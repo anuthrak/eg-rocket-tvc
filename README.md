@@ -34,7 +34,8 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── loader.js                    loading screen (plain script, runs first)
 ├── main.js                      entry point: start-up order, tabs, app version
 ├── bench.js                     Bench tab: 3D rig, Web Serial / demo feed, readouts, chart
-└── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
+├── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
+└── public/                      static assets: favicon, app icons, images
 CHANGELOG.md                     what changed in each version
 ```
 
