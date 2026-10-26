@@ -44,15 +44,20 @@
     font: 500 11px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
   .cell:first-child { border-left: 0; }
   .cell svg { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-  .cell b { color: var(--text); font: 500 13px var(--cond); letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .cell b { color: var(--text); font: 500 13px var(--cond); letter-spacing: .04em; font-variant-numeric: tabular-nums;
+    display: inline-block; text-align: right; }
+  /* Fixed-width value slots so the right-aligned strip never shifts as digits change */
+  #linkClock { min-width: 10ch; } #feedRate { min-width: 6ch; } #lastAge { min-width: 6.5ch; }
+  #baudVal { min-width: 6ch; } #lineCount { min-width: 7.5ch; }
+  header h1 #crumb { display: inline-block; text-align: left; }
   .cell.link { color: var(--text); min-width: 0; max-width: 40ch; }
   #statusText { overflow: hidden; text-overflow: ellipsis; }
   #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
   #dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   #dot.stale { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
-  .pill { display: none; padding: 2px 9px; border-radius: 4px; background: var(--amber); color: #000;
+  .pill { display: inline-block; visibility: hidden; padding: 2px 9px; border-radius: 4px; background: var(--amber); color: #000;
     font: 600 11px var(--cond); letter-spacing: .18em; text-transform: uppercase; white-space: nowrap; }
-  .pill.on { display: inline-block; }
+  .pill.on { visibility: visible; }   /* space is always reserved, so showing it doesn't shift the strip */
 
   /* ---------- Tabs ---------- */
   .tabs { display: flex; gap: 0; background: var(--panel); border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; margin-right: 6px; }
@@ -140,12 +145,11 @@
   .ms-sub { font: 500 9px var(--label); letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ms-sub b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .ms-met { display: flex; align-items: center; gap: 12px; }
-  .ms-met > div:last-child { min-width: 0; }
-  .ms-clock { font: 500 36px/1 var(--cond); font-variant-numeric: tabular-nums; letter-spacing: .02em; white-space: nowrap; }
-  .ms-clock small, #met small { font-size: .5em; color: var(--muted); margin-right: .15em; letter-spacing: 0; }
-  .ms-phase { font: 600 13px var(--cond); letter-spacing: .14em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #sSpeed { color: var(--yaw); } #sAlt { color: var(--pitch); }
+  .ms-nextrow { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 4px; min-width: 0; }
+  .ms-phase { font: 600 20px/1.1 var(--cond); letter-spacing: .06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .ms-count { font: 500 22px/1.1 var(--cond); color: var(--pitch); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ms-count small, #met small { font-size: .5em; color: var(--muted); margin-right: .15em; letter-spacing: 0; }
+  #sSpeedMax { color: var(--yaw); } #sAltMax { color: var(--pitch); }
 
   /* Mission events list (wide screens) */
   .m-events { display: none; position: absolute; right: 12px; width: var(--map-w);
@@ -247,14 +251,11 @@
   .thr-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #ff7a2f, #ffd27a); }
   #engState { font: 600 10px var(--cond); letter-spacing: .14em; color: rgba(255,255,255,.75); text-align: center; min-height: 13px; }
 
-  /* Wide screens: metric strip + events list replace the round gauges and the timeline */
+  /* Wide screens: the bottom HUD shows live values; the top strip and events list add only what it doesn't */
   @media (min-width: 761px) and (min-height: 521px) {
     .m-strip { display: grid; }
     .m-events { display: flex; }
     .m-controls { top: calc(12px + var(--strip-h) + 8px); }
-    .m-gauges, .m-center, .thr-box { display: none; }
-    .m-bottom { grid-template-columns: 1fr auto; padding-top: 20px; background: none; }
-    .m-gimbal { grid-column: 2; }
     .callout { top: 24%; }
   }
   /* Fewer header cells as the window narrows */
@@ -267,7 +268,7 @@
     .card .val b { font-size: 24px; }
     .cell.hstat { display: none; }
     .tl-ev span { font-size: 9px; letter-spacing: .06em; }
-    .ms-clock { font-size: 26px; } .ms-val b { font-size: 18px; } .ms-met { gap: 8px; }
+    .ms-phase { font-size: 16px; } .ms-count { font-size: 18px; } .ms-val b { font-size: 18px; }
   }
   /* Narrow / portrait: stack the 3D view above the panel and let the page scroll */
   @media (max-width: 760px) {
@@ -318,22 +319,22 @@
 </head>
 <body data-tab="bench">
 <header>
-  <h1>EG Rocket<span class="sep">/</span>TVC<span class="sep">/</span><span id="crumb">Bench</span></h1>
+  <h1>EG Rocket<span class="sep">/</span>TVC<span class="sep">/</span><span id="crumb" data-labels="Bench|Mission">Bench</span></h1>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="bench" role="tab">Bench</button>
     <button class="tab" data-tab="mission" role="tab">Mission</button>
   </nav>
-  <button id="connectBtn" class="primary">Connect Arduino</button>
+  <button id="connectBtn" class="primary" data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
   <select id="baud" title="Baud rate">
     <option>9600</option><option>57600</option><option selected>115200</option><option>230400</option>
   </select>
-  <button id="demoBtn">Demo mode</button>
+  <button id="demoBtn" data-labels="Demo mode|Stop demo">Demo mode</button>
   <button id="zeroBtn" class="bench-only" title="Treat the current orientation as 0°">Zero</button>
   <button id="viewBtn" class="bench-only">Reset view</button>
   <div id="status">
     <span id="demoPill" class="pill">Demo mode</span>
     <div class="strip">
-      <span class="cell link"><span id="dot"></span><span id="statusText">Not connected</span></span>
+      <span class="cell link"><span id="dot"></span><span id="statusText" data-labels="Not connected|Demo feed|Live|Stale">Not connected</span></span>
       <span class="cell hstat"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5"/><path d="M6 3.5V6l1.8 1.2"/></svg>Link<b id="linkClock">—</b></span>
       <span class="cell hstat"><svg viewBox="0 0 12 12"><path d="M1 6h2l1.5-3 3 6L9 6h2"/></svg>Feed<b id="feedRate">—</b></span>
       <span class="cell hstat"><svg viewBox="0 0 12 12"><path d="M3.5 1.5h5M3.5 10.5h5M4 1.5l4 4.5-4 4.5M8 1.5 4 6l4 4.5"/></svg>Last<b id="lastAge">—</b></span>
@@ -411,29 +412,29 @@
   <div id="missionView"></div>
   <div class="m-ui">
     <div class="m-controls">
-      <button id="launchBtn" class="primary">Launch</button>
-      <button id="pauseBtn" disabled>Pause</button>
+      <button id="launchBtn" class="primary" data-labels="Launch|In flight|Fly again">Launch</button>
+      <button id="pauseBtn" disabled data-labels="Pause|Resume">Pause</button>
       <button id="resetSimBtn">Reset</button>
       <select id="warp" title="Time warp">
         <option value="1">1×</option><option value="2">2×</option><option value="5">5×</option>
         <option value="10">10×</option><option value="25">25×</option><option value="50">50×</option>
       </select>
-      <button id="camBtn">Cam: Chase</button>
+      <button id="camBtn" data-labels="Cam: Chase|Cam: Overview">Cam: Chase</button>
     </div>
 
     <div class="m-strip">
-      <div class="ms-tile ms-met">
-        <div class="ms-clock" id="sMet"><small>T-</small>00:00:10</div>
-        <div><div class="ms-label">Mission timeline</div><div class="ms-phase" id="sPhase">READY FOR LAUNCH</div></div>
+      <div class="ms-tile ms-next">
+        <div class="ms-label">Time to next event</div>
+        <div class="ms-nextrow"><span class="ms-phase" id="sNext">LIFTOFF</span><span class="ms-count" id="sNextT"><small>T-</small>00:00:10</span></div>
       </div>
-      <div class="ms-tile"><div class="ms-label" id="sSpeedLabel">Speed</div>
-        <div class="ms-val"><b id="sSpeed">0</b><small>km/h</small></div><div class="ms-sub">Max <b id="sSpeedMax">0 km/h</b></div></div>
-      <div class="ms-tile"><div class="ms-label" id="sAltLabel">Altitude</div>
-        <div class="ms-val"><b id="sAlt">0.0</b><small>km</small></div><div class="ms-sub">Max <b id="sAltMax">0 km</b></div></div>
-      <div class="ms-tile"><div class="ms-label">Gimbal P / Y</div>
-        <div class="ms-val"><b id="sGim">+0.0 / +0.0</b><small>°</small></div><div class="ms-sub">Max <b id="sGimMax">0.0°</b> of ±8°</div></div>
-      <div class="ms-tile"><div class="ms-label">Throttle</div>
-        <div class="ms-val"><b id="sThr">0</b><small>%</small></div><div class="ms-sub" id="sEng">Stage 1 · off</div></div>
+      <div class="ms-tile"><div class="ms-label">Max speed</div>
+        <div class="ms-val"><b id="sSpeedMax">0</b><small>km/h</small></div><div class="ms-sub">Peak since liftoff</div></div>
+      <div class="ms-tile"><div class="ms-label">Max altitude</div>
+        <div class="ms-val"><b id="sAltMax">0.0</b><small>km</small></div><div class="ms-sub">Peak since liftoff</div></div>
+      <div class="ms-tile"><div class="ms-label">Peak gimbal</div>
+        <div class="ms-val"><b id="sGimMax">0.0</b><small>°</small></div><div class="ms-sub" id="sGimSub">0% of ±8° limit</div></div>
+      <div class="ms-tile"><div class="ms-label">Engine</div>
+        <div class="ms-val"><b id="sEng">OFF</b></div><div class="ms-sub" id="sEngSub">Stage 1 · 0% throttle</div></div>
     </div>
 
     <canvas id="minimap"></canvas>
@@ -927,8 +928,24 @@ function setTab(name) {
   $('crumb').textContent = name;
   if (name === 'mission') $('mbSlot').appendChild(view);
   else benchMain.prepend(view);
+  lockWidths();
   try { localStorage.setItem('tvc-tab', name); } catch {}
 }
+
+// Labels that swap text (Connect/Disconnect, Bench/Mission, …) get a min-width equal to their
+// longest version, so switching never nudges the controls beside them.
+function lockWidths() {
+  document.querySelectorAll('[data-labels]').forEach(el => {
+    if (!el.offsetWidth) return;            // hidden on this tab; measured when it's shown
+    const cur = el.textContent;
+    el.style.minWidth = '';
+    const w = Math.max(...el.dataset.labels.split('|').map(t => { el.textContent = t; return el.getBoundingClientRect().width; }));
+    el.textContent = cur;
+    el.style.minWidth = Math.ceil(w) + 'px';
+  });
+}
+document.fonts.ready.then(lockWidths);
+window.addEventListener('resize', lockWidths);
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $('mbExpand').onclick = () => setTab('bench');
 $('mbCollapse').onclick = () => {
@@ -1599,32 +1616,31 @@ let lastNextEl = null;
 function updateHUD(now) {
   if (now - lastHud < 60) return; lastHud = now;
   const t = simT, tel = telemetry(t), eng = engineAt(t);
-  $('met').innerHTML = $('sMet').innerHTML = metHTML(fmtClock(t));
-  $('phase').textContent = $('sPhase').textContent = phaseAt(t);
+  $('met').innerHTML = metHTML(fmtClock(t));
+  $('phase').textContent = phaseAt(t);
 
-  // Metric strip
+  // Top strip: only what the bottom HUD doesn't show (next event, peaks, engine state)
   if (simState !== 'idle') {
     hudMax.v = Math.max(hudMax.v, tel.v); hudMax.alt = Math.max(hudMax.alt, tel.alt);
     hudMax.g = Math.max(hudMax.g, Math.abs(att.gp), Math.abs(att.gy));
   }
   const thrOn = eng.on && eng.thr > 0.02;
-  $('sSpeed').textContent = Math.round(tel.v).toLocaleString('en-US');
-  $('sSpeedMax').textContent = Math.round(hudMax.v).toLocaleString('en-US') + ' km/h';
-  $('sAlt').textContent = fmtAlt(tel.alt);
-  $('sAltMax').textContent = fmtAlt(hudMax.alt) + ' km';
-  $('sSpeedLabel').textContent = tel.moon ? 'Speed · Moon' : 'Speed';
-  $('sAltLabel').textContent = tel.moon ? 'Altitude · Moon' : 'Altitude';
-  $('sGim').textContent = `${sgn1(att.gp / DEG)} / ${sgn1(att.gy / DEG)}`;
-  $('sGimMax').textContent = (hudMax.g / DEG).toFixed(1) + '°';
-  $('sThr').textContent = thrOn ? Math.round(eng.thr * 100) : 0;
-  $('sEng').textContent = `${t < T_SEP ? 'Stage 1' : 'Stage 2'} · ${thrOn ? 'burning' : 'engine off'}`;
+  $('sSpeedMax').textContent = Math.round(hudMax.v).toLocaleString('en-US');
+  $('sAltMax').textContent = fmtAlt(hudMax.alt);
+  $('sGimMax').textContent = (hudMax.g / DEG).toFixed(1);
+  $('sGimSub').textContent = `${Math.round(hudMax.g / GMAX * 100)}% of ±8° limit`;
+  const rcs = simState === 'running' && !thrOn && Math.max(Math.abs(att.rcsP), Math.abs(att.rcsY)) > 0.12;
+  $('sEng').textContent = thrOn ? 'BURNING' : rcs ? 'RCS' : 'OFF';
+  $('sEngSub').textContent = `${t < T_SEP ? 'Stage 1' : 'Stage 2'} · ${thrOn ? Math.round(eng.thr * 100) : 0}% throttle`;
 
-  let nextEv = null;
+  let nextEv = null, nextE = null;
   evEls.forEach(([e, li]) => {
     const d = simState !== 'idle' && t >= e.t;
     li.classList.toggle('done', d); li.classList.toggle('next', !d && !nextEv);
-    if (!d && !nextEv) nextEv = li;
+    if (!d && !nextEv) { nextEv = li; nextE = e; }
   });
+  $('sNext').textContent = nextE ? nextE.c.split(' · ')[0] : 'MISSION COMPLETE';
+  $('sNextT').innerHTML = nextE ? metHTML(fmtClock(t - nextE.t)) : '';
   if (nextEv !== lastNextEl) {   // keep the upcoming event in view
     lastNextEl = nextEv;
     const list = $('evList');
