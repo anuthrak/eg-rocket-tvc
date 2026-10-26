@@ -66,18 +66,18 @@
 </div>
 <script src="loader.js"></script>
 <header>
-  <h1>EG Rocket<span class="sep">/</span>TVC<span class="sep">/</span><span id="crumb" data-labels="Bench|Mission">Bench</span></h1>
+  <h1><span class="brand-long">EG Rocket </span>TVC<span class="brand-crumb"><span class="sep">/</span><span id="crumb" data-labels="Bench|Mission">Bench</span></span></h1>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="bench" role="tab">Bench</button>
     <button class="tab" data-tab="mission" role="tab">Mission</button>
   </nav>
-  <button id="connectBtn" class="primary" data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
-  <select id="baud" title="Baud rate">
+  <button id="connectBtn" class="primary serial-only" data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
+  <select id="baud" class="serial-only" title="Baud rate">
     <option>9600</option><option>57600</option><option selected>115200</option><option>230400</option>
   </select>
   <button id="demoBtn" data-labels="Demo mode|Stop demo">Demo mode</button>
-  <button id="zeroBtn" class="bench-only" title="Treat the current orientation as 0°">Zero</button>
-  <button id="viewBtn" class="bench-only">Reset view</button>
+  <button id="zeroBtn" class="bench-only ib" title="Treat the current orientation as 0°" aria-label="Zero"><svg class="ic " viewBox="0 0 16 16" aria-hidden="true"><path d="M1.8 8h12.4"/><path d="M8 4.4v7.2" stroke-dasharray="1.4 1.6"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg><span class="lbl">Zero</span></button>
+  <button id="viewBtn" class="bench-only ib" title="Reset view" aria-label="Reset view"><svg class="ic " viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg><span class="lbl">Reset view</span></button>
   <div id="status">
     <span id="demoPill" class="pill">Demo mode</span>
     <div class="strip">
@@ -160,15 +160,16 @@
   <div id="missionView"></div>
   <div class="m-ui">
     <div class="m-controls">
-      <button id="launchBtn" class="primary" data-labels="Launch|In flight|Fly again">Launch</button>
-      <button id="pauseBtn" disabled data-labels="Pause|Resume">Pause</button>
-      <button id="resetSimBtn">Reset</button>
+      <button id="launchBtn" class="primary ib" aria-label="Launch"><svg class="ic ic-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z" fill="currentColor" stroke="none"/></svg><span class="lbl" data-labels="Launch|In flight|Fly again">Launch</span></button>
+      <button id="pauseBtn" class="ib" disabled aria-label="Pause"><svg class="ic ic-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/></svg><svg class="ic ic-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z" fill="currentColor" stroke="none"/></svg><span class="lbl" data-labels="Pause|Resume">Pause</span></button>
+      <button id="resetSimBtn" class="ib" aria-label="Reset"><svg class="ic " viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.4-3.4M3.6 2.6v2.6h2.6"/></svg><span class="lbl">Reset</span></button>
       <select id="warp" title="Time warp">
         <option value="1">1×</option><option value="2">2×</option><option value="5">5×</option>
         <option value="10">10×</option><option value="25">25×</option><option value="50">50×</option>
       </select>
-      <button id="camBtn" data-labels="Cam: Chase|Cam: Overview">Cam: Chase</button>
+      <button id="camBtn" class="ib" data-mode="chase" aria-label="Camera: chase"><svg class="ic ic-chase" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.2"/><path d="M8 1.5v2.8M8 11.7v2.8M1.5 8h2.8M11.7 8h2.8"/></svg><svg class="ic ic-overview" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.6" cy="8" r="2.1"/><circle cx="12.6" cy="8" r="1.1"/><ellipse cx="8.4" cy="8" rx="6.4" ry="3.4" stroke-dasharray="1.6 1.8"/></svg><span class="lbl" data-labels="Cam: Chase|Cam: Overview">Cam: Chase</span></button>
     </div>
+    <div class="m-py" id="mPY">P <b id="mpyP">—</b> · Y <b id="mpyY">—</b></div>
 
     <div class="m-strip">
       <div class="ms-tile ms-next">

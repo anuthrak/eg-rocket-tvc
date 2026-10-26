@@ -365,6 +365,8 @@ export function initBench() {
     $('yawMax').textContent = d1(peak.yaw);
     $('mbP').textContent = d1(target.pitch);
     $('mbY').textContent = d1(target.yaw);
+    $('mpyP').textContent = d1(target.pitch); $('mpyY').textContent = d1(target.yaw);
+    $('mPY').classList.toggle('on', hasData);   // one-line P/Y under the mission controls on phones
     $('pitchCard').classList.toggle('limit', hasData && Math.abs(target.pitch) >= 44.5);
     $('yawCard').classList.toggle('limit', hasData && Math.abs(target.yaw) >= 44.5);
 

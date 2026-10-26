@@ -6,6 +6,7 @@ import { initMission } from './mission.js';
 export const VERSION = '2.1.0';   // bump with CHANGELOG.md; see README → Releasing
 
 const $ = id => document.getElementById(id);
+if (!('serial' in navigator)) document.body.classList.add('no-serial');   // hides Connect + baud
 const loader = window.tvcLoader;
 // Each step yields a frame so the loading bar can repaint before the next heavy bit
 const nextFrame = () => new Promise(r => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });

@@ -281,6 +281,18 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
 @media (max-width: 1800px) { .cell.wide { display: none; } }
 @media (max-width: 1500px) { .cell.mid { display: none; } }
 
+/* Icon buttons: text labels on desktop, line icons on phones (see the compact block at the end) */
+.ic { display: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
+.lbl { display: inline-block; }
+#pauseBtn[data-paused] .ic-pause, #pauseBtn:not([data-paused]) .ic-play,
+#camBtn[data-mode="overview"] .ic-chase, #camBtn[data-mode="chase"] .ic-overview { display: none !important; }
+body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari): Connect can't work */
+.m-py { display: none; position: absolute; top: 50px; left: 12px; padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: rgba(11,11,13,.78); font: 600 11px var(--cond); letter-spacing: .1em; color: var(--muted); text-shadow: none; }
+.m-py b { font-weight: 600; font-variant-numeric: tabular-nums; }
+#mpyP { color: var(--pitch); } #mpyY { color: var(--yaw); }
+
 /* Medium windows: tighter sidebar */
 @media (max-width: 1000px) {
   aside { padding: 10px; gap: 10px; }
@@ -294,15 +306,15 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
 @media (max-width: 760px) {
   body { height: auto; min-height: 100dvh; overflow: auto; }
   header { padding: 8px 12px; gap: 6px; }
-  header h1 { font-size: 14px; width: 100%; }
+  header h1 { font-size: 14px; margin-right: 4px; }
   button, select { padding: 6px 10px; font-size: 12px; }
-  #status { margin-left: 0; width: 100%; }
   footer { padding: 6px 12px; } footer .end { margin-left: 0; } footer .note { display: none; }
   main { grid-template-columns: 1fr; grid-template-rows: clamp(320px, 60vh, 600px) auto; }
   aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
 
   body[data-tab="mission"] { height: 100vh; height: 100dvh; overflow: hidden; }
-  :root { --g: 66px; --map-w: 128px; }
+  :root { --g: 66px; --map-w: 112px; }
+  .tab { padding: 5px 11px; }
   .m-controls button, .m-controls select { font-size: 11px; padding: 5px 8px; letter-spacing: .08em; }
   .m-bottom { grid-template-columns: 1fr auto; grid-template-areas: "center center" "gauges gimbal"; padding-top: 28px; gap: 6px 10px; }
   .m-center { grid-area: center; } .m-gauges { grid-area: gauges; } .m-gimbal { grid-area: gimbal; }
@@ -328,4 +340,23 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
   .tl-ev span { display: none; } .tl-next { display: block; }
   .mini-bench { top: 56px; transform: none; }
   .mb-slot { height: 110px; }
+}
+
+/* Phones (portrait or landscape) and other small windows: one-line header, one row of icon controls */
+@media (max-width: 760px), (max-height: 520px) {
+  header h1 .brand-long, header h1 .brand-crumb { display: none; }   /* just "TVC"; the tabs show where you are */
+  #status .pill, #statusText { display: none; }                       /* status shrinks to its coloured dot */
+  .strip { border: 0; background: none; } .cell.link { padding: 0 2px 0 4px; }
+  header { gap: 6px; } .tab { padding: 5px 9px; }
+  header button, header select { padding: 6px 8px; font-size: 11px; letter-spacing: .08em; }
+  header h1 { letter-spacing: .14em; }
+  .ib { padding: 6px 8px; } .ib .ic { display: block; } .ib .lbl { display: none; }
+  .m-controls { gap: 5px; }
+  .mini-bench { display: none; }        /* the Bench tab is one tap away; .m-py shows P/Y instead */
+  .m-py.on { display: block; }
+  .callout { top: 86px; }
+}
+/* Touch devices can't reach the Nano over USB: hide Connect + baud there even if Web Serial exists */
+@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (max-height: 520px) {
+  .serial-only { display: none; }
 }

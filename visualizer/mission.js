@@ -564,7 +564,7 @@ export async function initMission(step) {
     mapBounds = { x0, x1, y0, y1 };
   }
   function setChase() {
-    camMode = 'chase'; marker.visible = false; $('camBtn').textContent = 'Cam: Chase';
+    camMode = 'chase'; marker.visible = false; setCamLabel();
     applyViewOffset();
     const k = clamp(1.25 / mCam.aspect, 1, 2.4);   // back off on tall/narrow windows
     mControls.target.copy(ship.position); mCam.position.copy(ship.position).addScaledVector(CHASE_OFFSET, k); mControls.update();
@@ -596,7 +596,7 @@ export async function initMission(step) {
     mCam.updateProjectionMatrix();
   }
   function setOverview() {
-    camMode = 'overview'; marker.visible = true; $('camBtn').textContent = 'Cam: Overview';
+    camMode = 'overview'; marker.visible = true; setCamLabel();
     applyViewOffset();
     const { x0, x1, y0, y1 } = mapBounds;
     const hw = (x1 - x0) / 2 + 4, hh = (y1 - y0) / 2 + 4;
@@ -627,12 +627,19 @@ export async function initMission(step) {
   $('mbCollapse').addEventListener('click', () => { if (camMode === 'overview') applyViewOffset(); });
 
   // ---------- Controls ----------
+  // Buttons hold an icon (phones) and a text label (desktop); keep both and the accessible name in sync
+  function setLabel(btn, text) { btn.querySelector('.lbl').textContent = text; btn.setAttribute('aria-label', text); }
+  function setCamLabel() {
+    const b = $('camBtn'); b.dataset.mode = camMode;
+    setLabel(b, camMode === 'chase' ? 'Cam: Chase' : 'Cam: Overview');
+  }
   function refreshButtons() {
     const lb = $('launchBtn'), pb = $('pauseBtn');
     lb.disabled = simState === 'running' || simState === 'paused';
-    lb.textContent = simState === 'done' ? 'Fly again' : simState === 'idle' ? 'Launch' : 'In flight';
+    setLabel(lb, simState === 'done' ? 'Fly again' : simState === 'idle' ? 'Launch' : 'In flight');
     pb.disabled = !(simState === 'running' || simState === 'paused');
-    pb.textContent = simState === 'paused' ? 'Resume' : 'Pause';
+    setLabel(pb, simState === 'paused' ? 'Resume' : 'Pause');
+    pb.toggleAttribute('data-paused', simState === 'paused');
   }
   function resetSim() {
     simState = 'idle'; simT = -10;
