@@ -60,11 +60,16 @@ body[data-tab="mission"] #benchMain { display: none; }
 body[data-tab="mission"] .bench-only { visibility: hidden; }
 
 /* ---------- Bench tab ---------- */
-main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(250px, 28vw, 340px); min-height: 0; }
+/* Two sidebars around the 3D view: left = readouts + chart + input, right = gimbal + link */
+main { --side: clamp(260px, 21vw, 360px); display: grid; min-height: 0;
+  grid-template-columns: var(--side) minmax(0, 1fr) var(--side); grid-template-areas: "left view right"; }
+#view { grid-area: view; }
+.side-l { grid-area: left; border-right: 1px solid var(--line); }
+.side-r { grid-area: right; border-left: 1px solid var(--line); }
 /* Canvas is absolutely positioned so it never forces the layout wider/taller than the window */
 #view { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #view canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; touch-action: none; }
-aside { border-left: 1px solid var(--line); background: var(--bg); padding: 12px; overflow-y: auto;
+aside { background: var(--bg); padding: 12px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 10px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
 .readouts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -80,6 +85,9 @@ aside { border-left: 1px solid var(--line); background: var(--bg); padding: 12px
 h2 { display: flex; justify-content: space-between; margin: 0 0 8px; }
 h2 span { color: var(--dim); }
 #chart { width: 100%; height: clamp(100px, 18vh, 180px); display: block; }
+/* The chart takes whatever height the left sidebar has left */
+.chart-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 220px; }
+.chart-panel #chart { flex: 1 1 auto; height: 0; min-height: 120px; }
 label.opt { display: flex; gap: 8px; align-items: flex-start; color: var(--text); }
 label.opt input { accent-color: var(--text); }
 .hint { color: var(--muted); font-size: 12px; }
@@ -293,6 +301,15 @@ body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari):
 .m-py b { font-weight: 600; font-variant-numeric: tabular-nums; }
 #mpyP { color: var(--pitch); } #mpyY { color: var(--yaw); }
 
+/* Shorter windows: tighten the Bench sidebars so neither has to scroll (help text moves to Connect's tooltip) */
+@media (max-height: 820px) and (min-width: 761px) {
+  .side-r .hint { display: none; }
+  .chart-panel { min-height: 140px; }
+  .kv dt, .kv dd { padding: 3px 0; }
+  .card .val { margin: 6px 0 4px; }
+}
+/* Narrower windows: slimmer sidebars */
+@media (max-width: 1100px) { main { --side: clamp(210px, 24vw, 260px); } }
 /* Medium windows: tighter sidebar */
 @media (max-width: 1000px) {
   aside { padding: 10px; gap: 10px; }
@@ -309,8 +326,9 @@ body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari):
   header h1 { font-size: 14px; margin-right: 4px; }
   button, select { padding: 6px 10px; font-size: 12px; }
   footer { padding: 6px 12px; } footer .end { margin-left: 0; } footer .note { display: none; }
-  main { grid-template-columns: 1fr; grid-template-rows: clamp(320px, 60vh, 600px) auto; }
-  aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  main { grid-template-columns: 1fr; grid-template-areas: "view" "left" "right"; grid-template-rows: clamp(320px, 60vh, 600px) auto auto; }
+  .side-l, .side-r { border: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .chart-panel { flex: none; min-height: 0; } .chart-panel #chart { flex: none; height: clamp(140px, 22vh, 200px); }
 
   body[data-tab="mission"] { height: 100vh; height: 100dvh; overflow: hidden; }
   :root { --g: 66px; --map-w: 112px; }
@@ -331,7 +349,8 @@ body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari):
 @media (max-height: 520px) and (min-width: 600px) {
   header { padding: 6px 12px; }
   header h1 { font-size: 13px; }
-  main { grid-template-columns: minmax(0, 1fr) 240px; }
+  main { --side: 200px; }
+  .chart-panel { min-height: 140px; }
   .card .val b { font-size: 18px; }
   #chart { height: 90px; }
   :root { --g: 62px; --map-w: 150px; }

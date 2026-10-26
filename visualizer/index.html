@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rocket TVC Mission Control</title>
+<title>Rocket TVC | Mission Control</title>
 <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -18,7 +18,7 @@
 } }
 </script>
 </head>
-<body data-tab="bench">
+<body data-tab="mission">
 <!-- ======================= LOADING SCREEN ======================= -->
 <div id="loader" data-variant="fuel" role="progressbar" aria-label="Loading">
   <div class="ld-brand">EG Rocket · TVC</div>
@@ -69,12 +69,12 @@
 </div>
 <script src="loader.js"></script>
 <header>
-  <h1><span class="brand-long">EG Rocket </span>TVC<span class="brand-crumb"><span class="sep">/</span><span id="crumb" data-labels="Bench|Mission">Bench</span></span></h1>
+  <h1><span class="brand-long">EG Rocket </span>TVC<span class="brand-crumb"><span class="sep">/</span><span id="crumb" data-labels="Mission|Bench">Mission</span></span></h1>
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="bench" role="tab">Bench</button>
-    <button class="tab" data-tab="mission" role="tab">Mission</button>
+    <button class="tab active" data-tab="mission" role="tab">Mission</button>
+    <button class="tab" data-tab="bench" role="tab">Bench</button>
   </nav>
-  <button id="connectBtn" class="primary serial-only" data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
+  <button id="connectBtn" class="primary serial-only" title="Needs Chrome or Edge on desktop. Close the Arduino Serial Monitor first, since only one program can hold the port." data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
   <select id="baud" class="serial-only" title="Baud rate">
     <option>9600</option><option>57600</option><option selected>115200</option><option>230400</option>
   </select>
@@ -97,24 +97,36 @@
 <!-- ======================= BENCH TAB ======================= -->
 <main id="benchMain">
   <div id="view"></div>
-  <aside>
+  <!-- Left: live readouts, chart, input options · Right: gimbal + link details -->
+  <aside class="side-l">
     <div class="readouts">
       <div class="card pitch" id="pitchCard"><div class="label">Pitch</div>
         <div class="val"><b id="pitchVal">—</b><small>°</small></div><div class="sub">Max <b id="pitchMax">—</b></div></div>
       <div class="card yaw" id="yawCard"><div class="label">Yaw</div>
         <div class="val"><b id="yawVal">—</b><small>°</small></div><div class="sub">Max <b id="yawMax">—</b></div></div>
       <div class="card roll"><div class="label">Roll</div>
-        <div class="val"><b id="rollVal">—</b><small>°</small></div><div class="sub">Gyro only · drifts</div></div>
+        <div class="val"><b id="rollVal">—</b><small>°</small></div><div class="sub">Gyro · drifts</div></div>
       <div class="card"><div class="label">Rate</div>
         <div class="val"><b id="rateVal">—</b><small>Hz</small></div><div class="sub">Samples / s</div></div>
     </div>
 
-    <div class="panel">
+    <div class="panel chart-panel">
       <h2>Pitch · Yaw<span>Last 10 s</span></h2>
       <canvas id="chart"></canvas>
       <div class="legend"><span><i style="background:var(--pitch)"></i>Pitch</span><span><i style="background:var(--yaw)"></i>Yaw</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±45° servo limit</span></div>
     </div>
 
+    <div class="panel">
+      <h2>Input</h2>
+      <label class="opt"><input type="checkbox" id="servoMode" checked>
+        <span>Data is servo angles (45–135°, 90° = upright)</span></label>
+      <label class="opt" style="margin-top:6px"><input type="checkbox" id="smooth" checked>
+        <span>Smooth motion</span></label>
+      <label class="opt" style="margin-top:6px"><input type="checkbox" id="outline">
+        <span>Outline view (white line drawing)</span></label>
+    </div>
+  </aside>
+  <aside class="side-r">
     <div class="panel">
       <h2>Gimbal<span>Servo command</span></h2>
       <dl class="kv">
@@ -141,19 +153,9 @@
       <div id="raw">—</div>
     </div>
 
-    <div class="panel">
-      <h2>Input</h2>
-      <label class="opt"><input type="checkbox" id="servoMode" checked>
-        <span>Data is servo angles (45–135°) — subtract 90° so neutral = upright</span></label>
-      <label class="opt" style="margin-top:6px"><input type="checkbox" id="smooth" checked>
-        <span>Smooth motion</span></label>
-      <label class="opt" style="margin-top:6px"><input type="checkbox" id="outline">
-        <span>Outline view (white line drawing)</span></label>
-    </div>
-
     <div class="hint panel">
-      Needs <b>Chrome or Edge</b> on desktop. Close the Processing sketch and the Arduino Serial Monitor first —
-      only one program can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
+      Needs <b>Chrome or Edge</b> on desktop. Close the Arduino Serial Monitor first, since only one program
+      can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
     </div>
   </aside>
 </main>

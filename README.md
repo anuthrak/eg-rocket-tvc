@@ -48,8 +48,8 @@ Open `firmware/nano_tvc/nano_tvc.ino` in the Arduino IDE (board: Arduino Nano; l
 
 Three.js and Web Serial, with no build step.
 
-- **Bench:** live 3D view of the rig from the Arduino.
-- **Mission:** Earth-to-Moon flight sim with a TVC controller and a SpaceX-style dashboard.
+- **Mission** (home page): Earth-to-Moon flight sim with a TVC controller and a SpaceX-style dashboard.
+- **Bench:** live 3D view of the rig from the Arduino, with readouts and a chart on the left and gimbal/link details on the right.
 
 **Live:** https://eg-rocket-tvc.vercel.app (every push to `main` redeploys)
 

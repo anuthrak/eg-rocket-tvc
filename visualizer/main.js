@@ -54,7 +54,10 @@ if (matchMedia('(max-width: 760px), (max-height: 520px)').matches) $('mbCollapse
 await initMission(step);
 
 $('appVersion').textContent = 'v' + VERSION;
-try { const saved = localStorage.getItem('tvc-tab'); if (saved === 'mission') setTab('mission'); } catch {}
+// Mission is the home page; Bench only if that's where the viewer last was
+let savedTab = null;
+try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
+setTab(savedTab === 'bench' ? 'bench' : 'mission');
 document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');
 loader?.done();
