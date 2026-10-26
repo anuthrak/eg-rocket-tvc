@@ -9,55 +9,74 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #14161b; --panel: #1d2027; --line: #2c3039; --text: #e6e8ee; --muted: #8a90a0;
-    --accent: #e0483e; --pitch: #4fa3ff; --yaw: #ffb347; --ok: #3ecf8e; --warn: #ff6b6b;
+    --bg: #000; --panel: #0b0b0d; --panel-2: #131418; --line: #1e2025; --line-2: #2c2f36;
+    --text: #f2f3f5; --muted: #6b6f78; --dim: #474b53;
+    --accent: #3d7bff; --pitch: #5b8cff; --yaw: #ff8a3d; --ok: #3ecf6e; --warn: #ff4d5e; --amber: #f5a623;
     --map-w: clamp(150px, 22vw, 300px);
     --g: clamp(78px, 8.5vw, 112px);
     --cond: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    font: 14px/1.4 'Barlow', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   body { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
   header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px;
-    border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: .02em; }
-  button, select { background: #2a2e37; color: var(--text); border: 1px solid var(--line);
-    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+    border-bottom: 1px solid var(--line); background: var(--bg); }
+  header h1 { font: 600 15px var(--cond); margin: 0 14px 0 0; letter-spacing: .2em; text-transform: uppercase; white-space: nowrap; }
+  header h1 .sep { color: var(--dim); margin: 0 .35em; }
+  header h1 #crumb { color: var(--muted); }
+  button, select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer;
+    font: 600 12px var(--cond); letter-spacing: .14em; text-transform: uppercase; }
   button:hover { border-color: var(--muted); }
   button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); }
-  #status { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); }
-  #dot { width: 9px; height: 9px; border-radius: 50%; background: #555; }
-  #dot.on { background: var(--ok); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #status { margin-left: auto; display: flex; align-items: center; gap: 14px; color: var(--muted);
+    font: 600 12px var(--cond); letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
+  #status .link { display: flex; align-items: center; gap: 7px; }
+  #status .hstat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 6px; letter-spacing: .06em; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  #dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .pill { display: none; padding: 2px 9px; border-radius: 4px; background: var(--amber); color: #000;
+    font: 600 11px var(--cond); letter-spacing: .18em; }
+  .pill.on { display: inline-block; }
 
   /* ---------- Tabs ---------- */
-  .tabs { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px; margin-right: 6px; }
-  .tab { border: 0; background: transparent; padding: 5px 14px; border-radius: 6px; color: var(--muted); }
-  .tab.active { background: #2a2e37; color: var(--text); }
+  .tabs { display: flex; gap: 0; background: var(--panel); border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; margin-right: 6px; }
+  .tab { border: 0; background: transparent; padding: 5px 16px; border-radius: 5px; color: var(--muted); }
+  .tab.active { background: var(--accent); color: #fff; }
   body > main, body > #mission { grid-row: 2; }
   body[data-tab="bench"] #mission,
   body[data-tab="mission"] #benchMain,
   body[data-tab="mission"] .bench-only { display: none; }
 
-  /* ---------- Bench tab (unchanged) ---------- */
+  /* ---------- Bench tab ---------- */
   main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(250px, 28vw, 340px); min-height: 0; }
   /* Canvas is absolutely positioned so it never forces the layout wider/taller than the window */
   #view { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
   #view canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; touch-action: none; }
-  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 14px; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 14px; }
+  aside { border-left: 1px solid var(--line); background: var(--bg); padding: 12px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
   .readouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; text-align: center; }
-  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .card .val { font-size: 22px; font-variant-numeric: tabular-nums; }
-  .card.pitch .val { color: var(--pitch); } .card.yaw .val { color: var(--yaw); }
-  .limit .val { color: var(--warn) !important; }
-  h2 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px; }
-  #chart { width: 100%; height: clamp(100px, 18vh, 180px); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 8px; min-width: 0; }
+  .card .label, h2 { font: 600 11px var(--cond); color: var(--muted); text-transform: uppercase; letter-spacing: .18em; }
+  .card .val { margin: 8px 0 6px; white-space: nowrap; }
+  .card .val b { font: 600 28px/1 var(--cond); font-variant-numeric: tabular-nums; }
+  .card .val small { font: 500 12px var(--cond); color: var(--muted); margin-left: 3px; }
+  .card .sub { font: 500 10px var(--cond); color: var(--dim); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
+  .card .sub b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card.pitch .val b { color: var(--pitch); } .card.yaw .val b { color: var(--yaw); }
+  .limit .val b { color: var(--warn) !important; }
+  h2 { display: flex; justify-content: space-between; margin: 0 0 8px; }
+  h2 span { color: var(--dim); }
+  #chart { width: 100%; height: clamp(100px, 18vh, 180px); display: block; }
   label.opt { display: flex; gap: 8px; align-items: flex-start; color: var(--text); }
+  label.opt input { accent-color: var(--accent); }
   .hint { color: var(--muted); font-size: 12px; }
-  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font: 500 11px var(--cond); letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px; }
+  code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   #raw { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted);
     background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; min-height: 28px; word-break: break-all; }
 
@@ -71,12 +90,12 @@
 
   .m-controls { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px;
     max-width: calc(100% - var(--map-w) - 36px); }
-  .m-controls button, .m-controls select { background: rgba(20,22,27,.72); backdrop-filter: blur(6px);
-    font: 600 13px var(--cond); letter-spacing: .12em; text-transform: uppercase; padding: 6px 12px; text-shadow: none; }
+  .m-controls button, .m-controls select { background: rgba(11,11,13,.78); backdrop-filter: blur(6px);
+    font: 600 13px var(--cond); letter-spacing: .14em; text-transform: uppercase; padding: 6px 12px; text-shadow: none; }
   .m-controls button.primary { background: var(--accent); border-color: var(--accent); }
 
   #minimap { position: absolute; top: 12px; right: 12px; width: var(--map-w); aspect-ratio: 1.6;
-    border: 1px solid rgba(255,255,255,.14); border-radius: 8px; background: rgba(0,0,0,.5); }
+    border: 1px solid var(--line-2); border-radius: 10px; background: rgba(11,11,13,.78); }
 
   .callout { position: absolute; top: 16%; left: 50%; transform: translate(-50%, -8px); opacity: 0;
     transition: opacity .45s, transform .45s; font: 600 clamp(14px, 1.9vw, 22px) var(--cond); letter-spacing: .24em;
@@ -86,11 +105,11 @@
   .callout.show { opacity: 1; transform: translate(-50%, 0); }
 
   .mini-bench { position: absolute; left: 12px; top: 50%; transform: translateY(-62%);
-    width: clamp(170px, 17vw, 240px); background: rgba(20,22,27,.85); border: 1px solid var(--line);
+    width: clamp(170px, 17vw, 240px); background: rgba(11,11,13,.88); border: 1px solid var(--line-2);
     border-radius: 10px; overflow: hidden; backdrop-filter: blur(6px); text-shadow: none;
-    font: 12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    font: 600 12px var(--cond); letter-spacing: .06em; }
   .mb-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 6px 5px 10px;
-    font-size: 11px; letter-spacing: .12em; color: var(--muted); }
+    font-size: 11px; letter-spacing: .18em; color: var(--muted); }
   .mb-head .live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #555; margin-right: 6px; vertical-align: 1px; }
   .mb-head .live.on { background: var(--ok); }
   .mb-head button { padding: 1px 8px; font-size: 13px; line-height: 1.3; }
@@ -111,6 +130,8 @@
   .gauge svg { width: 100%; height: 100%; transform: rotate(135deg); overflow: visible; }
   .g-track { fill: none; stroke: rgba(255,255,255,.18); stroke-width: 3; stroke-dasharray: 197.9 263.9; stroke-linecap: round; }
   .g-val { fill: none; stroke: #fff; stroke-width: 3; stroke-dasharray: 0 263.9; stroke-linecap: round; }
+  #gSpeedArc { stroke: var(--yaw); } #gAltArc { stroke: var(--pitch); }
+  #gSpeed { color: var(--yaw); } #gAlt { color: var(--pitch); }
   .g-num { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
   .g-num b { font: 600 calc(var(--g) * .21) var(--cond); font-variant-numeric: tabular-nums; }
   .g-num span { font: 500 calc(var(--g) * .095) var(--cond); letter-spacing: .14em; color: rgba(255,255,255,.65); margin-top: 3px; }
@@ -120,14 +141,18 @@
   .m-center { text-align: center; min-width: 0; }
   #met { font: 600 clamp(24px, 3.3vw, 42px) var(--cond); letter-spacing: .08em; font-variant-numeric: tabular-nums; line-height: 1.05; }
   .mission-name { font: 600 11px var(--cond); letter-spacing: .32em; color: rgba(255,255,255,.6); }
-  #phase { font: 600 13px var(--cond); letter-spacing: .22em; color: #8fd3ff; margin-top: 2px; }
+  #phase { font: 600 13px var(--cond); letter-spacing: .22em; color: var(--pitch); margin-top: 2px; }
   .timeline { position: relative; height: 48px; margin: 6px 24px 0; }
   .tl-track, .tl-fill { position: absolute; left: 0; top: 23px; height: 2px; }
   .tl-track { right: 0; background: rgba(255,255,255,.22); }
   .tl-fill { width: 0; background: #fff; }
   .tl-ev { position: absolute; top: 18px; width: 0; }
   .tl-ev i { position: absolute; left: -6px; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.55); border-radius: 50%; background: #000; }
-  .tl-ev.done i { background: #fff; border-color: #fff; }
+  .tl-ev.done i { background: var(--ok); border-color: var(--ok); }
+  .tl-ev.done i::after { content: ''; position: absolute; left: 2.5px; top: .5px; width: 2.5px; height: 5px;
+    border: solid #000; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+  .tl-ev.next i { border-color: var(--ok); box-shadow: 0 0 6px rgba(62,207,110,.6); }
+  .tl-ev.next span { color: var(--ok); }
   .tl-ev span { position: absolute; transform: translateX(-50%); white-space: nowrap;
     font: 600 10px var(--cond); letter-spacing: .12em; color: rgba(255,255,255,.7); }
   .tl-ev.done span { color: #fff; }
@@ -154,15 +179,17 @@
   /* Medium windows: tighter sidebar */
   @media (max-width: 1000px) {
     aside { padding: 10px; gap: 10px; }
-    .card .val { font-size: 18px; }
+    .card { padding: 8px 8px 6px; }
+    .card .val b { font-size: 22px; }
+    #status .hstat { display: none; }
     .tl-ev span { font-size: 9px; letter-spacing: .06em; }
   }
   /* Narrow / portrait: stack the 3D view above the panel and let the page scroll */
   @media (max-width: 760px) {
     body { height: auto; min-height: 100dvh; overflow: auto; }
     header { padding: 8px 12px; gap: 6px; }
-    header h1 { font-size: 15px; width: 100%; }
-    button, select { padding: 6px 10px; font-size: 13px; }
+    header h1 { font-size: 14px; width: 100%; }
+    button, select { padding: 6px 10px; font-size: 12px; }
     #status { margin-left: 0; width: 100%; font-size: 12px; }
     main { grid-template-columns: 1fr; grid-template-rows: clamp(320px, 60vh, 600px) auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
@@ -184,9 +211,9 @@
   /* Short landscape windows (e.g. phone sideways): keep side-by-side, compact */
   @media (max-height: 520px) and (min-width: 600px) {
     header { padding: 6px 12px; }
-    header h1 { font-size: 14px; }
+    header h1 { font-size: 13px; }
     main { grid-template-columns: minmax(0, 1fr) 240px; }
-    .card .val { font-size: 16px; }
+    .card .val b { font-size: 18px; }
     #chart { height: 90px; }
     :root { --g: 62px; --map-w: 150px; }
     .m-bottom { padding-top: 20px; padding-bottom: 8px; }
@@ -205,7 +232,7 @@
 </head>
 <body data-tab="bench">
 <header>
-  <h1>TVC Visualizer</h1>
+  <h1>EG Rocket<span class="sep">/</span>TVC<span class="sep">/</span><span id="crumb">Bench</span></h1>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="bench" role="tab">Bench</button>
     <button class="tab" data-tab="mission" role="tab">Mission</button>
@@ -217,7 +244,12 @@
   <button id="demoBtn">Demo mode</button>
   <button id="zeroBtn" class="bench-only" title="Treat the current orientation as 0°">Zero</button>
   <button id="viewBtn" class="bench-only">Reset view</button>
-  <div id="status"><span id="dot"></span><span id="statusText">Not connected</span></div>
+  <div id="status">
+    <span id="demoPill" class="pill">Demo mode</span>
+    <span class="hstat">Link<b id="linkClock">--:--:--</b></span>
+    <span class="hstat">Feed<b id="feedRate">0 Hz</b></span>
+    <span class="link"><span id="dot"></span><span id="statusText">Not connected</span></span>
+  </div>
 </header>
 
 <!-- ======================= BENCH TAB ======================= -->
@@ -225,18 +257,21 @@
   <div id="view"></div>
   <aside>
     <div class="readouts">
-      <div class="card pitch" id="pitchCard"><div class="label">Pitch</div><div class="val" id="pitchVal">0.0°</div></div>
-      <div class="card yaw" id="yawCard"><div class="label">Yaw</div><div class="val" id="yawVal">0.0°</div></div>
-      <div class="card"><div class="label">Rate</div><div class="val" id="rateVal">0 Hz</div></div>
+      <div class="card pitch" id="pitchCard"><div class="label">Pitch</div>
+        <div class="val"><b id="pitchVal">0.0</b><small>°</small></div><div class="sub">Max <b id="pitchMax">0.0°</b></div></div>
+      <div class="card yaw" id="yawCard"><div class="label">Yaw</div>
+        <div class="val"><b id="yawVal">0.0</b><small>°</small></div><div class="sub">Max <b id="yawMax">0.0°</b></div></div>
+      <div class="card"><div class="label">Rate</div>
+        <div class="val"><b id="rateVal">0</b><small>Hz</small></div><div class="sub">Samples / s</div></div>
     </div>
 
-    <div>
-      <h2>Last 10 seconds</h2>
+    <div class="panel">
+      <h2>Pitch · Yaw<span>Last 10 s</span></h2>
       <canvas id="chart"></canvas>
-      <div class="hint"><span style="color:var(--pitch)">■</span> pitch &nbsp; <span style="color:var(--yaw)">■</span> yaw &nbsp; dashed = ±45° servo limit</div>
+      <div class="legend"><span><i style="background:var(--pitch)"></i>Pitch</span><span><i style="background:var(--yaw)"></i>Yaw</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±45° servo limit</span></div>
     </div>
 
-    <div>
+    <div class="panel">
       <h2>Input</h2>
       <label class="opt"><input type="checkbox" id="servoMode" checked>
         <span>Data is servo angles (45–135°) — subtract 90° so neutral = upright</span></label>
@@ -244,12 +279,12 @@
         <span>Smooth motion</span></label>
     </div>
 
-    <div>
+    <div class="panel">
       <h2>Last line received</h2>
       <div id="raw">—</div>
     </div>
 
-    <div class="hint">
+    <div class="hint panel">
       Needs <b>Chrome or Edge</b> on desktop. Close the Processing sketch and the Arduino Serial Monitor first —
       only one program can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
     </div>
@@ -348,7 +383,7 @@ renderer.shadowMap.enabled = true;
 view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x14161b);
+scene.background = new THREE.Color(0x050506);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -370,7 +405,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 sun.position.set(4, 8, 5); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
 scene.add(sun);
 
-const grid = new THREE.GridHelper(8, 16, 0x3a3f4b, 0x262a33);
+const grid = new THREE.GridHelper(8, 16, 0x2a2d34, 0x16171b);
 scene.add(grid);
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.35 }));
 floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
@@ -459,7 +494,9 @@ const target = { roll: 0, pitch: 0, yaw: 0 };
 const shown  = { roll: 0, pitch: 0, yaw: 0 };
 const zero   = { roll: 0, pitch: 0, yaw: 0 };
 const history = []; // {t, pitch, yaw}
+const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
 let sampleTimes = [];
+let linkStart = null;                // when the current Arduino / demo feed started
 
 const $ = id => document.getElementById(id);
 const servoMode = $('servoMode'), smooth = $('smooth');
@@ -474,6 +511,7 @@ function handleLine(line) {
   target.roll = roll - zero.roll;
   target.pitch = pitch - zero.pitch;
   target.yaw = yaw - zero.yaw;
+  for (const a of ['pitch', 'yaw']) if (Math.abs(target[a]) > Math.abs(peak[a])) peak[a] = target[a];
 
   const now = performance.now();
   sampleTimes.push(now);
@@ -484,6 +522,7 @@ function handleLine(line) {
 $('zeroBtn').onclick = () => {
   zero.roll += target.roll; zero.pitch += target.pitch; zero.yaw += target.yaw;
   target.roll = target.pitch = target.yaw = 0;
+  peak.pitch = peak.yaw = 0;
 };
 servoMode.onchange = () => { zero.roll = zero.pitch = zero.yaw = 0; };
 $('viewBtn').onclick = resetView;
@@ -492,6 +531,7 @@ $('viewBtn').onclick = resetView;
 let port = null, reader = null, pipeDone = null, keepReading = false;
 
 function setStatus(text, on) { $('statusText').textContent = text; $('dot').classList.toggle('on', !!on); $('mbLive').classList.toggle('on', !!on); }
+function startLink() { linkStart = performance.now(); peak.pitch = peak.yaw = 0; }
 
 async function connect() {
   if (!('serial' in navigator)) { setStatus('Web Serial not supported — use Chrome or Edge'); return; }
@@ -499,7 +539,8 @@ async function connect() {
     stopDemo();
     port = await navigator.serial.requestPort();
     await port.open({ baudRate: Number($('baud').value) });
-    setStatus('Connected', true);
+    setStatus('Live', true);
+    startLink();
     $('connectBtn').textContent = 'Disconnect';
     keepReading = true;
     readLoop();
@@ -540,7 +581,7 @@ async function disconnect() {
   try { if (reader) await reader.cancel(); } catch {}
   try { if (pipeDone) await pipeDone; } catch {}
   try { if (port) await port.close(); } catch {}
-  port = null; reader = null;
+  port = null; reader = null; linkStart = null;
   setStatus('Not connected', false);
   $('connectBtn').textContent = 'Connect Arduino';
 }
@@ -557,7 +598,9 @@ let demoTimer = null;
 function startDemo() {
   if (port) return;
   $('demoBtn').textContent = 'Stop demo';
-  setStatus('Demo mode', true);
+  $('demoPill').classList.add('on');
+  setStatus('Demo feed', true);
+  startLink();
   const t0 = performance.now();
   demoTimer = setInterval(() => {
     const t = (performance.now() - t0) / 1000;
@@ -571,7 +614,8 @@ function stopDemo() {
   if (!demoTimer) return;
   clearInterval(demoTimer); demoTimer = null;
   $('demoBtn').textContent = 'Demo mode';
-  if (!port) setStatus('Not connected', false);
+  $('demoPill').classList.remove('on');
+  if (!port) { setStatus('Not connected', false); linkStart = null; }
 }
 $('demoBtn').onclick = () => (demoTimer ? stopDemo() : startDemo());
 
@@ -585,19 +629,34 @@ function drawChart() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const RANGE = 60; // ±60° visible
+  const L = 22;     // left gutter for axis labels
   const yOf = v => h / 2 - (v / RANGE) * (h / 2 - 6);
-  ctx.strokeStyle = '#2c3039'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
-  ctx.setLineDash([4, 4]); ctx.strokeStyle = '#6b3b3b';
-  [45, -45].forEach(v => { ctx.beginPath(); ctx.moveTo(0, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
+  // Faint grid: every 15° and every 2 s, with small muted axis labels
+  ctx.lineWidth = 1; ctx.font = '500 9px "Barlow Condensed", sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let v = -45; v <= 45; v += 15) {
+    const y = Math.round(yOf(v)) + 0.5;
+    ctx.strokeStyle = v === 0 ? '#2c2f36' : '#16171b';
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.fillStyle = '#5a5e66'; ctx.fillText(v, L - 5, y);
+  }
+  ctx.strokeStyle = '#16171b';
+  for (let s = 2; s < 10; s += 2) {
+    const x = Math.round(L + (w - L) * s / 10) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,77,94,.55)';
+  [45, -45].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
   ctx.setLineDash([]);
   const now = performance.now();
-  const xOf = t => w - ((now - t) / 10000) * w;
-  [['pitch', '#4fa3ff'], ['yaw', '#ffb347']].forEach(([k, c]) => {
-    ctx.strokeStyle = c; ctx.lineWidth = 1.6; ctx.beginPath();
+  const xOf = t => w - ((now - t) / 10000) * (w - L);
+  ctx.save(); ctx.beginPath(); ctx.rect(L, 0, w - L, h); ctx.clip();
+  [['pitch', '#5b8cff'], ['yaw', '#ff8a3d']].forEach(([k, c]) => {
+    ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.beginPath();
     history.forEach((s, i) => { const x = xOf(s.t), y = yOf(s[k]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
   });
+  ctx.restore();
 }
 
 // ---------- Loop ----------
@@ -614,14 +673,22 @@ function animate(now) {
 
   if (now - lastUi > 80) {
     lastUi = now;
-    $('pitchVal').textContent = target.pitch.toFixed(1) + '°';
-    $('yawVal').textContent = target.yaw.toFixed(1) + '°';
+    $('pitchVal').textContent = target.pitch.toFixed(1);
+    $('yawVal').textContent = target.yaw.toFixed(1);
+    $('pitchMax').textContent = peak.pitch.toFixed(1) + '°';
+    $('yawMax').textContent = peak.yaw.toFixed(1) + '°';
     $('mbP').textContent = target.pitch.toFixed(1) + '°';
     $('mbY').textContent = target.yaw.toFixed(1) + '°';
     $('pitchCard').classList.toggle('limit', Math.abs(target.pitch) >= 44.5);
     $('yawCard').classList.toggle('limit', Math.abs(target.yaw) >= 44.5);
     sampleTimes = sampleTimes.filter(t => now - t < 1000);
-    $('rateVal').textContent = sampleTimes.length + ' Hz';
+    $('rateVal').textContent = sampleTimes.length;
+    $('feedRate').textContent = sampleTimes.length + ' Hz';
+    if (linkStart === null) $('linkClock').textContent = '--:--:--';
+    else {
+      const s = Math.floor((now - linkStart) / 1000);
+      $('linkClock').textContent = 'T+' + [s / 3600, s / 60 % 60, s % 60].map(v => String(Math.floor(v)).padStart(2, '0')).join(':');
+    }
     drawChart();
   }
 }
@@ -634,6 +701,7 @@ const benchMain = $('benchMain');
 function setTab(name) {
   document.body.dataset.tab = name;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  $('crumb').textContent = name;
   if (name === 'mission') $('mbSlot').appendChild(view);
   else benchMain.prepend(view);
   try { localStorage.setItem('tvc-tab', name); } catch {}
@@ -1313,7 +1381,7 @@ function updateHUD(now) {
   const prog = simState === 'idle' ? 0 : tlPos(t);
   $('tlFill').style.width = (prog * 100) + '%';
   let next = null;
-  tlEls.forEach(([e, el]) => { const d = simState !== 'idle' && t >= e.t; el.classList.toggle('done', d); if (!d && !next) next = e; });
+  tlEls.forEach(([e, el]) => { const d = simState !== 'idle' && t >= e.t; el.classList.toggle('done', d); el.classList.toggle('next', !d && !next); if (!d && !next) next = e; });
   $('tlNext').textContent = next ? `NEXT · ${next.s} ${fmtClock(t - next.t)}` : 'MISSION COMPLETE';
   drawMinimap();
 }
