@@ -25,6 +25,20 @@ export function initBench() {
     return Math.max(1.45 / Math.tan(vHalf), 1.15 / Math.tan(hHalf)) * 1.1;
   }
   const VIEW_DIR = new THREE.Vector3(3.2, 0.9, 4.2).normalize();
+  // Zoom stays in proportion to the 8×8 floor grid: close enough to inspect the gimbal, never so far that the rig is a
+  // speck. Orbiting stays a free 360°. The pan target is fenced to the grid so the view can't wander off it.
+  const GRID_HALF = 4;
+  function setZoomLimits() {
+    controls.minDistance = 1.2;
+    controls.maxDistance = Math.max(11, fitDistance() * 1.5);   // tall, narrow windows need more room to fit the rocket
+  }
+  const _tClamp = new THREE.Vector3();
+  function fenceTarget() {
+    _tClamp.set(THREE.MathUtils.clamp(controls.target.x, -GRID_HALF, GRID_HALF),
+                THREE.MathUtils.clamp(controls.target.y, 0, PIVOT_Y * 2),
+                THREE.MathUtils.clamp(controls.target.z, -GRID_HALF, GRID_HALF)).sub(controls.target);
+    if (_tClamp.lengthSq()) { controls.target.add(_tClamp); camera.position.add(_tClamp); }
+  }
   function resetView() {
     controls.target.set(0, PIVOT_Y, 0);
     camera.position.copy(controls.target).addScaledVector(VIEW_DIR, fitDistance());
@@ -135,6 +149,7 @@ export function initBench() {
     renderer.setSize(w, h, false); // false = CSS controls display size, we only set the buffer
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    setZoomLimits();
     if (firstFit) { resetView(); firstFit = false; return; }
     // Keep the user's viewing angle but re-zoom so the rocket stays in frame
     const dir = camera.position.clone().sub(controls.target).normalize();
@@ -356,6 +371,7 @@ export function initBench() {
 
     rocket.rotation.set(deg(shown.pitch), deg(shown.roll), deg(-shown.yaw));
     controls.update();
+    fenceTarget();
     if (view.clientWidth > 1 && view.clientHeight > 1) (outlineOn ? outlineFx : renderer).render(scene, camera);
 
     if (now - lastUi > 80) {

@@ -763,6 +763,30 @@ export async function initMission(step) {
 
   // ---------- Main loop ----------
   let lastFrame = performance.now();
+  // Keep the camera out of Earth and the Moon. Each has a thin springy shell above its surface: dip into it and a
+  // slightly underdamped spring pushes the camera back out (a small bounce, not a dead stop). A hard floor just above
+  // the surface means it can never end up inside. Shells are thinner than the pad / landing heights, so the low
+  // chase views still work.
+  const SHELLS = [{ c: new THREE.Vector3(0, 0, 0), R: RE, soft: 0.3, v: 0 }, { c: moon.position, R: RM, soft: 0.12, v: 0 }];
+  const _cOff = new THREE.Vector3();
+  function keepCameraOutside(dt) {
+    for (const b of SHELLS) {
+      _cOff.subVectors(mCam.position, b.c);
+      let d = _cOff.length();
+      const shell = b.R + b.soft, floor = b.R + 0.03;
+      if (d >= shell && b.v <= 0) { b.v = 0; continue; }
+      // spring k=120, damping c=14 (ζ≈0.64: a little overshoot), in small sub-steps so it behaves the same at any frame rate
+      const n = Math.ceil(dt / (1 / 240));
+      for (let i = 0; i < n; i++) {
+        const h = dt / n;
+        b.v += (120 * (shell - d) - 14 * b.v) * h;
+        d = Math.max(floor, d + b.v * h);
+        if (d <= floor && b.v < 0) b.v = 0;
+      }
+      mCam.position.copy(b.c).addScaledVector(_cOff.normalize(), d);
+    }
+  }
+
   function missionFrame(now) {
     requestAnimationFrame(missionFrame);
     const realDt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
@@ -785,6 +809,7 @@ export async function initMission(step) {
     if (document.body.dataset.tab !== 'mission') return;
     followShip();
     mControls.update();
+    keepCameraOutside(realDt);
     mRenderer.render(mScene, mCam);
     updateHUD(now);
   }
