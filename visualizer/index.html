@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TVC Visualizer</title>
+<title>Rocket TVC Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow+Semi+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
@@ -114,6 +114,34 @@
   footer b { color: var(--muted); font-weight: 600; margin-right: 4px; }
   footer a { color: var(--muted); }
   footer .end { margin-left: auto; }
+  footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /* temporary loader preview */
+
+  /* ---------- Loading screen (two looks: "fuel" and "arc") ---------- */
+  #loader { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; transition: opacity .45s; }
+  #loader.out { opacity: 0; pointer-events: none; }
+  #loader[hidden] { display: none; }
+  #loader svg { width: min(600px, 84vw); height: auto; overflow: visible; display: none; }
+  #loader[data-variant="fuel"] .ld-fuel, #loader[data-variant="arc"] .ld-arc { display: block; }
+  .ld-brand { font: 600 11px var(--cond); letter-spacing: .3em; color: var(--dim); text-transform: uppercase; }
+  .ld-status { width: min(600px, 84vw); display: flex; justify-content: space-between; gap: 16px;
+    font: 600 11px var(--cond); letter-spacing: .26em; color: var(--muted); text-transform: uppercase; }
+  .ld-status b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; letter-spacing: .08em; }
+  .ld-line { fill: none; stroke: #fff; stroke-width: 1.3; stroke-linejoin: round; }
+  .ld-dim { fill: none; stroke: var(--dim); stroke-width: 1; }
+  .ld-feed { stroke: var(--line-2); stroke-width: 3; transition: stroke .3s; }
+  .ld-feed.on { stroke: var(--yaw); }
+  .ld-nozzle { transform-box: view-box; transform-origin: 73px 80px; }
+  #loader.finale .ld-nozzle { animation: ld-gimbal 1.1s ease-in-out; }
+  @keyframes ld-gimbal { 0%, 100% { transform: rotate(0); } 28% { transform: rotate(8deg); } 64% { transform: rotate(-8deg); } }
+  .ld-trail { fill: none; stroke: #fff; stroke-width: 1.6; stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .ld-ms circle { fill: var(--bg); stroke: var(--dim); stroke-width: 1.4; transition: fill .25s, stroke .25s; }
+  .ld-ms.done circle { fill: var(--ok); stroke: var(--ok); }
+  .ld-ms text { font: 600 9px var(--cond); letter-spacing: .14em; fill: var(--dim); transition: fill .25s; }
+  .ld-ms.done text { fill: var(--text); }
+  .ld-moonring { fill: none; stroke: var(--ok); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
+  #loader.finale .ld-moonring { animation: ld-ring 1.1s ease-out; }
+  @keyframes ld-ring { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
 
   /* ---------- Mission tab ---------- */
   #mission { position: relative; min-height: 0; overflow: hidden; background: #000; color: #fff;
@@ -318,6 +346,139 @@
 </script>
 </head>
 <body data-tab="bench">
+<!-- ======================= LOADING SCREEN ======================= -->
+<div id="loader" data-variant="fuel" role="progressbar" aria-label="Loading">
+  <div class="ld-brand">EG Rocket · TVC</div>
+
+  <!-- Look 1: the bench rocket in line art; its two tanks fill as the page loads, then the nozzle does a gimbal check -->
+  <svg class="ld-fuel" viewBox="0 0 600 160" aria-hidden="true">
+    <defs>
+      <clipPath id="ldClipA"><rect x="80" y="50" width="196" height="60" rx="14"/></clipPath>
+      <clipPath id="ldClipB"><rect x="299" y="50" width="119" height="60" rx="14"/></clipPath>
+    </defs>
+    <polygon class="ld-line" points="73,42 117,9 161,42"/>
+    <polygon class="ld-line" points="73,118 117,151 161,118"/>
+    <rect class="ld-line" x="73" y="42" width="352" height="76"/>
+    <path class="ld-line" d="M425 42 Q505 46 535 80 Q505 114 425 118"/>
+    <circle class="ld-dim" cx="463" cy="80" r="7"/>
+    <rect class="ld-dim" x="80" y="50" width="196" height="60" rx="14"/>
+    <rect class="ld-dim" x="299" y="50" width="119" height="60" rx="14"/>
+    <rect id="ldFuelA" x="80" y="50" width="0" height="60" fill="var(--pitch)" clip-path="url(#ldClipA)"/>
+    <rect id="ldFuelB" x="299" y="50" width="0" height="60" fill="var(--yaw)" clip-path="url(#ldClipB)"/>
+    <path id="ldFeed" class="ld-feed" d="M299 80 H74"/>
+    <rect class="ld-line" x="282" y="34" width="11" height="92" fill="#000"/>
+    <rect class="ld-line" x="284" y="24" width="7" height="10"/>
+    <rect class="ld-line" x="284" y="126" width="7" height="10"/>
+    <circle class="ld-line" cx="287.5" cy="80" r="3.5" fill="#000"/>
+    <g class="ld-nozzle">
+      <polygon class="ld-line" points="40,49 73,58 73,102 40,111" fill="#000"/>
+      <path class="ld-dim" d="M47 52 V108 M54 54 V106 M61 55.5 V104.5 M68 57 V103"/>
+    </g>
+  </svg>
+
+  <!-- Look 2: the Earth → Moon trajectory; the ship marker flies it as the page loads, ticking off milestones -->
+  <svg class="ld-arc" viewBox="0 0 600 220" aria-hidden="true">
+    <circle class="ld-dim" cx="90" cy="110" r="52" stroke-dasharray="2 4"/>
+    <circle class="ld-dim" cx="520" cy="110" r="24" stroke-dasharray="2 4"/>
+    <circle class="ld-line" cx="90" cy="110" r="38" fill="rgba(91,140,255,.12)"/>
+    <ellipse class="ld-dim" cx="90" cy="110" rx="38" ry="12"/>
+    <ellipse class="ld-dim" cx="90" cy="110" rx="14" ry="38"/>
+    <circle class="ld-line" cx="520" cy="110" r="13" fill="rgba(255,255,255,.05)"/>
+    <circle class="ld-moonring" cx="520" cy="110" r="13"/>
+    <path id="ldArcBase" class="ld-dim" stroke-dasharray="3 4" d="M90 58 A52 52 0 0 0 38 110 A229 85 0 0 0 496 110 L507 110"/>
+    <path id="ldArcTrail" class="ld-trail" pathLength="1" d="M90 58 A52 52 0 0 0 38 110 A229 85 0 0 0 496 110 L507 110"/>
+    <g id="ldMilestones"></g>
+    <circle id="ldShipGlow" r="9" fill="var(--yaw)" opacity=".3" cx="90" cy="58"/>
+    <circle id="ldShip" r="3.5" fill="var(--yaw)" cx="90" cy="58"/>
+  </svg>
+
+  <div class="ld-status"><span id="ldText">Loading Three.js</span><b id="ldPct">0%</b></div>
+</div>
+<script>
+// Loading screen. The module script below reports real progress through window.tvcLoader;
+// until it starts (Three.js still downloading) the bar creeps on its own up to 25%.
+(() => {
+  const $ = id => document.getElementById(id);
+  const el = $('loader');
+  const store = (s, k, v) => { try { return v === undefined ? s.getItem(k) : s.setItem(k, v); } catch { return null; } };
+  let variant = store(localStorage, 'tvc-loader') === 'arc' ? 'arc' : 'fuel';
+  el.dataset.variant = variant;
+  let quick = store(sessionStorage, 'tvc-loaded') === '1';   // reload in the same session: skip the finale
+  let t0 = performance.now(), target = 0, shown = 0, doneReq = false, finishing = false, timers = [], ticker = 0;
+
+  // Arc milestones, placed along the path
+  const base = $('ldArcBase'), LEN = base.getTotalLength();
+  // [label, fraction of the path, label dx, label dy, text-anchor]; LOI sits where the final 11px descent begins
+  const MS = [['LIFTOFF', 0, 0, -12, 'middle'], ['ORBIT', 0.13, -8, 4, 'end'], ['TLI', 0.22, 0, 16, 'middle'],
+    ['MCC', 0.55, 0, 16, 'middle'], ['LOI', 1 - 11 / LEN, -9, 4, 'end'], ['TOUCHDOWN', 1, 13, 38, 'middle']];
+  const msEls = MS.map(([name, f, dx, dy, anchor]) => {
+    const p = base.getPointAtLength(LEN * f), g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'ld-ms');
+    g.innerHTML = `<circle cx="${p.x}" cy="${p.y}" r="4"/><text x="${p.x + dx}" y="${p.y + dy}" text-anchor="${anchor}">${name}</text>`;
+    $('ldMilestones').appendChild(g);
+    return [f, g];
+  });
+
+  function render(p) {
+    $('ldPct').textContent = Math.floor(p * 100) + '%';
+    $('ldFuelA').setAttribute('width', 196 * Math.min(1, p / 0.5));
+    $('ldFuelB').setAttribute('width', 119 * Math.max(0, (p - 0.5) / 0.5));
+    $('ldFeed').classList.toggle('on', p > 0.5);
+    $('ldArcTrail').style.strokeDashoffset = 1 - p;
+    const pt = base.getPointAtLength(LEN * p);
+    for (const id of ['ldShip', 'ldShipGlow']) { $(id).setAttribute('cx', pt.x); $(id).setAttribute('cy', pt.y); }
+    msEls.forEach(([f, g]) => g.classList.toggle('done', p >= f - 1e-6));
+  }
+  // Timer-driven (not requestAnimationFrame) so loading still completes in a background tab
+  function tick() {
+    if (finishing) return;
+    const now = performance.now();
+    const goal = Math.max(target, Math.min(0.25, (now - t0) / 3000 * 0.25));
+    shown += (goal - shown) * 0.12;
+    if (goal - shown < 0.002) shown = goal;
+    render(shown);
+    if (doneReq && shown >= 0.999 && now - t0 >= (quick ? 0 : 1000)) finish();
+    else ticker = setTimeout(tick, 16);
+  }
+  function finish() {
+    finishing = true; render(1);
+    store(sessionStorage, 'tvc-loaded', '1');
+    if (!quick) { el.classList.add('finale'); $('ldText').textContent = variant === 'fuel' ? 'Gimbal check · ±8°' : 'Touchdown'; }
+    timers.push(setTimeout(() => {
+      $('ldText').textContent = 'Ready';
+      el.classList.add('out');
+      timers.push(setTimeout(() => { el.hidden = true; }, 450));
+    }, quick ? 120 : 1250));
+  }
+  function start() {
+    timers.forEach(clearTimeout); timers = [];
+    el.hidden = false; el.classList.remove('out', 'finale');
+    t0 = performance.now(); shown = target = 0; doneReq = finishing = false;
+    $('ldText').textContent = 'Loading Three.js';
+    clearTimeout(ticker); tick();
+  }
+  // If the 3D library never arrives, say so and let a click dismiss the screen
+  timers.push(setTimeout(() => {
+    if (doneReq) return;
+    $('ldText').textContent = 'Still loading · check your connection (click to skip)';
+    el.onclick = () => { el.hidden = true; };
+  }, 15000));
+
+  window.tvcLoader = {
+    set(p, text) { target = Math.max(target, p); if (text && !finishing) $('ldText').textContent = text; },
+    done() { target = 1; doneReq = true; },
+    // TEMPORARY: replay a look with simulated steps (footer buttons)
+    preview(v) {
+      variant = el.dataset.variant = v; store(localStorage, 'tvc-loader', v); quick = false;
+      start();
+      [[0.3, 'Building bench rig', 500], [0.45, 'Generating Earth', 900], [0.65, 'Generating Moon', 1300],
+       [0.8, 'Plotting transfer orbit', 1700], [1, 'Ready', 2100]].forEach(([p, t, ms]) => timers.push(setTimeout(() => this.set(p, t), ms)));
+      timers.push(setTimeout(() => this.done(), 2150));
+    },
+  };
+  tick();
+})();
+</script>
 <header>
   <h1>EG Rocket<span class="sep">/</span>TVC<span class="sep">/</span><span id="crumb" data-labels="Bench|Mission">Bench</span></h1>
   <nav class="tabs" role="tablist">
@@ -507,6 +668,7 @@
 <footer>
   <span><b>Source</b>Arduino Nano · MPU6050 via Web Serial · <span id="ftBaud">115200</span> baud</span>
   <span class="note"><b>Note</b>Mission sim is illustrative and not to scale</span>
+  <span class="tmp"><b>Loader preview</b><button data-ld="fuel">Fuel</button><button data-ld="arc">Arc</button></span>
   <span class="end"><b>v2.0</b>EG1004 TVC · <a href="https://github.com/anuthrak/eg-rocket-tvc" target="_blank" rel="noopener">GitHub</a></span>
 </footer>
 
@@ -514,6 +676,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
+
+// Loading-screen progress. Each step yields a frame so the bar can repaint before the next heavy bit.
+const loader = window.tvcLoader;
+const nextFrame = () => new Promise(r => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
+loader?.set(0.3, 'Building bench rig');
+await nextFrame();
 
 // =====================================================================
 // BENCH TAB (unchanged behaviour)
@@ -1226,6 +1394,8 @@ function moonTexture() {
 }
 
 // Earth
+loader?.set(0.45, 'Generating Earth');
+await nextFrame();
 const [earthMap, cloudMap] = earthTextures();
 const earth = new THREE.Mesh(new THREE.SphereGeometry(RE, 96, 64), new THREE.MeshStandardMaterial({ map: earthMap, roughness: 0.85 }));
 earth.rotation.set(0.35, 0, Math.PI / 2); mScene.add(earth);   // axis in the view plane so we see continents, not the ice cap
@@ -1242,6 +1412,8 @@ const atmo = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.05, 96, 64), new THR
 mScene.add(atmo);
 
 // Moon
+loader?.set(0.65, 'Generating Moon');
+await nextFrame();
 const moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 72, 48), new THREE.MeshStandardMaterial({ map: moonTexture(), roughness: 0.95 }));
 moon.position.set(MX, 0, 0); moon.rotation.set(0.2, 0, Math.PI / 2); mScene.add(moon);
 
@@ -1336,6 +1508,8 @@ const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, sizeAtte
 marker.scale.set(0.035, 0.035, 1); marker.renderOrder = 10; marker.visible = false; mScene.add(marker);
 
 // Planned trajectory + flown trail
+loader?.set(0.8, 'Plotting transfer orbit');
+await nextFrame();
 const planPts = [];
 for (let t = 0; t <= t_land; t += 0.25) planPts.push(posAt(t));
 const planLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(planPts),
@@ -1730,6 +1904,9 @@ setChase();
 requestAnimationFrame(missionFrame);
 
 try { const saved = localStorage.getItem('tvc-tab'); if (saved === 'mission') setTab('mission'); } catch {}
+document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
+loader?.set(1, 'Ready');
+loader?.done();
 </script>
 </body>
 </html>
