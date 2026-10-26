@@ -6,20 +6,23 @@
 <title>TVC Visualizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow+Semi+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #000; --panel: #0b0b0d; --panel-2: #131418; --line: #1e2025; --line-2: #2c2f36;
+    --bg: #000; --panel: #0b0b0d; --panel-2: #131418; --line: #1a1c20; --line-2: #2c2f36;
     --text: #f2f3f5; --muted: #6b6f78; --dim: #474b53;
-    --accent: #3d7bff; --pitch: #5b8cff; --yaw: #ff8a3d; --ok: #3ecf6e; --warn: #ff4d5e; --amber: #f5a623;
+    --pitch: #5b8cff; --yaw: #ff8a3d; --roll: #a477ff; --ok: #3ecf6e; --warn: #ff4d5e; --amber: #f5a623;
     --map-w: clamp(150px, 22vw, 300px);
     --g: clamp(78px, 8.5vw, 112px);
+    --strip-h: 64px;
     --cond: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+    --label: 'Barlow Semi Condensed', 'Barlow Condensed', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.4 'Barlow', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  body { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+  body { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
   header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px;
     border-bottom: 1px solid var(--line); background: var(--bg); }
   header h1 { font: 600 15px var(--cond); margin: 0 14px 0 0; letter-spacing: .2em; text-transform: uppercase; white-space: nowrap; }
@@ -30,21 +33,31 @@
     font: 600 12px var(--cond); letter-spacing: .14em; text-transform: uppercase; }
   button:hover { border-color: var(--muted); }
   button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  #status { margin-left: auto; display: flex; align-items: center; gap: 14px; color: var(--muted);
-    font: 600 12px var(--cond); letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
-  #status .link { display: flex; align-items: center; gap: 7px; }
-  #status .hstat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 6px; letter-spacing: .06em; }
-  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  /* Chrome stays monochrome; colour is reserved for data */
+  button.primary { background: transparent; border-color: var(--text); color: var(--text); }
+  button.primary:not(:disabled):hover { background: var(--text); color: #000; }
+
+  /* ---------- Header status strip ---------- */
+  #status { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .strip { display: flex; align-items: stretch; min-width: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); overflow: hidden; }
+  .cell { display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-left: 1px solid var(--line);
+    font: 500 11px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .cell:first-child { border-left: 0; }
+  .cell svg { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .cell b { color: var(--text); font: 500 13px var(--cond); letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .cell.link { color: var(--text); min-width: 0; max-width: 40ch; }
+  #statusText { overflow: hidden; text-overflow: ellipsis; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
   #dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  #dot.stale { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
   .pill { display: none; padding: 2px 9px; border-radius: 4px; background: var(--amber); color: #000;
-    font: 600 11px var(--cond); letter-spacing: .18em; }
+    font: 600 11px var(--cond); letter-spacing: .18em; text-transform: uppercase; white-space: nowrap; }
   .pill.on { display: inline-block; }
 
   /* ---------- Tabs ---------- */
   .tabs { display: flex; gap: 0; background: var(--panel); border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; margin-right: 6px; }
   .tab { border: 0; background: transparent; padding: 5px 16px; border-radius: 5px; color: var(--muted); }
-  .tab.active { background: var(--accent); color: #fff; }
+  .tab.active { background: var(--text); color: #000; }
   body > main, body > #mission { grid-row: 2; }
   body[data-tab="bench"] #mission,
   body[data-tab="mission"] #benchMain,
@@ -58,27 +71,44 @@
   aside { border-left: 1px solid var(--line); background: var(--bg); padding: 12px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 10px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
-  .readouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 8px; min-width: 0; }
-  .card .label, h2 { font: 600 11px var(--cond); color: var(--muted); text-transform: uppercase; letter-spacing: .18em; }
+  .readouts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px 8px; min-width: 0; }
+  .card .label, h2 { font: 600 10px var(--label); color: var(--muted); text-transform: uppercase; letter-spacing: .16em; }
   .card .val { margin: 8px 0 6px; white-space: nowrap; }
-  .card .val b { font: 600 28px/1 var(--cond); font-variant-numeric: tabular-nums; }
-  .card .val small { font: 500 12px var(--cond); color: var(--muted); margin-left: 3px; }
-  .card .sub { font: 500 10px var(--cond); color: var(--dim); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
+  .card .val b { font: 500 30px/1 var(--cond); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .card .val small { font: 500 12px var(--label); color: var(--muted); margin-left: 3px; }
+  .card .sub { font: 500 10px var(--label); color: var(--dim); letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
   .card .sub b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .card.pitch .val b { color: var(--pitch); } .card.yaw .val b { color: var(--yaw); }
+  .card.pitch .val b { color: var(--pitch); } .card.yaw .val b { color: var(--yaw); } .card.roll .val b { color: var(--roll); }
   .limit .val b { color: var(--warn) !important; }
   h2 { display: flex; justify-content: space-between; margin: 0 0 8px; }
   h2 span { color: var(--dim); }
   #chart { width: 100%; height: clamp(100px, 18vh, 180px); display: block; }
   label.opt { display: flex; gap: 8px; align-items: flex-start; color: var(--text); }
-  label.opt input { accent-color: var(--accent); }
+  label.opt input { accent-color: var(--text); }
   .hint { color: var(--muted); font-size: 12px; }
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font: 500 11px var(--cond); letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font: 500 10px var(--label); letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
   .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px; }
-  code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
-  #raw { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted);
-    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; min-height: 28px; word-break: break-all; }
+  code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font: 11px var(--mono); }
+  #raw { font: 11px/1.5 var(--mono); color: var(--muted); margin-top: 8px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-height: 30px; word-break: break-all; }
+  /* Key-value tables: label · right-aligned value · unit column */
+  .kv { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; column-gap: 8px; margin: 0; }
+  .kv dt, .kv dd { margin: 0; padding: 4px 0; border-top: 1px solid var(--line); }
+  .kv > :nth-child(-n+3) { border-top: 0; }
+  .kv dt { font: 500 10px/1.7 var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .kv dd { font: 500 14px/1.3 var(--cond); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .kv dd.u { font: 500 10px/1.7 var(--label); color: var(--dim); text-align: left; letter-spacing: .06em; }
+  .sat { position: relative; height: 4px; margin: 6px 0 2px; border-radius: 2px; overflow: hidden;
+    background: linear-gradient(90deg, var(--pitch), var(--roll) 45%, var(--amber) 75%, var(--warn)); }
+  .sat i { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--panel-2); }
+
+  /* ---------- Footer ---------- */
+  footer { grid-row: 3; display: flex; flex-wrap: wrap; gap: 2px 22px; align-items: center; padding: 6px 16px;
+    border-top: 1px solid var(--line); background: var(--bg); font: 500 11px var(--label); letter-spacing: .04em; color: var(--dim); }
+  footer b { color: var(--muted); font-weight: 600; margin-right: 4px; }
+  footer a { color: var(--muted); }
+  footer .end { margin-left: auto; }
 
   /* ---------- Mission tab ---------- */
   #mission { position: relative; min-height: 0; overflow: hidden; background: #000; color: #fff;
@@ -92,10 +122,50 @@
     max-width: calc(100% - var(--map-w) - 36px); }
   .m-controls button, .m-controls select { background: rgba(11,11,13,.78); backdrop-filter: blur(6px);
     font: 600 13px var(--cond); letter-spacing: .14em; text-transform: uppercase; padding: 6px 12px; text-shadow: none; }
-  .m-controls button.primary { background: var(--accent); border-color: var(--accent); }
+  .m-controls button.primary { background: rgba(11,11,13,.78); border-color: var(--text); }
 
   #minimap { position: absolute; top: 12px; right: 12px; width: var(--map-w); aspect-ratio: 1.6;
     border: 1px solid var(--line-2); border-radius: 10px; background: rgba(11,11,13,.78); }
+
+  /* Metric strip (wide screens) */
+  .m-strip { display: none; position: absolute; top: 12px; left: 12px; right: calc(var(--map-w) + 24px); height: var(--strip-h);
+    grid-template-columns: minmax(0, 1.8fr) repeat(4, minmax(0, 1fr)); gap: 6px; text-shadow: none; }
+  .ms-tile { background: rgba(11,11,13,.82); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px;
+    min-width: 0; overflow: hidden; backdrop-filter: blur(6px); }
+  .ms-label { font: 600 10px var(--label); letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ms-val { margin-top: 1px; white-space: nowrap; overflow: hidden; }
+  .ms-val b { font: 500 22px/1.1 var(--cond); font-variant-numeric: tabular-nums; }
+  .ms-val small { font: 500 11px var(--label); color: var(--muted); margin-left: 3px; }
+  .ms-sub { font: 500 9px var(--label); letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ms-sub b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ms-met { display: flex; align-items: center; gap: 12px; }
+  .ms-met > div:last-child { min-width: 0; }
+  .ms-clock { font: 500 36px/1 var(--cond); font-variant-numeric: tabular-nums; letter-spacing: .02em; white-space: nowrap; }
+  .ms-clock small, #met small { font-size: .5em; color: var(--muted); margin-right: .15em; letter-spacing: 0; }
+  .ms-phase { font: 600 13px var(--cond); letter-spacing: .14em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sSpeed { color: var(--yaw); } #sAlt { color: var(--pitch); }
+
+  /* Mission events list (wide screens) */
+  .m-events { display: none; position: absolute; right: 12px; width: var(--map-w);
+    top: calc(12px + var(--map-w) / 1.6 + 10px); bottom: calc(var(--g) + 64px); flex-direction: column;
+    background: rgba(11,11,13,.82); border: 1px solid var(--line-2); border-radius: 10px; backdrop-filter: blur(6px); text-shadow: none; }
+  .me-head { display: flex; justify-content: space-between; gap: 8px; padding: 9px 12px 6px; font: 600 10px var(--label);
+    letter-spacing: .16em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .me-head span + span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  #evList { position: relative; list-style: none; margin: 0; padding: 0 12px 8px; overflow-y: auto; min-height: 0; flex: 1; }
+  #evList li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 3px 0; }
+  #evList i { position: relative; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--dim); }
+  #evList span { font: 600 11px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #evList time { font: 500 10px var(--cond); letter-spacing: .04em; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #evList .done i { background: var(--ok); border-color: var(--ok); }
+  #evList .done i::after { content: ''; position: absolute; left: 2.5px; top: .5px; width: 3px; height: 5.5px;
+    border: solid #000; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+  #evList .done span { color: var(--text); } #evList .done time { color: var(--muted); }
+  #evList .next i { border-color: var(--ok); box-shadow: 0 0 6px rgba(62,207,110,.6); }
+  #evList .next span { color: #fff; } #evList .next time { color: var(--ok); }
 
   .callout { position: absolute; top: 16%; left: 50%; transform: translate(-50%, -8px); opacity: 0;
     transition: opacity .45s, transform .45s; font: 600 clamp(14px, 1.9vw, 22px) var(--cond); letter-spacing: .24em;
@@ -112,6 +182,7 @@
     font-size: 11px; letter-spacing: .18em; color: var(--muted); }
   .mb-head .live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #555; margin-right: 6px; vertical-align: 1px; }
   .mb-head .live.on { background: var(--ok); }
+  .mb-head .live.stale { background: var(--amber); }
   .mb-head button { padding: 1px 8px; font-size: 13px; line-height: 1.3; }
   .mb-slot { position: relative; height: clamp(140px, 24vh, 230px); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
   .mb-slot #view { position: absolute; inset: 0; }
@@ -176,13 +247,27 @@
   .thr-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #ff7a2f, #ffd27a); }
   #engState { font: 600 10px var(--cond); letter-spacing: .14em; color: rgba(255,255,255,.75); text-align: center; min-height: 13px; }
 
+  /* Wide screens: metric strip + events list replace the round gauges and the timeline */
+  @media (min-width: 761px) and (min-height: 521px) {
+    .m-strip { display: grid; }
+    .m-events { display: flex; }
+    .m-controls { top: calc(12px + var(--strip-h) + 8px); }
+    .m-gauges, .m-center, .thr-box { display: none; }
+    .m-bottom { grid-template-columns: 1fr auto; padding-top: 20px; background: none; }
+    .m-gimbal { grid-column: 2; }
+    .callout { top: 24%; }
+  }
+  /* Fewer header cells as the window narrows */
+  @media (max-width: 1400px) { .cell.wide { display: none; } }
+
   /* Medium windows: tighter sidebar */
   @media (max-width: 1000px) {
     aside { padding: 10px; gap: 10px; }
     .card { padding: 8px 8px 6px; }
-    .card .val b { font-size: 22px; }
-    #status .hstat { display: none; }
+    .card .val b { font-size: 24px; }
+    .cell.hstat { display: none; }
     .tl-ev span { font-size: 9px; letter-spacing: .06em; }
+    .ms-clock { font-size: 26px; } .ms-val b { font-size: 18px; } .ms-met { gap: 8px; }
   }
   /* Narrow / portrait: stack the 3D view above the panel and let the page scroll */
   @media (max-width: 760px) {
@@ -190,7 +275,8 @@
     header { padding: 8px 12px; gap: 6px; }
     header h1 { font-size: 14px; width: 100%; }
     button, select { padding: 6px 10px; font-size: 12px; }
-    #status { margin-left: 0; width: 100%; font-size: 12px; }
+    #status { margin-left: 0; width: 100%; }
+    footer { padding: 6px 12px; } footer .end { margin-left: 0; } footer .note { display: none; }
     main { grid-template-columns: 1fr; grid-template-rows: clamp(320px, 60vh, 600px) auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
 
@@ -246,9 +332,14 @@
   <button id="viewBtn" class="bench-only">Reset view</button>
   <div id="status">
     <span id="demoPill" class="pill">Demo mode</span>
-    <span class="hstat">Link<b id="linkClock">--:--:--</b></span>
-    <span class="hstat">Feed<b id="feedRate">0 Hz</b></span>
-    <span class="link"><span id="dot"></span><span id="statusText">Not connected</span></span>
+    <div class="strip">
+      <span class="cell link"><span id="dot"></span><span id="statusText">Not connected</span></span>
+      <span class="cell hstat"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5"/><path d="M6 3.5V6l1.8 1.2"/></svg>Link<b id="linkClock">—</b></span>
+      <span class="cell hstat"><svg viewBox="0 0 12 12"><path d="M1 6h2l1.5-3 3 6L9 6h2"/></svg>Feed<b id="feedRate">—</b></span>
+      <span class="cell hstat"><svg viewBox="0 0 12 12"><path d="M3.5 1.5h5M3.5 10.5h5M4 1.5l4 4.5-4 4.5M8 1.5 4 6l4 4.5"/></svg>Last<b id="lastAge">—</b></span>
+      <span class="cell hstat wide"><svg viewBox="0 0 12 12"><path d="M1.5 9a4.5 4.5 0 0 1 9 0M6 9l2-3"/></svg>Baud<b id="baudVal">115200</b></span>
+      <span class="cell hstat wide"><svg viewBox="0 0 12 12"><path d="M4 3h6.5M4 6h6.5M4 9h6.5M1.5 3h.5M1.5 6h.5M1.5 9h.5"/></svg>Lines<b id="lineCount">—</b></span>
+    </div>
   </div>
 </header>
 
@@ -258,11 +349,13 @@
   <aside>
     <div class="readouts">
       <div class="card pitch" id="pitchCard"><div class="label">Pitch</div>
-        <div class="val"><b id="pitchVal">0.0</b><small>°</small></div><div class="sub">Max <b id="pitchMax">0.0°</b></div></div>
+        <div class="val"><b id="pitchVal">—</b><small>°</small></div><div class="sub">Max <b id="pitchMax">—</b></div></div>
       <div class="card yaw" id="yawCard"><div class="label">Yaw</div>
-        <div class="val"><b id="yawVal">0.0</b><small>°</small></div><div class="sub">Max <b id="yawMax">0.0°</b></div></div>
+        <div class="val"><b id="yawVal">—</b><small>°</small></div><div class="sub">Max <b id="yawMax">—</b></div></div>
+      <div class="card roll"><div class="label">Roll</div>
+        <div class="val"><b id="rollVal">—</b><small>°</small></div><div class="sub">Gyro only · drifts</div></div>
       <div class="card"><div class="label">Rate</div>
-        <div class="val"><b id="rateVal">0</b><small>Hz</small></div><div class="sub">Samples / s</div></div>
+        <div class="val"><b id="rateVal">—</b><small>Hz</small></div><div class="sub">Samples / s</div></div>
     </div>
 
     <div class="panel">
@@ -272,16 +365,38 @@
     </div>
 
     <div class="panel">
+      <h2>Gimbal<span>Servo command</span></h2>
+      <dl class="kv">
+        <dt>Pitch servo</dt><dd id="gsP">—</dd><dd class="u">deg</dd>
+        <dt>Yaw servo</dt><dd id="gsY">—</dd><dd class="u">deg</dd>
+        <dt>Pitch deflection</dt><dd id="gdP">—</dd><dd class="u">deg</dd>
+        <dt>Yaw deflection</dt><dd id="gdY">—</dd><dd class="u">deg</dd>
+        <dt>Saturation</dt><dd id="gSat">—</dd><dd class="u">% ±45°</dd>
+      </dl>
+      <div class="sat"><i id="gSatBar"></i></div>
+    </div>
+
+    <div class="panel">
+      <h2>Link<span>Web Serial</span></h2>
+      <dl class="kv">
+        <dt>Port</dt><dd id="lkPort">—</dd><dd class="u"></dd>
+        <dt>Baud</dt><dd id="lkBaud">115200</dd><dd class="u">bit/s</dd>
+        <dt>Format</dt><dd>roll,pitch,yaw</dd><dd class="u">csv</dd>
+        <dt>Lines received</dt><dd id="lkLines">—</dd><dd class="u"></dd>
+        <dt>Unparsed lines</dt><dd id="lkErr">—</dd><dd class="u"></dd>
+        <dt>Since last line</dt><dd id="lkAge">—</dd><dd class="u" id="lkAgeU">ms</dd>
+      </dl>
+      <div id="raw">—</div>
+    </div>
+
+    <div class="panel">
       <h2>Input</h2>
       <label class="opt"><input type="checkbox" id="servoMode" checked>
         <span>Data is servo angles (45–135°) — subtract 90° so neutral = upright</span></label>
       <label class="opt" style="margin-top:6px"><input type="checkbox" id="smooth" checked>
         <span>Smooth motion</span></label>
-    </div>
-
-    <div class="panel">
-      <h2>Last line received</h2>
-      <div id="raw">—</div>
+      <label class="opt" style="margin-top:6px"><input type="checkbox" id="outline">
+        <span>Outline view (white line drawing)</span></label>
     </div>
 
     <div class="hint panel">
@@ -306,8 +421,28 @@
       <button id="camBtn">Cam: Chase</button>
     </div>
 
+    <div class="m-strip">
+      <div class="ms-tile ms-met">
+        <div class="ms-clock" id="sMet"><small>T-</small>00:00:10</div>
+        <div><div class="ms-label">Mission timeline</div><div class="ms-phase" id="sPhase">READY FOR LAUNCH</div></div>
+      </div>
+      <div class="ms-tile"><div class="ms-label" id="sSpeedLabel">Speed</div>
+        <div class="ms-val"><b id="sSpeed">0</b><small>km/h</small></div><div class="ms-sub">Max <b id="sSpeedMax">0 km/h</b></div></div>
+      <div class="ms-tile"><div class="ms-label" id="sAltLabel">Altitude</div>
+        <div class="ms-val"><b id="sAlt">0.0</b><small>km</small></div><div class="ms-sub">Max <b id="sAltMax">0 km</b></div></div>
+      <div class="ms-tile"><div class="ms-label">Gimbal P / Y</div>
+        <div class="ms-val"><b id="sGim">+0.0 / +0.0</b><small>°</small></div><div class="ms-sub">Max <b id="sGimMax">0.0°</b> of ±8°</div></div>
+      <div class="ms-tile"><div class="ms-label">Throttle</div>
+        <div class="ms-val"><b id="sThr">0</b><small>%</small></div><div class="ms-sub" id="sEng">Stage 1 · off</div></div>
+    </div>
+
     <canvas id="minimap"></canvas>
     <div id="callout" class="callout"></div>
+
+    <div class="m-events">
+      <div class="me-head"><span>Mission events</span><span>Lunar TVC demo</span></div>
+      <ol id="evList"></ol>
+    </div>
 
     <div id="miniBench" class="mini-bench">
       <div class="mb-head">
@@ -318,7 +453,7 @@
         </span>
       </div>
       <div id="mbSlot" class="mb-slot"></div>
-      <div class="mb-vals"><span class="p">P <b id="mbP">0.0°</b></span><span class="y">Y <b id="mbY">0.0°</b></span></div>
+      <div class="mb-vals"><span class="p">P <b id="mbP">—</b></span><span class="y">Y <b id="mbY">—</b></span></div>
     </div>
 
     <div class="m-bottom" id="mBottom">
@@ -339,7 +474,7 @@
       </div>
 
       <div class="m-center">
-        <div id="met">T-00:00:10</div>
+        <div id="met"><small>T-</small>00:00:10</div>
         <div class="mission-name">LUNAR TVC DEMO MISSION</div>
         <div id="phase">READY FOR LAUNCH</div>
         <div class="timeline" id="timeline">
@@ -368,9 +503,16 @@
   </div>
 </section>
 
+<footer>
+  <span><b>Source</b>Arduino Nano · MPU6050 via Web Serial · <span id="ftBaud">115200</span> baud</span>
+  <span class="note"><b>Note</b>Mission sim is illustrative and not to scale</span>
+  <span class="end"><b>v2.0</b>EG1004 TVC · <a href="https://github.com/anuthrak/eg-rocket-tvc" target="_blank" rel="noopener">GitHub</a></span>
+</footer>
+
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 
 // =====================================================================
 // BENCH TAB (unchanged behaviour)
@@ -472,6 +614,31 @@ for (let i = 0; i < 4; i++) {
 // Small axis gizmo at the pivot
 const axes = new THREE.AxesHelper(0.5); axes.position.y = PIVOT_Y; scene.add(axes);
 
+// Outline view: black fills + white silhouettes (OutlineEffect's inverted hull) + white fin edges
+const outlineFx = new OutlineEffect(renderer, { defaultThickness: 0.005, defaultColor: [1, 1, 1], defaultAlpha: 1 });
+const noOutline = { visible: false };
+[grid.material, floor.material, refLine.material, axes.material].forEach(m => { m.userData.outlineParameters = noOutline; });
+const fillMat = new THREE.MeshBasicMaterial({ color: 0x050506 });
+const finFillMat = new THREE.MeshBasicMaterial({ color: 0x050506, side: THREE.DoubleSide });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+finFillMat.userData.outlineParameters = edgeMat.userData.outlineParameters = noOutline; // flat fins: edges only
+const finEdgeGeo = new THREE.EdgesGeometry(finGeo);
+const rocketMeshes = [];
+rocket.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
+rocketMeshes.forEach(m => {
+  m.userData.solidMat = m.material;
+  m.userData.lineMat = m.material === finMat ? finFillMat : fillMat;
+  if (m.material === finMat) { const e = new THREE.LineSegments(finEdgeGeo, edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
+});
+let outlineOn = false;
+function setOutline(on) {
+  outlineOn = on;
+  rocketMeshes.forEach(m => {
+    m.material = on ? m.userData.lineMat : m.userData.solidMat;
+    if (m.userData.edges) m.userData.edges.visible = on;
+  });
+}
+
 let firstFit = true;
 function resize() {
   const w = Math.max(1, view.clientWidth), h = Math.max(1, view.clientHeight);
@@ -497,16 +664,24 @@ const history = []; // {t, pitch, yaw}
 const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
 let sampleTimes = [];
 let linkStart = null;                // when the current Arduino / demo feed started
+let lastLineT = null;                // when the last valid line arrived (null = none yet)
+let lineCount = 0, errCount = 0;     // lines received / lines that didn't parse, since link start
+let portLabel = '—';
+const raw = { pitch: null, yaw: null }; // pitch/yaw exactly as sent (servo angles in servo mode)
 
 const $ = id => document.getElementById(id);
 const servoMode = $('servoMode'), smooth = $('smooth');
+$('outline').onchange = e => setOutline(e.target.checked);
+$('baud').onchange = () => { ['baudVal', 'lkBaud', 'ftBaud'].forEach(id => { $(id).textContent = $('baud').value; }); };
 
 function handleLine(line) {
   if (!line) return;
   $('raw').textContent = line;
+  lineCount++;
   const parts = line.split(',').map(s => parseFloat(s));
-  if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) return; // ignore boot noise
+  if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; return; } // ignore boot noise
   let [roll, pitch, yaw] = parts;
+  raw.pitch = pitch; raw.yaw = yaw;
   if (servoMode.checked) { pitch -= 90; yaw -= 90; }
   target.roll = roll - zero.roll;
   target.pitch = pitch - zero.pitch;
@@ -514,6 +689,7 @@ function handleLine(line) {
   for (const a of ['pitch', 'yaw']) if (Math.abs(target[a]) > Math.abs(peak[a])) peak[a] = target[a];
 
   const now = performance.now();
+  lastLineT = now;
   sampleTimes.push(now);
   history.push({ t: now, pitch: target.pitch, yaw: target.yaw });
   while (history.length && now - history[0].t > 10000) history.shift();
@@ -530,8 +706,16 @@ $('viewBtn').onclick = resetView;
 // ---------- Web Serial ----------
 let port = null, reader = null, pipeDone = null, keepReading = false;
 
-function setStatus(text, on) { $('statusText').textContent = text; $('dot').classList.toggle('on', !!on); $('mbLive').classList.toggle('on', !!on); }
-function startLink() { linkStart = performance.now(); peak.pitch = peak.yaw = 0; }
+function setStatus(text, on) {
+  $('statusText').textContent = text;
+  for (const id of ['dot', 'mbLive']) { $(id).classList.toggle('on', !!on); $(id).classList.remove('stale'); }
+}
+function startLink(label) {
+  linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
+  peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label;
+}
+function endLink() { linkStart = lastLineT = null; portLabel = '—'; }
+const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
 
 async function connect() {
   if (!('serial' in navigator)) { setStatus('Web Serial not supported — use Chrome or Edge'); return; }
@@ -540,7 +724,8 @@ async function connect() {
     port = await navigator.serial.requestPort();
     await port.open({ baudRate: Number($('baud').value) });
     setStatus('Live', true);
-    startLink();
+    const { usbVendorId: vid, usbProductId: pid } = port.getInfo();
+    startLink(vid ? `${hex4(vid)}:${hex4(pid)}` : 'Serial');
     $('connectBtn').textContent = 'Disconnect';
     keepReading = true;
     readLoop();
@@ -581,7 +766,7 @@ async function disconnect() {
   try { if (reader) await reader.cancel(); } catch {}
   try { if (pipeDone) await pipeDone; } catch {}
   try { if (port) await port.close(); } catch {}
-  port = null; reader = null; linkStart = null;
+  port = null; reader = null; endLink();
   setStatus('Not connected', false);
   $('connectBtn').textContent = 'Connect Arduino';
 }
@@ -600,7 +785,7 @@ function startDemo() {
   $('demoBtn').textContent = 'Stop demo';
   $('demoPill').classList.add('on');
   setStatus('Demo feed', true);
-  startLink();
+  startLink('Demo');
   const t0 = performance.now();
   demoTimer = setInterval(() => {
     const t = (performance.now() - t0) / 1000;
@@ -615,7 +800,7 @@ function stopDemo() {
   clearInterval(demoTimer); demoTimer = null;
   $('demoBtn').textContent = 'Demo mode';
   $('demoPill').classList.remove('on');
-  if (!port) { setStatus('Not connected', false); linkStart = null; }
+  if (!port) { setStatus('Not connected', false); endLink(); }
 }
 $('demoBtn').onclick = () => (demoTimer ? stopDemo() : startDemo());
 
@@ -669,28 +854,66 @@ function animate(now) {
 
   rocket.rotation.set(deg(shown.pitch), deg(shown.roll), deg(-shown.yaw));
   controls.update();
-  if (view.clientWidth > 1 && view.clientHeight > 1) renderer.render(scene, camera);
+  if (view.clientWidth > 1 && view.clientHeight > 1) (outlineOn ? outlineFx : renderer).render(scene, camera);
 
   if (now - lastUi > 80) {
     lastUi = now;
-    $('pitchVal').textContent = target.pitch.toFixed(1);
-    $('yawVal').textContent = target.yaw.toFixed(1);
-    $('pitchMax').textContent = peak.pitch.toFixed(1) + '°';
-    $('yawMax').textContent = peak.yaw.toFixed(1) + '°';
-    $('mbP').textContent = target.pitch.toFixed(1) + '°';
-    $('mbY').textContent = target.yaw.toFixed(1) + '°';
-    $('pitchCard').classList.toggle('limit', Math.abs(target.pitch) >= 44.5);
-    $('yawCard').classList.toggle('limit', Math.abs(target.yaw) >= 44.5);
-    sampleTimes = sampleTimes.filter(t => now - t < 1000);
-    $('rateVal').textContent = sampleTimes.length;
-    $('feedRate').textContent = sampleTimes.length + ' Hz';
-    if (linkStart === null) $('linkClock').textContent = '--:--:--';
-    else {
-      const s = Math.floor((now - linkStart) / 1000);
-      $('linkClock').textContent = 'T+' + [s / 3600, s / 60 % 60, s % 60].map(v => String(Math.floor(v)).padStart(2, '0')).join(':');
-    }
+    updateBenchUI(now);
     drawChart();
   }
+}
+
+const DASH = '—';
+const sgn1 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
+function updateBenchUI(now) {
+  const linked = linkStart !== null, hasData = linked && lastLineT !== null;
+  const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
+  $('pitchVal').textContent = f1(target.pitch);
+  $('yawVal').textContent = f1(target.yaw);
+  $('rollVal').textContent = f1(target.roll);
+  $('pitchMax').textContent = d1(peak.pitch);
+  $('yawMax').textContent = d1(peak.yaw);
+  $('mbP').textContent = d1(target.pitch);
+  $('mbY').textContent = d1(target.yaw);
+  $('pitchCard').classList.toggle('limit', hasData && Math.abs(target.pitch) >= 44.5);
+  $('yawCard').classList.toggle('limit', hasData && Math.abs(target.yaw) >= 44.5);
+
+  sampleTimes = sampleTimes.filter(t => now - t < 1000);
+  const rate = sampleTimes.length;
+  $('rateVal').textContent = linked ? rate : DASH;
+  $('feedRate').textContent = linked ? rate + ' Hz' : DASH;
+  if (!linked) $('linkClock').textContent = DASH;
+  else {
+    const s = Math.floor((now - linkStart) / 1000);
+    $('linkClock').textContent = 'T+' + [s / 3600, s / 60 % 60, s % 60].map(v => String(Math.floor(v)).padStart(2, '0')).join(':');
+  }
+
+  // Link panel + header cells
+  const age = hasData ? now - lastLineT : null;
+  const ageNum = age === null ? DASH : age < 1000 ? Math.round(age) : (age / 1000).toFixed(1);
+  const ageUnit = age !== null && age >= 1000 ? 's' : 'ms';
+  $('lastAge').textContent = age === null ? DASH : `${ageNum} ${ageUnit}`;
+  $('lkAge').textContent = ageNum; $('lkAgeU').textContent = ageUnit;
+  $('lineCount').textContent = $('lkLines').textContent = linked ? lineCount.toLocaleString('en-US') : DASH;
+  $('lkErr').textContent = linked ? errCount.toLocaleString('en-US') : DASH;
+  $('lkPort').textContent = portLabel;
+
+  // Connected but nothing arriving for a second → STALE
+  if (port) {
+    const stale = now - (lastLineT ?? linkStart) > 1000;
+    $('statusText').textContent = stale ? 'Stale' : 'Live';
+    for (const id of ['dot', 'mbLive']) { $(id).classList.toggle('on', !stale); $(id).classList.toggle('stale', stale); }
+  }
+
+  // Gimbal panel
+  const servoKnown = hasData && servoMode.checked && raw.pitch !== null;
+  $('gsP').textContent = servoKnown ? raw.pitch.toFixed(0) : DASH;
+  $('gsY').textContent = servoKnown ? raw.yaw.toFixed(0) : DASH;
+  $('gdP').textContent = hasData ? sgn1(target.pitch) : DASH;
+  $('gdY').textContent = hasData ? sgn1(target.yaw) : DASH;
+  const sat = hasData ? Math.min(100, Math.max(Math.abs(target.pitch), Math.abs(target.yaw)) / 45 * 100) : 0;
+  $('gSat').textContent = hasData ? sat.toFixed(0) : DASH;
+  $('gSatBar').style.width = (100 - sat) + '%';
 }
 requestAnimationFrame(animate);
 
@@ -1316,6 +1539,7 @@ function refreshButtons() {
 }
 function resetSim() {
   simState = 'idle'; simT = -10;
+  hudMax.v = hudMax.alt = hudMax.g = 0;
   Object.assign(att, { psi: TH_L, w: 0, chi: 0, wc: 0, gp: 0, gy: 0, rcsP: 0, rcsY: 0 });
   reattachBooster();
   trailN = 0; trail2D.length = 0; lastTrailT = -1; trailGeo.setDrawRange(0, 0);
@@ -1359,11 +1583,54 @@ function drawMinimap() {
   g.textAlign = 'left'; g.fillText(w < 190 ? 'NOT TO SCALE' : 'TRAJECTORY · NOT TO SCALE', 8, 12);
 }
 let lastHud = 0;
+const hudMax = { v: 0, alt: 0, g: 0 };
+const metHTML = s => `<small>${s.slice(0, 2)}</small>${s.slice(2)}`;   // small grey "T+" prefix
+const fmtAlt = a => (a < 100 ? a.toFixed(1) : Math.round(a).toLocaleString('en-US'));
+
+// Mission events list (wide screens): every event, check when passed, ring on the next one
+const evEls = EVENTS.map(e => {
+  const li = document.createElement('li');
+  li.innerHTML = `<i></i><span>${e.c.split(' · ')[0]}</span><time>${fmtClock(e.t).replace(/^T([+-])/, 'T$1 ')}</time>`;
+  $('evList').appendChild(li);
+  return [e, li];
+});
+let lastNextEl = null;
+
 function updateHUD(now) {
   if (now - lastHud < 60) return; lastHud = now;
   const t = simT, tel = telemetry(t), eng = engineAt(t);
-  $('met').textContent = fmtClock(t);
-  $('phase').textContent = phaseAt(t);
+  $('met').innerHTML = $('sMet').innerHTML = metHTML(fmtClock(t));
+  $('phase').textContent = $('sPhase').textContent = phaseAt(t);
+
+  // Metric strip
+  if (simState !== 'idle') {
+    hudMax.v = Math.max(hudMax.v, tel.v); hudMax.alt = Math.max(hudMax.alt, tel.alt);
+    hudMax.g = Math.max(hudMax.g, Math.abs(att.gp), Math.abs(att.gy));
+  }
+  const thrOn = eng.on && eng.thr > 0.02;
+  $('sSpeed').textContent = Math.round(tel.v).toLocaleString('en-US');
+  $('sSpeedMax').textContent = Math.round(hudMax.v).toLocaleString('en-US') + ' km/h';
+  $('sAlt').textContent = fmtAlt(tel.alt);
+  $('sAltMax').textContent = fmtAlt(hudMax.alt) + ' km';
+  $('sSpeedLabel').textContent = tel.moon ? 'Speed · Moon' : 'Speed';
+  $('sAltLabel').textContent = tel.moon ? 'Altitude · Moon' : 'Altitude';
+  $('sGim').textContent = `${sgn1(att.gp / DEG)} / ${sgn1(att.gy / DEG)}`;
+  $('sGimMax').textContent = (hudMax.g / DEG).toFixed(1) + '°';
+  $('sThr').textContent = thrOn ? Math.round(eng.thr * 100) : 0;
+  $('sEng').textContent = `${t < T_SEP ? 'Stage 1' : 'Stage 2'} · ${thrOn ? 'burning' : 'engine off'}`;
+
+  let nextEv = null;
+  evEls.forEach(([e, li]) => {
+    const d = simState !== 'idle' && t >= e.t;
+    li.classList.toggle('done', d); li.classList.toggle('next', !d && !nextEv);
+    if (!d && !nextEv) nextEv = li;
+  });
+  if (nextEv !== lastNextEl) {   // keep the upcoming event in view
+    lastNextEl = nextEv;
+    const list = $('evList');
+    if (nextEv && list.clientHeight) list.scrollTop = nextEv.offsetTop - list.clientHeight / 2;
+  }
+
   $('stageLabel').textContent = t < T_SEP ? 'STAGE 1 TELEMETRY' : 'STAGE 2 TELEMETRY';
   $('gSpeed').textContent = Math.round(tel.v).toLocaleString('en-US');
   $('gAlt').textContent = tel.alt < 100 ? tel.alt.toFixed(1) : Math.round(tel.alt).toLocaleString('en-US');
