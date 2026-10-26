@@ -164,12 +164,12 @@ export function initBench() {
 
   function handleLine(line) {
     if (!line) return;
-    $('raw').textContent = line;
     lineCount++;
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
     const parts = line.split(',').map(s => parseFloat(s));
-    if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; return; } // ignore boot noise
+    if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; logLine(line, 'msg'); return; } // boot messages etc.
+    logLine(line);
     let [roll, pitch, yaw] = parts;
     raw.pitch = pitch; raw.yaw = yaw;
     if (servoMode.checked) { pitch -= 90; yaw -= 90; }
@@ -200,7 +200,19 @@ export function initBench() {
     $('statusText').textContent = text;
     for (const id of ['dot', 'mbLive']) { $(id).classList.toggle('on', !!on); $(id).classList.remove('stale'); }
   }
+  // Serial log: newest at the bottom, keeps the last 200 lines, follows new lines unless you've scrolled up
+  function logLine(text, cls) {
+    const log = $('serialLog'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+    const row = document.createElement('div');
+    row.textContent = text; if (cls) row.className = cls;
+    log.appendChild(row);
+    while (log.childElementCount > 200) log.firstElementChild.remove();
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  }
+  const gTrail = [];   // recent gimbal dial positions
+
   function startLink(label) {
+    $('serialLog').textContent = '';
     linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
   }
@@ -407,6 +419,16 @@ export function initBench() {
     const sat = hasData ? Math.min(100, Math.max(Math.abs(target.pitch), Math.abs(target.yaw)) / 45 * 100) : 0;
     $('gSat').textContent = hasData ? sat.toFixed(0) : DASH;
     $('gSatBar').style.width = (100 - sat) + '%';
+
+    // Gimbal dial: +Y to the right, +P up, ring = ±45°
+    $('gDial').classList.toggle('on', hasData);
+    if (hasData) {
+      const k = v => Math.max(-1, Math.min(1, v / 45)) * 44, x = k(target.yaw), y = -k(target.pitch);
+      $('gdDot').setAttribute('cx', x.toFixed(1)); $('gdDot').setAttribute('cy', y.toFixed(1));
+      $('gdDot').classList.toggle('sat', sat >= 98);
+      gTrail.push(`${x.toFixed(1)},${y.toFixed(1)}`); if (gTrail.length > 30) gTrail.shift();
+    } else gTrail.length = 0;
+    $('gdTrail').setAttribute('points', gTrail.join(' '));
   }
   requestAnimationFrame(animate);
 }

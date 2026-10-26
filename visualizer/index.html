@@ -129,6 +129,15 @@
   <aside class="side-r">
     <div class="panel">
       <h2>Gimbal<span>Servo command</span></h2>
+      <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
+      <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
+        <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
+        <line class="gd-axis" x1="-44" y1="0" x2="44" y2="0"/><line class="gd-axis" x1="0" y1="-44" x2="0" y2="44"/>
+        <text class="gd-lbl" x="0" y="-47">+P</text><text class="gd-lbl" x="49" y="2" text-anchor="start">+Y</text>
+        <text class="gd-lbl" x="33" y="-33">45°</text>
+        <polyline class="gd-trail" id="gdTrail" points=""/>
+        <circle class="gd-dot" id="gdDot" r="3.5"/>
+      </svg>
       <dl class="kv">
         <dt>Pitch servo</dt><dd id="gsP">—</dd><dd class="u">deg</dd>
         <dt>Yaw servo</dt><dd id="gsY">—</dd><dd class="u">deg</dd>
@@ -139,18 +148,19 @@
       <div class="sat"><i id="gSatBar"></i></div>
     </div>
 
-    <div class="panel">
+    <div class="panel log-panel">
       <h2>Link<span>Web Serial</span></h2>
       <dl class="kv">
         <dt>Port</dt><dd id="lkPort">—</dd><dd class="u"></dd>
         <dt>Firmware</dt><dd id="lkFw">—</dd><dd class="u"></dd>
-        <dt>Baud</dt><dd id="lkBaud">115200</dd><dd class="u">bit/s</dd>
-        <dt>Format</dt><dd>roll,pitch,yaw</dd><dd class="u">csv</dd>
+        <dt class="lk-extra">Baud</dt><dd class="lk-extra" id="lkBaud">115200</dd><dd class="u lk-extra">bit/s</dd>
+        <dt class="lk-extra">Format</dt><dd class="lk-extra">roll,pitch,yaw</dd><dd class="u lk-extra">csv</dd>
         <dt>Lines received</dt><dd id="lkLines">—</dd><dd class="u"></dd>
         <dt>Unparsed lines</dt><dd id="lkErr">—</dd><dd class="u"></dd>
         <dt>Since last line</dt><dd id="lkAge">—</dd><dd class="u" id="lkAgeU">ms</dd>
       </dl>
-      <div id="raw">—</div>
+      <div class="log-head"><span>Serial log</span><span>Last 200 lines</span></div>
+      <div id="serialLog" class="log" role="log"></div>
     </div>
 
     <div class="hint panel">

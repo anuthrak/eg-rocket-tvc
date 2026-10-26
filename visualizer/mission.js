@@ -219,10 +219,14 @@ export async function initMission(step) {
     for (let i = 0; i < oct; i++) { sum += a * vnoise(x * f, y * f, z * f, s + i * 17); norm += a; a *= 0.5; f *= 2.03; }
     return sum / norm;
   }
-  function sphereCanvas(W, H, fn) {
+  // Works in ~50 ms slices with a frame in between, so the loading bar keeps animating while textures generate
+  const breathe = () => new Promise(r => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 60); });
+  async function sphereCanvas(W, H, fn) {
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+    let sliceEnd = performance.now() + 50;
     for (let y = 0; y < H; y++) {
+      if (performance.now() > sliceEnd && !document.hidden) { await breathe(); sliceEnd = performance.now() + 50; }   // hidden tab: nobody's watching, don't slow down
       const lat = (0.5 - (y + 0.5) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
       for (let x = 0; x < W; x++) {
         const lon = ((x + 0.5) / W) * Math.PI * 2;
@@ -232,9 +236,9 @@ export async function initMission(step) {
     g.putImageData(img, 0, 0);
     return c;
   }
-  function earthTextures() {
+  async function earthTextures() {
     const W = 640, H = 320;
-    const surf = sphereCanvas(W, H, (x, y, z, lat, d, i) => {
+    const surf = await sphereCanvas(W, H, (x, y, z, lat, d, i) => {
       const n = fbm(x * 1.9 + 5, y * 1.9 + 5, z * 1.9 + 5, 1, 5);
       const al = Math.abs(lat) / (Math.PI / 2);
       let r, g, b;
@@ -249,15 +253,16 @@ export async function initMission(step) {
       }
       d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
     });
-    const cloud = sphereCanvas(W, H, (x, y, z, lat, d, i) => {
+    await step(0.55, 'Generating clouds');   // split so the loading bar can repaint between the two big canvases
+    const cloud = await sphereCanvas(W, H, (x, y, z, lat, d, i) => {
       const n = fbm(x * 2.6 + 20, y * 4 + 20, z * 2.6 + 20, 4, 4);
       d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = clamp((n - 0.52) * 4.5, 0, 0.9) * 255;
     });
     return [surf, cloud].map(c => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; });
   }
-  function moonTexture() {
+  async function moonTexture() {
     const MW = 768, MH = 384;
-    const c = sphereCanvas(MW, MH, (x, y, z, lat, d, i) => {
+    const c = await sphereCanvas(MW, MH, (x, y, z, lat, d, i) => {
       const n = fbm(x * 3 + 2, y * 3 + 2, z * 3 + 2, 31, 5), m = fbm(x * 1.2, y * 1.2, z * 1.2, 77, 3);
       const v = 120 + (n - 0.5) * 120 - (m > 0.56 ? 38 : 0);
       d[i] = v; d[i + 1] = v; d[i + 2] = v * 0.98; d[i + 3] = 255;
@@ -275,7 +280,7 @@ export async function initMission(step) {
 
   // Earth
   await step(0.45, 'Generating Earth');
-  const [earthMap, cloudMap] = earthTextures();
+  const [earthMap, cloudMap] = await earthTextures();
   const earth = new THREE.Mesh(new THREE.SphereGeometry(RE, 96, 64), new THREE.MeshStandardMaterial({ map: earthMap, roughness: 0.85 }));
   earth.rotation.set(0.35, 0, Math.PI / 2); mScene.add(earth);   // axis in the view plane so we see continents, not the ice cap
   const clouds = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.008, 96, 64),
@@ -292,7 +297,7 @@ export async function initMission(step) {
 
   // Moon
   await step(0.65, 'Generating Moon');
-  const moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 72, 48), new THREE.MeshStandardMaterial({ map: moonTexture(), roughness: 0.95 }));
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 72, 48), new THREE.MeshStandardMaterial({ map: await moonTexture(), roughness: 0.95 }));
   moon.position.set(MX, 0, 0); moon.rotation.set(0.2, 0, Math.PI / 2); mScene.add(moon);
 
   // Launch pad + tower
