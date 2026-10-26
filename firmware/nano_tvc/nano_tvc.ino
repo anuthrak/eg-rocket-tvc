@@ -7,6 +7,9 @@
 //   PD controller -> gimbal command, clamped to ±GMAX, slew-rate limited to GRATE.
 // Hardware: Arduino Nano + MPU6050 + 2 servos. No A2212 motor/ESC yet, so throttle is fixed.
 
+// Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
+const char FW_VERSION[] = "1.0.0";
+
 Adafruit_MPU6050 mpu;
 Servo pitchServo;
 Servo yawServo;
@@ -91,6 +94,8 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
+  Serial.print("TVC firmware v");
+  Serial.println(FW_VERSION);
 
   // Attach servos and centre the nozzle
   pitchServo.attach(pitchServoPin);
