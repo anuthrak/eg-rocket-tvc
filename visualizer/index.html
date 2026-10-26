@@ -1514,18 +1514,48 @@ let mapBounds;
 }
 function setChase() {
   camMode = 'chase'; marker.visible = false; $('camBtn').textContent = 'Cam: Chase';
+  applyViewOffset();
   const k = clamp(1.25 / mCam.aspect, 1, 2.4);   // back off on tall/narrow windows
   mControls.target.copy(ship.position); mCam.position.copy(ship.position).addScaledVector(CHASE_OFFSET, k); mControls.update();
 }
+// The part of the mission view not covered by HUD panels (px, relative to the view)
+function overviewRect(w, h) {
+  const base = mView.getBoundingClientRect(), box = el => el.getBoundingClientRect();
+  const shown = el => el.offsetParent !== null;
+  const events = document.querySelector('.m-events');
+  let L = shown($('miniBench')) ? box($('miniBench')).right - base.left : 0;
+  let R = box(shown(events) ? events : $('minimap')).left - base.left;
+  let T = box(document.querySelector('.m-controls')).bottom - base.top;
+  let B = box($('mBottom')).top - base.top + 40;   // the HUD's top padding is mostly empty gradient
+  L += 16; R -= 16; T += 12; B -= 12;
+  if (R - L < w * 0.35 || B - T < h * 0.3) return { L: 0, R: w, T: 0, B: h };   // small screens: panels cover too much, use it all
+  return { L, R, T, B };
+}
+function applyViewOffset() {
+  const w = mView.clientWidth, h = mView.clientHeight;
+  if (w < 2 || h < 2) return;
+  if (camMode === 'overview') {
+    // Put the centre of the picture in the middle of the uncovered area
+    const f = overviewRect(w, h);
+    mCam.setViewOffset(w, h, w / 2 - (f.L + f.R) / 2, h / 2 - (f.T + f.B) / 2, w, h);
+  } else {
+    const dy = Math.round(($('mBottom').offsetHeight || 0) * 0.32);
+    mCam.setViewOffset(w, h + 2 * dy, 0, 2 * dy, w, h);   // shift the picture up so the HUD doesn't cover it
+  }
+  mCam.updateProjectionMatrix();
+}
 function setOverview() {
   camMode = 'overview'; marker.visible = true; $('camBtn').textContent = 'Cam: Overview';
+  applyViewOffset();
   const { x0, x1, y0, y1 } = mapBounds;
-  const hw = (x1 - x0) / 2 + 10, hh = (y1 - y0) / 2 + 8;
-  const cx = (x0 + x1) / 2 - hw * 0.12, cy = (y0 + y1) / 2;
+  const hw = (x1 - x0) / 2 + 4, hh = (y1 - y0) / 2 + 4;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const w = mView.clientWidth, h = mView.clientHeight, f = overviewRect(w, h);
+  // At distance d one world unit spans (h/2)/(d·tan(fov/2)) px; pick d so Earth→Moon fits the uncovered area
   const tv = Math.tan(mCam.fov * DEG / 2);
-  const dist = Math.max(hh / tv, hw / (tv * mCam.aspect)) * 1.05;
+  const dist = Math.max(hh * h / (f.B - f.T), hw * h / (f.R - f.L)) / tv * 1.1;
   mControls.target.set(cx, cy, 0);
-  mCam.position.set(cx, cy - dist * 0.25, dist * 0.97); mControls.update();
+  mCam.position.set(cx, cy - dist * 0.18, dist); mControls.update();
 }
 $('camBtn').onclick = () => (camMode === 'chase' ? setOverview() : setChase());
 function followShip() {
@@ -1539,12 +1569,11 @@ function mResize() {
   mRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   mRenderer.setSize(w, h, false);
   mCam.aspect = w / h;
-  const dy = Math.round(($('mBottom').offsetHeight || 0) * 0.32);
-  mCam.setViewOffset(w, h + 2 * dy, 0, 2 * dy, w, h);   // shift the picture up so the HUD doesn't cover it
-  mCam.updateProjectionMatrix();
+  applyViewOffset();
   if (camMode === 'overview') setOverview();
 }
 new ResizeObserver(mResize).observe(mView);
+$('mbCollapse').addEventListener('click', () => { if (camMode === 'overview') applyViewOffset(); });
 
 // ---------- Controls ----------
 function refreshButtons() {
