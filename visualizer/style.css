@@ -354,7 +354,18 @@ body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari):
   .m-controls { gap: 5px; }
   .mini-bench { display: none; }        /* the Bench tab is one tap away; .m-py shows P/Y instead */
   .m-py.on { display: block; }
-  .callout { top: 86px; }
+}
+/* Portrait phones: callouts sit just under the minimap */
+@media (max-width: 760px) {
+  html { scrollbar-gutter: stable; }   /* Bench scrolls, Mission doesn't: reserve the bar so the header can't shift */
+  .callout { top: calc(12px + var(--map-w) / 1.6 + 16px); }
+}
+/* Landscape phones / very short windows: callouts go between the controls and the minimap; smaller map */
+@media (max-height: 520px) {
+  .callout { top: 52px; width: calc(100% - 2 * var(--map-w) - 56px); white-space: normal; text-align: center; letter-spacing: .14em; }
+}
+@media (max-height: 400px) {
+  :root { --map-w: 120px; }
 }
 /* Touch devices can't reach the Nano over USB: hide Connect + baud there even if Web Serial exists */
 @media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (max-height: 520px) {
