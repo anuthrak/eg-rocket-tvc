@@ -3,7 +3,7 @@
 import { initBench } from './bench.js';
 import { initMission } from './mission.js';
 
-export const VERSION = '2.2.0';   // bump with CHANGELOG.md; see README → Releasing
+export const VERSION = '2.3.0';   // bump with CHANGELOG.md; see README → Releasing
 
 const $ = id => document.getElementById(id);
 if (!('serial' in navigator)) document.body.classList.add('no-serial');   // hides Connect + baud
@@ -55,7 +55,7 @@ const mission = await initMission(step);
 
 // ---------- Intro after the loading screen ----------
 // Mission: the camera flies in from space while the HUD boots in around it. Bench: just the HUD boot.
-// Same-session reloads get a quick version; "reduce motion" gets the loader's plain fade only.
+// Same-tab reloads (cached) skip the fly-in and get a quick HUD fade; "reduce motion" gets the loader's plain fade only.
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 function bootHUD(selectors, startMs, gapMs) {
   let d = startMs;
@@ -74,7 +74,7 @@ document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
   if (reduceMotion.matches) return;
   const g = quick ? 12 : 40;   // panels land around when the camera does (~2 s)
   if (document.body.dataset.tab === 'mission') {
-    mission.flyIn(quick ? 0.4 : 1.8);
+    if (!quick) mission.flyIn(1.8);
     bootHUD([['header'], ['.m-strip .ms-tile'], ['.m-controls'], ['#mPY'], ['#minimap'], ['.m-events'], ['#evList li', quick ? 4 : 12],
              ['#miniBench'], ['.m-gauges'], ['.m-center'], ['.tl-ev', quick ? 6 : 25], ['.m-gimbal']], quick ? 0 : 450, g);
   } else {
@@ -87,9 +87,7 @@ $('appVersion').textContent = 'v' + VERSION;
 let savedTab = null;
 try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
 setTab(savedTab === 'bench' ? 'bench' : 'mission');
-// Footer loader previews (temporary): Fuel / Arc, and Launch = fuel look with the ignition + launch-out finale
-document.querySelectorAll('[data-ld]').forEach(b => {
-  b.onclick = () => (b.dataset.ld === 'launch' ? loader?.preview('fuel', 'launch') : loader?.preview(b.dataset.ld));
-});
+// Footer loader previews (temporary): Fuel / Arc
+document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');
 loader?.done();

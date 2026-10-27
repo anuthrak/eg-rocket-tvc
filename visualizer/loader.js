@@ -11,7 +11,6 @@
   el.dataset.variant = variant;
   let quick = store(sessionStorage, 'tvc-loaded') === '1';   // reload in the same session: skip the finale
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;   // system "reduce motion": plain fade only
-  let finaleKind = 'gimbal';                                  // 'launch' = ignition + launch-out (footer preview)
   let t0 = performance.now(), target = 0, shown = 0, doneReq = false, finishing = false, timers = [], ticker = 0;
   let setAt = t0, last = t0;
   const STAGES = [0.25, 0.3, 0.45, 0.55, 0.65, 0.8, 1];   // checkpoints reported by main.js / mission.js
@@ -71,22 +70,17 @@
     if (!calm) {
       el.classList.add('finale'); $('ldText').textContent = variant === 'fuel' ? 'Gimbal check · ±8°' : 'Touchdown';
       revealAt = 1250;
-      if (finaleKind === 'launch' && variant === 'fuel') {
-        at(1150, () => { el.classList.add('ignite'); $('ldText').textContent = 'Ignition'; });
-        at(1600, () => { el.classList.add('launch'); $('ldText').textContent = 'Liftoff'; });
-        revealAt = 2150;
-      }
     }
     at(revealAt, () => {
       $('ldText').textContent = 'Ready';
       document.dispatchEvent(new CustomEvent('tvc:reveal', { detail: { quick, reduced } }));
       el.classList.add('out');
-      at(450, () => { el.hidden = true; el.classList.remove('finale', 'ignite', 'launch'); });   // hidden first, so nothing animates back
+      at(450, () => { el.hidden = true; el.classList.remove('finale'); });
     });
   }
   function start() {
     timers.forEach(clearTimeout); timers = [];
-    el.hidden = false; el.classList.remove('out', 'finale', 'ignite', 'launch');
+    el.hidden = false; el.classList.remove('out', 'finale');
     t0 = setAt = last = performance.now(); shown = target = 0; doneReq = finishing = false;
     $('ldText').textContent = 'Loading Three.js';
     stopTicker(); tick();
@@ -105,8 +99,8 @@
     },
     done() { target = 1; doneReq = true; },
     // TEMPORARY: replay a look with simulated steps (footer buttons)
-    preview(v, finale = 'gimbal') {
-      variant = el.dataset.variant = v; quick = false; finaleKind = finale;
+    preview(v) {
+      variant = el.dataset.variant = v; quick = false;
       start();
       [[0.3, 'Building bench rig', 500], [0.45, 'Generating Earth', 800], [0.55, 'Generating clouds', 1050], [0.65, 'Generating Moon', 1300],
        [0.8, 'Plotting transfer orbit', 1700], [1, 'Ready', 2100]].forEach(([p, t, ms]) => timers.push(setTimeout(() => this.set(p, t), ms)));

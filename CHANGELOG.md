@@ -2,6 +2,12 @@
 
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
+## [2.3.0] – 2026-10-26
+### Added
+- Intro transition after the loading screen. Mission: the camera flies in from a wide shot of Earth to the chase view (~1.8 s, controls paused until it lands) while the HUD boots in, with panels fading and rising one after another, the event list cascading and timeline markers lighting up left to right. Bench: HUD boot only. Same-tab reloads skip the fly-in and get a quick HUD fade; "reduce motion" keeps a plain fade.
+### Changed
+- The 3D scenes skip drawing while the loading screen fully covers them, and the loading bar's speed is time-based, so slower machines load noticeably faster.
+
 ## [2.2.0] – 2026-10-26
 ### Added
 - Favicon (white tilted rocket on a black circle) plus PNG fallback and iOS home-screen icon, in `visualizer/public/`.
