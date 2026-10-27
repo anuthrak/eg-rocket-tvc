@@ -2,6 +2,23 @@
 
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
+## [2.2.0] – 2026-10-26
+### Added
+- Favicon (white tilted rocket on a black circle) plus PNG fallback and iOS home-screen icon, in `visualizer/public/`.
+- Bench: gimbal dial (nozzle position inside the ±45° ring, with a trail) and a serial log (last 200 lines, boot messages highlighted) that fills the right sidebar.
+- Mission camera collisions: Earth, the Moon, the rocket and the launch tower are solid; the camera dead-stops on contact (no sliding into surfaces) while orbiting at the same height and pulling away still work.
+### Changed
+- Mission is the first tab and the home page (returning Bench visitors still land on Bench).
+- Bench layout: two sidebars around the 3D view (readouts, chart and input on the left; gimbal and link on the right) that don't scroll on normal screens.
+- Phones and short windows: one-line header, line-icon controls, a one-line P/Y readout instead of the mini bench panel; Connect and baud hide where USB Web Serial can't work.
+- Loading bar eases between checkpoints and keeps moving while textures generate.
+- Bench zoom limited to the floor grid's scale (1.2–11 units); panning stays on the grid; orbiting is still a free 360°.
+- Static assets moved into `visualizer/public/`.
+### Fixed
+- Callouts no longer overlap the minimap on phones; short-landscape minimap clears the bottom HUD.
+- Header no longer shifts 10px between tabs in narrow desktop windows (scrollbar gutter).
+- Roll footnote and servo-mode label no longer clip in narrow sidebars; help text no longer mentions the removed Processing sketch.
+
 ## [2.1.0] – 2026-10-26
 ### Changed
 - Visualizer split from one 1,900-line `index.html` into six files: `index.html`, `style.css`, `loader.js`, `main.js`, `bench.js`, `mission.js`. Same look and behavior. Run locally with a static server (see README).

@@ -3,7 +3,7 @@
 import { initBench } from './bench.js';
 import { initMission } from './mission.js';
 
-export const VERSION = '2.1.0';   // bump with CHANGELOG.md; see README → Releasing
+export const VERSION = '2.2.0';   // bump with CHANGELOG.md; see README → Releasing
 
 const $ = id => document.getElementById(id);
 if (!('serial' in navigator)) document.body.classList.add('no-serial');   // hides Connect + baud
