@@ -824,6 +824,29 @@ export async function initMission(step) {
     (camGuard.offset ??= new THREE.Vector3()).subVectors(mCam.position, mControls.target);
   }
 
+  // Intro fly-in (after the loading screen): from a wide shot of Earth out in space, ease down to the chase view.
+  // Camera controls are paused until it lands, so a stray drag can't fight it.
+  let intro = null;
+  const _iDir = new THREE.Vector3();
+  function flyIn(seconds) {
+    setChase();                                                  // the pose to land on
+    const end = mCam.position.clone().sub(ship.position);
+    intro = { t0: performance.now(), ms: seconds * 1000, endDist: end.length(), endDir: end.normalize(),
+              startDist: 38, startDir: new THREE.Vector3(0.25, 0.55, 1).normalize() };
+    mControls.enabled = false;
+  }
+  function introStep(now) {
+    const k = clamp((now - intro.t0) / intro.ms, 0, 1);
+    const dolly = 1 - Math.pow(1 - k, 3);                        // ease-out: fast start, gentle landing
+    const turn = 0.5 - 0.5 * Math.cos(Math.PI * k);              // ease-in-out for the change of angle
+    _iDir.copy(intro.startDir).lerp(intro.endDir, turn).normalize();
+    mControls.target.copy(ship.position);
+    mCam.position.copy(ship.position).addScaledVector(_iDir, intro.startDist * Math.pow(intro.endDist / intro.startDist, dolly));
+    mCam.lookAt(ship.position);
+    if (k >= 1) { intro = null; mControls.enabled = true; camGuard.offset = null; mControls.update(); }
+  }
+
+  let mWarmed = false;
   function missionFrame(now) {
     requestAnimationFrame(missionFrame);
     const realDt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
@@ -844,13 +867,15 @@ export async function initMission(step) {
     updateEngines();
     clouds.rotateY(realDt * 0.004);
     if (document.body.dataset.tab !== 'mission') return;
-    followShip();
-    mControls.update();
-    collideCamera();
-    mRenderer.render(mScene, mCam);
+    if (intro) introStep(now);
+    else { followShip(); mControls.update(); collideCamera(); }
+    // One warm-up frame (uploads the planet textures to the GPU), then skip drawing while the loading screen covers it
+    if (mWarmed && window.tvcCovered?.()) return;
+    mRenderer.render(mScene, mCam); mWarmed = true;
     updateHUD(now);
   }
   resetSim();
   setChase();
   requestAnimationFrame(missionFrame);
+  return { flyIn };
 }

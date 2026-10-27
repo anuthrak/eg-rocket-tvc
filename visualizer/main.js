@@ -51,13 +51,45 @@ $('mbCollapse').onclick = () => {
 };
 if (matchMedia('(max-width: 760px), (max-height: 520px)').matches) $('mbCollapse').onclick();
 
-await initMission(step);
+const mission = await initMission(step);
+
+// ---------- Intro after the loading screen ----------
+// Mission: the camera flies in from space while the HUD boots in around it. Bench: just the HUD boot.
+// Same-session reloads get a quick version; "reduce motion" gets the loader's plain fade only.
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function bootHUD(selectors, startMs, gapMs) {
+  let d = startMs;
+  for (const [sel, gap = gapMs] of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.offsetParent === null) continue;                    // not shown at this size / on this tab
+      el.style.setProperty('--d', d + 'ms');
+      el.classList.remove('boot-in'); void el.offsetWidth;        // restart if it's already running
+      el.classList.add('boot-in');
+      el.addEventListener('animationend', () => el.classList.remove('boot-in'), { once: true });
+      d += gap;
+    }
+  }
+}
+document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
+  if (reduceMotion.matches) return;
+  const g = quick ? 12 : 40;   // panels land around when the camera does (~2 s)
+  if (document.body.dataset.tab === 'mission') {
+    mission.flyIn(quick ? 0.4 : 1.8);
+    bootHUD([['header'], ['.m-strip .ms-tile'], ['.m-controls'], ['#mPY'], ['#minimap'], ['.m-events'], ['#evList li', quick ? 4 : 12],
+             ['#miniBench'], ['.m-gauges'], ['.m-center'], ['.tl-ev', quick ? 6 : 25], ['.m-gimbal']], quick ? 0 : 450, g);
+  } else {
+    bootHUD([['header'], ['.side-l > *'], ['.side-r > *']], quick ? 0 : 120, g);
+  }
+});
 
 $('appVersion').textContent = 'v' + VERSION;
 // Mission is the home page; Bench only if that's where the viewer last was
 let savedTab = null;
 try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
 setTab(savedTab === 'bench' ? 'bench' : 'mission');
-document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
+// Footer loader previews (temporary): Fuel / Arc, and Launch = fuel look with the ignition + launch-out finale
+document.querySelectorAll('[data-ld]').forEach(b => {
+  b.onclick = () => (b.dataset.ld === 'launch' ? loader?.preview('fuel', 'launch') : loader?.preview(b.dataset.ld));
+});
 loader?.set(1, 'Ready');
 loader?.done();

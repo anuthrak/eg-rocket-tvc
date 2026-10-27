@@ -3,10 +3,15 @@
 (() => {
   const $ = id => document.getElementById(id);
   const el = $('loader');
+  // True while the loader fully covers the page: the 3D scenes skip drawing then (they can't be seen), which keeps
+  // slower machines from crawling through the load. Drawing resumes as soon as the fade-out starts.
+  window.tvcCovered = () => !el.hidden && !el.classList.contains('out');
   const store = (s, k, v) => { try { return v === undefined ? s.getItem(k) : s.setItem(k, v); } catch { return null; } };
   let variant = 'fuel';                                       // default look; the arc is kept for the footer preview
   el.dataset.variant = variant;
   let quick = store(sessionStorage, 'tvc-loaded') === '1';   // reload in the same session: skip the finale
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;   // system "reduce motion": plain fade only
+  let finaleKind = 'gimbal';                                  // 'launch' = ignition + launch-out (footer preview)
   let t0 = performance.now(), target = 0, shown = 0, doneReq = false, finishing = false, timers = [], ticker = 0;
   let setAt = t0, last = t0;
   const STAGES = [0.25, 0.3, 0.45, 0.55, 0.65, 0.8, 1];   // checkpoints reported by main.js / mission.js
@@ -44,11 +49,11 @@
   // instead of jumping. Runs on animation frames while visible, on a timer when hidden so loading still finishes.
   function tick(now = performance.now()) {
     if (finishing) return;
-    const dt = Math.min(0.1, Math.max(0, now - last) / 1000); last = now;   // capped: after a hiccup, catch up gradually
+    const dt = Math.min(0.25, Math.max(0, now - last) / 1000); last = now;   // capped: after a hiccup, catch up gradually
     const step = (goalAt(now) - shown) * (1 - Math.exp(-dt / 0.3));
     if (document.hidden) shown = goalAt(now);              // nobody's watching: no easing, so a background tab finishes promptly
     else shown += quick ? step : Math.min(step, dt / 1.2);
-    if (doneReq && 1 - shown < 0.002) shown = 1;
+    if (doneReq && 1 - shown < 0.01) shown = 1;
     render(shown);
     if (doneReq && shown >= 1 && now - t0 >= (quick ? 0 : 1000)) return finish();
     ticker = document.hidden ? setTimeout(tick, 50) : requestAnimationFrame(tick);
@@ -57,19 +62,31 @@
   document.addEventListener('visibilitychange', () => {   // animation frames pause in hidden tabs; switch to the timer
     if (document.hidden && !finishing && !el.hidden) { stopTicker(); ticker = setTimeout(tick, 50); }
   });
+  // Finale, then fade out. As the fade starts, 'tvc:reveal' tells main.js to run the intro transition.
   function finish() {
     finishing = true; render(1);
     store(sessionStorage, 'tvc-loaded', '1');
-    if (!quick) { el.classList.add('finale'); $('ldText').textContent = variant === 'fuel' ? 'Gimbal check · ±8°' : 'Touchdown'; }
-    timers.push(setTimeout(() => {
+    const calm = quick || reduced, at = (ms, fn) => timers.push(setTimeout(fn, ms));
+    let revealAt = 120;
+    if (!calm) {
+      el.classList.add('finale'); $('ldText').textContent = variant === 'fuel' ? 'Gimbal check · ±8°' : 'Touchdown';
+      revealAt = 1250;
+      if (finaleKind === 'launch' && variant === 'fuel') {
+        at(1150, () => { el.classList.add('ignite'); $('ldText').textContent = 'Ignition'; });
+        at(1600, () => { el.classList.add('launch'); $('ldText').textContent = 'Liftoff'; });
+        revealAt = 2150;
+      }
+    }
+    at(revealAt, () => {
       $('ldText').textContent = 'Ready';
+      document.dispatchEvent(new CustomEvent('tvc:reveal', { detail: { quick, reduced } }));
       el.classList.add('out');
-      timers.push(setTimeout(() => { el.hidden = true; }, 450));
-    }, quick ? 120 : 1250));
+      at(450, () => { el.hidden = true; el.classList.remove('finale', 'ignite', 'launch'); });   // hidden first, so nothing animates back
+    });
   }
   function start() {
     timers.forEach(clearTimeout); timers = [];
-    el.hidden = false; el.classList.remove('out', 'finale');
+    el.hidden = false; el.classList.remove('out', 'finale', 'ignite', 'launch');
     t0 = setAt = last = performance.now(); shown = target = 0; doneReq = finishing = false;
     $('ldText').textContent = 'Loading Three.js';
     stopTicker(); tick();
@@ -88,8 +105,8 @@
     },
     done() { target = 1; doneReq = true; },
     // TEMPORARY: replay a look with simulated steps (footer buttons)
-    preview(v) {
-      variant = el.dataset.variant = v; quick = false;
+    preview(v, finale = 'gimbal') {
+      variant = el.dataset.variant = v; quick = false; finaleKind = finale;
       start();
       [[0.3, 'Building bench rig', 500], [0.45, 'Generating Earth', 800], [0.55, 'Generating clouds', 1050], [0.65, 'Generating Moon', 1300],
        [0.8, 'Plotting transfer orbit', 1700], [1, 'Ready', 2100]].forEach(([p, t, ms]) => timers.push(setTimeout(() => this.set(p, t), ms)));

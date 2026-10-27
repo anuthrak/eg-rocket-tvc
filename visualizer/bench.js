@@ -363,7 +363,7 @@ export function initBench() {
 
   // ---------- Loop ----------
   const deg = THREE.MathUtils.degToRad;
-  let lastUi = 0;
+  let lastUi = 0, warmed = false;
   function animate(now) {
     requestAnimationFrame(animate);
     const k = smooth.checked ? 0.18 : 1;
@@ -372,7 +372,9 @@ export function initBench() {
     rocket.rotation.set(deg(shown.pitch), deg(shown.roll), deg(-shown.yaw));
     controls.update();
     fenceTarget();
-    if (view.clientWidth > 1 && view.clientHeight > 1) (outlineOn ? outlineFx : renderer).render(scene, camera);
+    // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
+    const covered = warmed && window.tvcCovered?.();
+    if (!covered && view.clientWidth > 1 && view.clientHeight > 1) { (outlineOn ? outlineFx : renderer).render(scene, camera); warmed = true; }
 
     if (now - lastUi > 80) {
       lastUi = now;
