@@ -3,9 +3,10 @@
 import { initBench } from './bench.js';
 import { initMission } from './mission.js';
 
-export const VERSION = '2.1.0';   // bump with CHANGELOG.md; see README → Releasing
+export const VERSION = '2.2.0';   // bump with CHANGELOG.md; see README → Releasing
 
 const $ = id => document.getElementById(id);
+if (!('serial' in navigator)) document.body.classList.add('no-serial');   // hides Connect + baud
 const loader = window.tvcLoader;
 // Each step yields a frame so the loading bar can repaint before the next heavy bit
 const nextFrame = () => new Promise(r => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
@@ -53,7 +54,10 @@ if (matchMedia('(max-width: 760px), (max-height: 520px)').matches) $('mbCollapse
 await initMission(step);
 
 $('appVersion').textContent = 'v' + VERSION;
-try { const saved = localStorage.getItem('tvc-tab'); if (saved === 'mission') setTab('mission'); } catch {}
+// Mission is the home page; Bench only if that's where the viewer last was
+let savedTab = null;
+try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
+setTab(savedTab === 'bench' ? 'bench' : 'mission');
 document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');
 loader?.done();

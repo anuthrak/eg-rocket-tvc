@@ -219,10 +219,14 @@ export async function initMission(step) {
     for (let i = 0; i < oct; i++) { sum += a * vnoise(x * f, y * f, z * f, s + i * 17); norm += a; a *= 0.5; f *= 2.03; }
     return sum / norm;
   }
-  function sphereCanvas(W, H, fn) {
+  // Works in ~50 ms slices with a frame in between, so the loading bar keeps animating while textures generate
+  const breathe = () => new Promise(r => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 60); });
+  async function sphereCanvas(W, H, fn) {
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+    let sliceEnd = performance.now() + 50;
     for (let y = 0; y < H; y++) {
+      if (performance.now() > sliceEnd && !document.hidden) { await breathe(); sliceEnd = performance.now() + 50; }   // hidden tab: nobody's watching, don't slow down
       const lat = (0.5 - (y + 0.5) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
       for (let x = 0; x < W; x++) {
         const lon = ((x + 0.5) / W) * Math.PI * 2;
@@ -232,9 +236,9 @@ export async function initMission(step) {
     g.putImageData(img, 0, 0);
     return c;
   }
-  function earthTextures() {
+  async function earthTextures() {
     const W = 640, H = 320;
-    const surf = sphereCanvas(W, H, (x, y, z, lat, d, i) => {
+    const surf = await sphereCanvas(W, H, (x, y, z, lat, d, i) => {
       const n = fbm(x * 1.9 + 5, y * 1.9 + 5, z * 1.9 + 5, 1, 5);
       const al = Math.abs(lat) / (Math.PI / 2);
       let r, g, b;
@@ -249,15 +253,16 @@ export async function initMission(step) {
       }
       d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
     });
-    const cloud = sphereCanvas(W, H, (x, y, z, lat, d, i) => {
+    await step(0.55, 'Generating clouds');   // split so the loading bar can repaint between the two big canvases
+    const cloud = await sphereCanvas(W, H, (x, y, z, lat, d, i) => {
       const n = fbm(x * 2.6 + 20, y * 4 + 20, z * 2.6 + 20, 4, 4);
       d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = clamp((n - 0.52) * 4.5, 0, 0.9) * 255;
     });
     return [surf, cloud].map(c => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; });
   }
-  function moonTexture() {
+  async function moonTexture() {
     const MW = 768, MH = 384;
-    const c = sphereCanvas(MW, MH, (x, y, z, lat, d, i) => {
+    const c = await sphereCanvas(MW, MH, (x, y, z, lat, d, i) => {
       const n = fbm(x * 3 + 2, y * 3 + 2, z * 3 + 2, 31, 5), m = fbm(x * 1.2, y * 1.2, z * 1.2, 77, 3);
       const v = 120 + (n - 0.5) * 120 - (m > 0.56 ? 38 : 0);
       d[i] = v; d[i + 1] = v; d[i + 2] = v * 0.98; d[i + 3] = 255;
@@ -275,7 +280,7 @@ export async function initMission(step) {
 
   // Earth
   await step(0.45, 'Generating Earth');
-  const [earthMap, cloudMap] = earthTextures();
+  const [earthMap, cloudMap] = await earthTextures();
   const earth = new THREE.Mesh(new THREE.SphereGeometry(RE, 96, 64), new THREE.MeshStandardMaterial({ map: earthMap, roughness: 0.85 }));
   earth.rotation.set(0.35, 0, Math.PI / 2); mScene.add(earth);   // axis in the view plane so we see continents, not the ice cap
   const clouds = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.008, 96, 64),
@@ -292,7 +297,7 @@ export async function initMission(step) {
 
   // Moon
   await step(0.65, 'Generating Moon');
-  const moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 72, 48), new THREE.MeshStandardMaterial({ map: moonTexture(), roughness: 0.95 }));
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 72, 48), new THREE.MeshStandardMaterial({ map: await moonTexture(), roughness: 0.95 }));
   moon.position.set(MX, 0, 0); moon.rotation.set(0.2, 0, Math.PI / 2); mScene.add(moon);
 
   // Launch pad + tower
@@ -557,6 +562,7 @@ export async function initMission(step) {
 
   // ---------- Camera ----------
   const CHASE_OFFSET = new THREE.Vector3(0.9, 0.25, 2.4);
+  const camGuard = { offset: null };   // last accepted camera offset from the target; cleared on camera jumps
   let mapBounds;
   {
     let x0 = -RE, x1 = MX + RM, y0 = -RE, y1 = RE;
@@ -564,7 +570,7 @@ export async function initMission(step) {
     mapBounds = { x0, x1, y0, y1 };
   }
   function setChase() {
-    camMode = 'chase'; marker.visible = false; $('camBtn').textContent = 'Cam: Chase';
+    camMode = 'chase'; marker.visible = false; setCamLabel(); camGuard.offset = null;
     applyViewOffset();
     const k = clamp(1.25 / mCam.aspect, 1, 2.4);   // back off on tall/narrow windows
     mControls.target.copy(ship.position); mCam.position.copy(ship.position).addScaledVector(CHASE_OFFSET, k); mControls.update();
@@ -596,7 +602,7 @@ export async function initMission(step) {
     mCam.updateProjectionMatrix();
   }
   function setOverview() {
-    camMode = 'overview'; marker.visible = true; $('camBtn').textContent = 'Cam: Overview';
+    camMode = 'overview'; marker.visible = true; setCamLabel(); camGuard.offset = null;
     applyViewOffset();
     const { x0, x1, y0, y1 } = mapBounds;
     const hw = (x1 - x0) / 2 + 4, hh = (y1 - y0) / 2 + 4;
@@ -627,12 +633,19 @@ export async function initMission(step) {
   $('mbCollapse').addEventListener('click', () => { if (camMode === 'overview') applyViewOffset(); });
 
   // ---------- Controls ----------
+  // Buttons hold an icon (phones) and a text label (desktop); keep both and the accessible name in sync
+  function setLabel(btn, text) { btn.querySelector('.lbl').textContent = text; btn.setAttribute('aria-label', text); }
+  function setCamLabel() {
+    const b = $('camBtn'); b.dataset.mode = camMode;
+    setLabel(b, camMode === 'chase' ? 'Cam: Chase' : 'Cam: Overview');
+  }
   function refreshButtons() {
     const lb = $('launchBtn'), pb = $('pauseBtn');
     lb.disabled = simState === 'running' || simState === 'paused';
-    lb.textContent = simState === 'done' ? 'Fly again' : simState === 'idle' ? 'Launch' : 'In flight';
+    setLabel(lb, simState === 'done' ? 'Fly again' : simState === 'idle' ? 'Launch' : 'In flight');
     pb.disabled = !(simState === 'running' || simState === 'paused');
-    pb.textContent = simState === 'paused' ? 'Resume' : 'Pause';
+    setLabel(pb, simState === 'paused' ? 'Resume' : 'Pause');
+    pb.toggleAttribute('data-paused', simState === 'paused');
   }
   function resetSim() {
     simState = 'idle'; simT = -10;
@@ -751,6 +764,66 @@ export async function initMission(step) {
 
   // ---------- Main loop ----------
   let lastFrame = performance.now();
+  // Solid bodies the camera can't pass through: Earth and the Moon (spheres), the rocket stack and the launch tower
+  // (capsules: a line segment with a radius), each with a small clearance above its surface.
+  //  - Dead stop: if a frame's orbit/zoom input would take the camera inside a clearance zone, the part of the move
+  //    heading inward is dropped, so the camera holds still where it touched (no sliding, no bounce) however long you
+  //    keep dragging. Orbiting around the target at the same height, or zooming out, still goes through.
+  //  - If it ends up inside anyway (the rocket moving into it, a window resize), it's placed straight back on the edge.
+  // Clearances are smaller than the pad / landing heights, so the low chase views still work.
+  const padUp = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0);
+  const padQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), padUp);
+  const towerA = padUp.clone().multiplyScalar(RE).add(new THREE.Vector3(0.14, 0, 0).applyQuaternion(padQ));
+  const towerB = towerA.clone().addScaledVector(padUp, 1.05);
+  const rocketA = new THREE.Vector3(), rocketB = new THREE.Vector3();
+  const BODIES = [
+    { c: new THREE.Vector3(), R: RE, clear: 0.2 },           // Earth
+    { c: moon.position, R: RM, clear: 0.1 },                 // Moon
+    { a: rocketA, b: rocketB, R: RR, clear: 0.06 },          // rocket stack
+    { a: towerA, b: towerB, R: 0.035, clear: 0.06 },         // launch tower
+  ].map(b => Object.assign(b, { n: new THREE.Vector3(), p: new THREE.Vector3() }));
+  const _seg = new THREE.Vector3(), _rel = new THREE.Vector3(), _cand = new THREE.Vector3();
+  const _sNew = new THREE.Spherical(), _sOld = new THREE.Spherical(), _sTry = new THREE.Spherical();
+  // How far the camera is inside a body's clearance zone (> 0 = inside); also leaves the outward normal in b.n
+  function depthIn(b, pos) {
+    if (b.c) b.p.copy(b.c);
+    else {
+      _seg.subVectors(b.b, b.a);
+      const t = THREE.MathUtils.clamp(_rel.subVectors(pos, b.a).dot(_seg) / _seg.lengthSq(), 0, 1);
+      b.p.copy(b.a).addScaledVector(_seg, t);
+    }
+    b.n.subVectors(pos, b.p);
+    const d = b.n.length();
+    b.n.divideScalar(d || 1);
+    return b.R + b.clear - d;
+  }
+  function collideCamera() {
+    // Rocket body: the whole stack until stage separation, then just the upper stage
+    ship.updateMatrixWorld();
+    rocketA.set(0, boost.free ? -0.24 : -0.76, 0).applyMatrix4(ship.matrixWorld);
+    rocketB.set(0, 0.2, 0).applyMatrix4(ship.matrixWorld);
+
+    // Dead stop: if this frame's move would put the camera inside a body, keep only the parts of it that don't —
+    // tried in order: around + zoom, around only, zoom only, nothing (all relative to the orbit target)
+    const blocked = pos => BODIES.some(b => depthIn(b, pos) > 0);
+    if (camGuard.offset && blocked(mCam.position)) {
+      _sNew.setFromVector3(_rel.subVectors(mCam.position, mControls.target));
+      _sOld.setFromVector3(camGuard.offset);
+      const tries = [[_sNew.theta, _sNew.radius], [_sNew.theta, _sOld.radius], [_sOld.theta, _sNew.radius], [_sOld.theta, _sOld.radius]];
+      for (const [theta, radius] of tries) {
+        _sTry.set(radius, _sOld.phi, theta);
+        _cand.setFromSpherical(_sTry).add(mControls.target);
+        if (!blocked(_cand) || (theta === _sOld.theta && radius === _sOld.radius)) { mCam.position.copy(_cand); break; }
+      }
+    }
+    // Still inside (moved there by the scene, not by input)? Put it straight back on the edge
+    for (const b of BODIES) {
+      const depth = depthIn(b, mCam.position);
+      if (depth > 0) mCam.position.addScaledVector(b.n, depth);
+    }
+    (camGuard.offset ??= new THREE.Vector3()).subVectors(mCam.position, mControls.target);
+  }
+
   function missionFrame(now) {
     requestAnimationFrame(missionFrame);
     const realDt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
@@ -773,6 +846,7 @@ export async function initMission(step) {
     if (document.body.dataset.tab !== 'mission') return;
     followShip();
     mControls.update();
+    collideCamera();
     mRenderer.render(mScene, mCam);
     updateHUD(now);
   }

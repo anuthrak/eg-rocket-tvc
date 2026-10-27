@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="32" fill="#000"/>
+  <g fill="#fff" transform="rotate(45 32 32) translate(0 3.5)">
+    <path d="M32 9C37.5 14 38.5 19.5 38.5 24L38.5 44L25.5 44L25.5 24C25.5 19.5 26.5 14 32 9Z"/>
+    <path d="M38.5 35L44 43L44 48L38.5 44.5Z"/>
+    <path d="M25.5 35L20 43L20 48L25.5 44.5Z"/>
+    <path d="M28.5 44L35.5 44L34.5 48L29.5 48Z"/>
+    <circle cx="32" cy="26" r="2.8" fill="#000"/>
+  </g>
+</svg>

@@ -1,5 +1,5 @@
 // Loading screen. The module script below reports real progress through window.tvcLoader;
-// until it starts (Three.js still downloading) the bar creeps on its own up to 25%.
+// between those checkpoints (and while Three.js downloads) it keeps creeping toward the next one.
 (() => {
   const $ = id => document.getElementById(id);
   const el = $('loader');
@@ -8,6 +8,8 @@
   el.dataset.variant = variant;
   let quick = store(sessionStorage, 'tvc-loaded') === '1';   // reload in the same session: skip the finale
   let t0 = performance.now(), target = 0, shown = 0, doneReq = false, finishing = false, timers = [], ticker = 0;
+  let setAt = t0, last = t0;
+  const STAGES = [0.25, 0.3, 0.45, 0.55, 0.65, 0.8, 1];   // checkpoints reported by main.js / mission.js
 
   // Arc milestones, placed along the path
   const base = $('ldArcBase'), LEN = base.getTotalLength();
@@ -32,17 +34,29 @@
     for (const id of ['ldShip', 'ldShipGlow']) { $(id).setAttribute('cx', pt.x); $(id).setAttribute('cy', pt.y); }
     msEls.forEach(([f, g]) => g.classList.toggle('done', p >= f - 1e-6));
   }
-  // Timer-driven (not requestAnimationFrame) so loading still completes in a background tab
-  function tick() {
-    if (finishing) return;
-    const now = performance.now();
-    const goal = Math.max(target, Math.min(0.25, (now - t0) / 3000 * 0.25));
-    shown += (goal - shown) * 0.12;
-    if (goal - shown < 0.002) shown = goal;
-    render(shown);
-    if (doneReq && shown >= 0.999 && now - t0 >= (quick ? 0 : 1000)) finish();
-    else ticker = setTimeout(tick, 16);
+  // Where the bar is heading: the last checkpoint, plus a slow creep (up to 85%) toward the next one
+  function goalAt(now) {
+    if (doneReq) return 1;
+    const next = STAGES.find(s => s > target + 1e-6) ?? 1;
+    return target + (next - target) * 0.85 * (1 - Math.exp(-(now - setAt) / 1500));
   }
+  // Eases toward the goal (~0.3 s time constant) but never faster than a full bar per 1.2 s, so checkpoints glide
+  // instead of jumping. Runs on animation frames while visible, on a timer when hidden so loading still finishes.
+  function tick(now = performance.now()) {
+    if (finishing) return;
+    const dt = Math.min(0.1, Math.max(0, now - last) / 1000); last = now;   // capped: after a hiccup, catch up gradually
+    const step = (goalAt(now) - shown) * (1 - Math.exp(-dt / 0.3));
+    if (document.hidden) shown = goalAt(now);              // nobody's watching: no easing, so a background tab finishes promptly
+    else shown += quick ? step : Math.min(step, dt / 1.2);
+    if (doneReq && 1 - shown < 0.002) shown = 1;
+    render(shown);
+    if (doneReq && shown >= 1 && now - t0 >= (quick ? 0 : 1000)) return finish();
+    ticker = document.hidden ? setTimeout(tick, 50) : requestAnimationFrame(tick);
+  }
+  const stopTicker = () => { cancelAnimationFrame(ticker); clearTimeout(ticker); };
+  document.addEventListener('visibilitychange', () => {   // animation frames pause in hidden tabs; switch to the timer
+    if (document.hidden && !finishing && !el.hidden) { stopTicker(); ticker = setTimeout(tick, 50); }
+  });
   function finish() {
     finishing = true; render(1);
     store(sessionStorage, 'tvc-loaded', '1');
@@ -56,9 +70,9 @@
   function start() {
     timers.forEach(clearTimeout); timers = [];
     el.hidden = false; el.classList.remove('out', 'finale');
-    t0 = performance.now(); shown = target = 0; doneReq = finishing = false;
+    t0 = setAt = last = performance.now(); shown = target = 0; doneReq = finishing = false;
     $('ldText').textContent = 'Loading Three.js';
-    clearTimeout(ticker); tick();
+    stopTicker(); tick();
   }
   // If the 3D library never arrives, say so and let a click dismiss the screen
   timers.push(setTimeout(() => {
@@ -68,13 +82,16 @@
   }, 15000));
 
   window.tvcLoader = {
-    set(p, text) { target = Math.max(target, p); if (text && !finishing) $('ldText').textContent = text; },
+    set(p, text) {
+      if (p > target) { target = p; setAt = performance.now(); }
+      if (text && !finishing) $('ldText').textContent = text;
+    },
     done() { target = 1; doneReq = true; },
     // TEMPORARY: replay a look with simulated steps (footer buttons)
     preview(v) {
       variant = el.dataset.variant = v; quick = false;
       start();
-      [[0.3, 'Building bench rig', 500], [0.45, 'Generating Earth', 900], [0.65, 'Generating Moon', 1300],
+      [[0.3, 'Building bench rig', 500], [0.45, 'Generating Earth', 800], [0.55, 'Generating clouds', 1050], [0.65, 'Generating Moon', 1300],
        [0.8, 'Plotting transfer orbit', 1700], [1, 'Ready', 2100]].forEach(([p, t, ms]) => timers.push(setTimeout(() => this.set(p, t), ms)));
       timers.push(setTimeout(() => this.done(), 2150));
     },
