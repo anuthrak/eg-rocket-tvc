@@ -562,6 +562,7 @@ export async function initMission(step) {
 
   // ---------- Camera ----------
   const CHASE_OFFSET = new THREE.Vector3(0.9, 0.25, 2.4);
+  const camGuard = { offset: null };   // last accepted camera offset from the target; cleared on camera jumps
   let mapBounds;
   {
     let x0 = -RE, x1 = MX + RM, y0 = -RE, y1 = RE;
@@ -569,7 +570,7 @@ export async function initMission(step) {
     mapBounds = { x0, x1, y0, y1 };
   }
   function setChase() {
-    camMode = 'chase'; marker.visible = false; setCamLabel();
+    camMode = 'chase'; marker.visible = false; setCamLabel(); camGuard.offset = null;
     applyViewOffset();
     const k = clamp(1.25 / mCam.aspect, 1, 2.4);   // back off on tall/narrow windows
     mControls.target.copy(ship.position); mCam.position.copy(ship.position).addScaledVector(CHASE_OFFSET, k); mControls.update();
@@ -601,7 +602,7 @@ export async function initMission(step) {
     mCam.updateProjectionMatrix();
   }
   function setOverview() {
-    camMode = 'overview'; marker.visible = true; setCamLabel();
+    camMode = 'overview'; marker.visible = true; setCamLabel(); camGuard.offset = null;
     applyViewOffset();
     const { x0, x1, y0, y1 } = mapBounds;
     const hw = (x1 - x0) / 2 + 4, hh = (y1 - y0) / 2 + 4;
@@ -763,28 +764,65 @@ export async function initMission(step) {
 
   // ---------- Main loop ----------
   let lastFrame = performance.now();
-  // Keep the camera out of Earth and the Moon. Each has a thin springy shell above its surface: dip into it and a
-  // slightly underdamped spring pushes the camera back out (a small bounce, not a dead stop). A hard floor just above
-  // the surface means it can never end up inside. Shells are thinner than the pad / landing heights, so the low
-  // chase views still work.
-  const SHELLS = [{ c: new THREE.Vector3(0, 0, 0), R: RE, soft: 0.3, v: 0 }, { c: moon.position, R: RM, soft: 0.12, v: 0 }];
-  const _cOff = new THREE.Vector3();
-  function keepCameraOutside(dt) {
-    for (const b of SHELLS) {
-      _cOff.subVectors(mCam.position, b.c);
-      let d = _cOff.length();
-      const shell = b.R + b.soft, floor = b.R + 0.03;
-      if (d >= shell && b.v <= 0) { b.v = 0; continue; }
-      // spring k=120, damping c=14 (ζ≈0.64: a little overshoot), in small sub-steps so it behaves the same at any frame rate
-      const n = Math.ceil(dt / (1 / 240));
+  // Solid bodies the camera can't pass through: Earth and the Moon (spheres), the rocket stack and the launch tower
+  // (capsules: a line segment with a radius). Each has a thin soft zone above its surface.
+  //  - If a frame's orbit/zoom input pushes the camera deeper into a zone, that movement is rejected, so the camera
+  //    stops where it touched instead of sliding along the surface, and on first contact it gets a small outward kick.
+  //  - A slightly underdamped spring then eases it back to the edge of the zone; a hard limit just above each surface
+  //    means it can never end up inside. Zones are thinner than the pad / landing heights, so low chase views still work.
+  const padUp = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0);
+  const padQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), padUp);
+  const towerA = padUp.clone().multiplyScalar(RE).add(new THREE.Vector3(0.14, 0, 0).applyQuaternion(padQ));
+  const towerB = towerA.clone().addScaledVector(padUp, 1.05);
+  const rocketA = new THREE.Vector3(), rocketB = new THREE.Vector3();
+  const BODIES = [
+    { c: new THREE.Vector3(), R: RE, soft: 0.3, gap: 0.03 },          // Earth
+    { c: moon.position, R: RM, soft: 0.12, gap: 0.03 },              // Moon
+    { a: rocketA, b: rocketB, R: RR, soft: 0.06, gap: 0.02 },         // rocket stack
+    { a: towerA, b: towerB, R: 0.035, soft: 0.06, gap: 0.02 },        // launch tower
+  ].map(b => Object.assign(b, { v: 0, depth: -1, touching: false, n: new THREE.Vector3(), p: new THREE.Vector3() }));
+  const _seg = new THREE.Vector3(), _rel = new THREE.Vector3();
+  // How far the camera is inside a body's soft zone (> 0 = inside); also leaves the outward normal in b.n
+  function depthIn(b, pos) {
+    if (b.c) b.p.copy(b.c);
+    else {
+      _seg.subVectors(b.b, b.a);
+      const t = THREE.MathUtils.clamp(_rel.subVectors(pos, b.a).dot(_seg) / _seg.lengthSq(), 0, 1);
+      b.p.copy(b.a).addScaledVector(_seg, t);
+    }
+    b.n.subVectors(pos, b.p);
+    const d = b.n.length();
+    b.n.divideScalar(d || 1);
+    return b.R + b.soft - d;
+  }
+  function collideCamera(dt) {
+    // Rocket body: the whole stack until stage separation, then just the upper stage
+    ship.updateMatrixWorld();
+    rocketA.set(0, boost.free ? -0.24 : -0.76, 0).applyMatrix4(ship.matrixWorld);
+    rocketB.set(0, 0.2, 0).applyMatrix4(ship.matrixWorld);
+
+    const deeper = BODIES.filter(b => { const d = depthIn(b, mCam.position); return d > 0 && d > b.depth + 1e-4; });
+    if (deeper.length && camGuard.offset) {
+      mCam.position.copy(mControls.target).add(camGuard.offset);      // reject this frame's move: stop, don't slide
+      for (const b of deeper) if (!b.touching) b.v = 0.5;              // first contact: small bounce outward
+    }
+    for (const b of BODIES) {
+      const depth = depthIn(b, mCam.position);
+      b.touching = depth > 0;
+      if (depth <= 0 && b.v <= 0) { b.v = 0; b.depth = depth; continue; }
+      // spring on outward displacement s (0 = zone edge): k=120, c=14 (ζ≈0.64), sub-stepped for any frame rate
+      let s = -depth;
+      const sMin = -(b.soft - b.gap), n = Math.ceil(dt / (1 / 240));
       for (let i = 0; i < n; i++) {
         const h = dt / n;
-        b.v += (120 * (shell - d) - 14 * b.v) * h;
-        d = Math.max(floor, d + b.v * h);
-        if (d <= floor && b.v < 0) b.v = 0;
+        b.v += (-120 * s - 14 * b.v) * h;
+        s = Math.max(sMin, s + b.v * h);
+        if (s <= sMin && b.v < 0) b.v = 0;
       }
-      mCam.position.copy(b.c).addScaledVector(_cOff.normalize(), d);
+      mCam.position.addScaledVector(b.n, s + depth);
+      b.depth = -s;
     }
+    (camGuard.offset ??= new THREE.Vector3()).subVectors(mCam.position, mControls.target);
   }
 
   function missionFrame(now) {
@@ -809,7 +847,7 @@ export async function initMission(step) {
     if (document.body.dataset.tab !== 'mission') return;
     followShip();
     mControls.update();
-    keepCameraOutside(realDt);
+    collideCamera(realDt);
     mRenderer.render(mScene, mCam);
     updateHUD(now);
   }
