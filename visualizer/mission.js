@@ -765,24 +765,26 @@ export async function initMission(step) {
   // ---------- Main loop ----------
   let lastFrame = performance.now();
   // Solid bodies the camera can't pass through: Earth and the Moon (spheres), the rocket stack and the launch tower
-  // (capsules: a line segment with a radius). Each has a thin soft zone above its surface.
-  //  - If a frame's orbit/zoom input pushes the camera deeper into a zone, that movement is rejected, so the camera
-  //    stops where it touched instead of sliding along the surface, and on first contact it gets a small outward kick.
-  //  - A slightly underdamped spring then eases it back to the edge of the zone; a hard limit just above each surface
-  //    means it can never end up inside. Zones are thinner than the pad / landing heights, so low chase views still work.
+  // (capsules: a line segment with a radius), each with a small clearance above its surface.
+  //  - Dead stop: if a frame's orbit/zoom input would take the camera inside a clearance zone, the part of the move
+  //    heading inward is dropped, so the camera holds still where it touched (no sliding, no bounce) however long you
+  //    keep dragging. Orbiting around the target at the same height, or zooming out, still goes through.
+  //  - If it ends up inside anyway (the rocket moving into it, a window resize), it's placed straight back on the edge.
+  // Clearances are smaller than the pad / landing heights, so the low chase views still work.
   const padUp = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0);
   const padQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), padUp);
   const towerA = padUp.clone().multiplyScalar(RE).add(new THREE.Vector3(0.14, 0, 0).applyQuaternion(padQ));
   const towerB = towerA.clone().addScaledVector(padUp, 1.05);
   const rocketA = new THREE.Vector3(), rocketB = new THREE.Vector3();
   const BODIES = [
-    { c: new THREE.Vector3(), R: RE, soft: 0.3, gap: 0.03 },          // Earth
-    { c: moon.position, R: RM, soft: 0.12, gap: 0.03 },              // Moon
-    { a: rocketA, b: rocketB, R: RR, soft: 0.06, gap: 0.02 },         // rocket stack
-    { a: towerA, b: towerB, R: 0.035, soft: 0.06, gap: 0.02 },        // launch tower
-  ].map(b => Object.assign(b, { v: 0, depth: -1, touching: false, n: new THREE.Vector3(), p: new THREE.Vector3() }));
-  const _seg = new THREE.Vector3(), _rel = new THREE.Vector3();
-  // How far the camera is inside a body's soft zone (> 0 = inside); also leaves the outward normal in b.n
+    { c: new THREE.Vector3(), R: RE, clear: 0.2 },           // Earth
+    { c: moon.position, R: RM, clear: 0.1 },                 // Moon
+    { a: rocketA, b: rocketB, R: RR, clear: 0.06 },          // rocket stack
+    { a: towerA, b: towerB, R: 0.035, clear: 0.06 },         // launch tower
+  ].map(b => Object.assign(b, { n: new THREE.Vector3(), p: new THREE.Vector3() }));
+  const _seg = new THREE.Vector3(), _rel = new THREE.Vector3(), _cand = new THREE.Vector3();
+  const _sNew = new THREE.Spherical(), _sOld = new THREE.Spherical(), _sTry = new THREE.Spherical();
+  // How far the camera is inside a body's clearance zone (> 0 = inside); also leaves the outward normal in b.n
   function depthIn(b, pos) {
     if (b.c) b.p.copy(b.c);
     else {
@@ -793,34 +795,31 @@ export async function initMission(step) {
     b.n.subVectors(pos, b.p);
     const d = b.n.length();
     b.n.divideScalar(d || 1);
-    return b.R + b.soft - d;
+    return b.R + b.clear - d;
   }
-  function collideCamera(dt) {
+  function collideCamera() {
     // Rocket body: the whole stack until stage separation, then just the upper stage
     ship.updateMatrixWorld();
     rocketA.set(0, boost.free ? -0.24 : -0.76, 0).applyMatrix4(ship.matrixWorld);
     rocketB.set(0, 0.2, 0).applyMatrix4(ship.matrixWorld);
 
-    const deeper = BODIES.filter(b => { const d = depthIn(b, mCam.position); return d > 0 && d > b.depth + 1e-4; });
-    if (deeper.length && camGuard.offset) {
-      mCam.position.copy(mControls.target).add(camGuard.offset);      // reject this frame's move: stop, don't slide
-      for (const b of deeper) if (!b.touching) b.v = 0.5;              // first contact: small bounce outward
+    // Dead stop: if this frame's move would put the camera inside a body, keep only the parts of it that don't —
+    // tried in order: around + zoom, around only, zoom only, nothing (all relative to the orbit target)
+    const blocked = pos => BODIES.some(b => depthIn(b, pos) > 0);
+    if (camGuard.offset && blocked(mCam.position)) {
+      _sNew.setFromVector3(_rel.subVectors(mCam.position, mControls.target));
+      _sOld.setFromVector3(camGuard.offset);
+      const tries = [[_sNew.theta, _sNew.radius], [_sNew.theta, _sOld.radius], [_sOld.theta, _sNew.radius], [_sOld.theta, _sOld.radius]];
+      for (const [theta, radius] of tries) {
+        _sTry.set(radius, _sOld.phi, theta);
+        _cand.setFromSpherical(_sTry).add(mControls.target);
+        if (!blocked(_cand) || (theta === _sOld.theta && radius === _sOld.radius)) { mCam.position.copy(_cand); break; }
+      }
     }
+    // Still inside (moved there by the scene, not by input)? Put it straight back on the edge
     for (const b of BODIES) {
       const depth = depthIn(b, mCam.position);
-      b.touching = depth > 0;
-      if (depth <= 0 && b.v <= 0) { b.v = 0; b.depth = depth; continue; }
-      // spring on outward displacement s (0 = zone edge): k=120, c=14 (ζ≈0.64), sub-stepped for any frame rate
-      let s = -depth;
-      const sMin = -(b.soft - b.gap), n = Math.ceil(dt / (1 / 240));
-      for (let i = 0; i < n; i++) {
-        const h = dt / n;
-        b.v += (-120 * s - 14 * b.v) * h;
-        s = Math.max(sMin, s + b.v * h);
-        if (s <= sMin && b.v < 0) b.v = 0;
-      }
-      mCam.position.addScaledVector(b.n, s + depth);
-      b.depth = -s;
+      if (depth > 0) mCam.position.addScaledVector(b.n, depth);
     }
     (camGuard.offset ??= new THREE.Vector3()).subVectors(mCam.position, mControls.target);
   }
@@ -847,7 +846,7 @@ export async function initMission(step) {
     if (document.body.dataset.tab !== 'mission') return;
     followShip();
     mControls.update();
-    collideCamera(realDt);
+    collideCamera();
     mRenderer.render(mScene, mCam);
     updateHUD(now);
   }
