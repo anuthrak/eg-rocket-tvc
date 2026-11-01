@@ -128,7 +128,7 @@
   </aside>
   <aside class="side-r">
     <div class="panel">
-      <h2>Gimbal<span>Servo command</span></h2>
+      <h2 class="h2-act">Gimbal<button id="calBtn" class="h2btn serial-only" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
@@ -168,6 +168,98 @@
       can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
     </div>
   </aside>
+
+  <!-- Gimbal calibration: floats over the 3D view so nothing else moves. Drives the firmware's CAL/SET/SAVE commands (calib.js). -->
+  <section id="calPanel" class="cal" hidden aria-label="Gimbal calibration">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Gimbal calibration<span id="calState">—</span></h2>
+        <button id="calClose" class="cal-x" title="Close (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <p id="calMsg" class="cal-msg" hidden></p>
+      <div id="calStepsWrap">
+        <nav class="cal-steps" id="calSteps">
+          <button data-step="0">1 Centre</button><button data-step="1">2 Level</button><button data-step="2">3 Sensor</button><button data-step="3">4 Direction</button><button data-step="4">5 Save</button>
+        </nav>
+      </div>
+
+      <div class="cal-body" id="calBody">
+        <!-- 1: servo centres -->
+        <div class="cal-step" data-step="0">
+          <p class="cal-p">Nudge each servo until the motor mount is dead straight. More than about 10° off? Pop the horn off and refit it one spline over first.</p>
+          <div class="cal-row x"><span class="cal-name">X servo<small id="cxPin">D9</small></span>
+            <button data-nudge="XC,-5">−5</button><button data-nudge="XC,-1">−1</button><b id="cxVal">—</b><button data-nudge="XC,1">+1</button><button data-nudge="XC,5">+5</button></div>
+          <div class="cal-row y"><span class="cal-name">Y servo<small id="cyPin">D10</small></span>
+            <button data-nudge="YC,-5">−5</button><button data-nudge="YC,-1">−1</button><b id="cyVal">—</b><button data-nudge="YC,1">+1</button><button data-nudge="YC,5">+5</button></div>
+          <div class="cal-acts"><button id="calCenter90">Reset both to 90°</button></div>
+        </div>
+
+        <!-- 2: level trim -->
+        <div class="cal-step" data-step="1" hidden>
+          <p class="cal-p">Stand the rocket upright and hold it still, then press Set level. The sensor is never mounted perfectly straight; this makes upright read 0°.</p>
+          <dl class="kv cal-kv">
+            <dt></dt><dd class="cal-colh">X</dd><dd class="cal-colh">Y</dd>
+            <dt>Sensor reads</dt><dd id="clRawX">—</dd><dd id="clRawY">—</dd>
+            <dt>Level trim</dt><dd id="clTrimX">—</dd><dd id="clTrimY">—</dd>
+            <dt>Tilt after trim</dt><dd id="clNowX">—</dd><dd id="clNowY">—</dd>
+          </dl>
+          <div class="cal-acts"><button id="calLevel" class="primary">Set level</button></div>
+        </div>
+
+        <!-- 3: sensor axes -->
+        <div class="cal-step" data-step="2" hidden>
+          <p class="cal-p">Checks the MPU6050 is mounted the way the controller expects. Follow the prompt, using the X and Y arrows printed on the sensor board.</p>
+          <div class="cal-prompt" id="csPrompt">Tilt the top toward +X</div>
+          <div class="cal-meter x"><span>X</span><div class="cal-bar"><i id="csBarX"></i></div><b id="csValX">—</b><span id="csResX" class="cal-res">Not checked</span></div>
+          <div class="cal-meter y"><span>Y</span><div class="cal-bar"><i id="csBarY"></i></div><b id="csValY">—</b><span id="csResY" class="cal-res">Not checked</span></div>
+          <p class="cal-p cal-warn" id="csHelp"></p>
+          <div class="cal-acts"><button id="calSensorRestart">Start over</button></div>
+        </div>
+
+        <!-- 4: servo direction (and pin mix-ups) -->
+        <div class="cal-step" data-step="3" hidden>
+          <p class="cal-p">Test moves one servo the way the controller would if the rocket leaned toward +X (or +Y). The top of the motor should tilt toward that side, so its thrust pushes the base back under the rocket.</p>
+          <div class="cal-dir x">
+            <div class="cal-dir-h"><span class="cal-name">X servo<small id="cdPinX">D9</small><small id="cdDirX">Normal</small></span>
+              <span id="cdStX" class="cal-res">Not tested</span><button id="calTestX">Test</button></div>
+            <div class="cal-ans" id="calAnsX" hidden><button id="calOkX">Motor tilted to +X</button><button id="calFlipX">Tilted to −X</button><button id="calSwapX">Y servo moved</button></div>
+            <p class="cal-note" id="cdNoteX"></p>
+          </div>
+          <div class="cal-dir y">
+            <div class="cal-dir-h"><span class="cal-name">Y servo<small id="cdPinY">D10</small><small id="cdDirY">Normal</small></span>
+              <span id="cdStY" class="cal-res">Not tested</span><button id="calTestY">Test</button></div>
+            <div class="cal-ans" id="calAnsY" hidden><button id="calOkY">Motor tilted to +Y</button><button id="calFlipY">Tilted to −Y</button><button id="calSwapY">X servo moved</button></div>
+            <p class="cal-note" id="cdNoteY"></p>
+          </div>
+        </div>
+
+        <!-- 5: review + save -->
+        <div class="cal-step" data-step="4" hidden>
+          <dl class="kv cal-kv">
+            <dt></dt><dd class="cal-colh">X</dd><dd class="cal-colh">Y</dd>
+            <dt>Servo centre</dt><dd id="svXc">—</dd><dd id="svYc">—</dd>
+            <dt>Direction</dt><dd id="svXd">—</dd><dd id="svYd">—</dd>
+            <dt>Level trim</dt><dd id="svTx">—</dd><dd id="svTy">—</dd>
+          </dl>
+          <div class="cal-line"><span>Pins</span><b id="svPins">—</b></div>
+          <label class="cal-line"><span>Linkage ratio<small>servo ° per gimbal °</small></span>
+            <input id="calSpg" type="number" min="0.2" max="5" step="0.1" value="1"></label>
+          <p class="cal-p" id="svChecks"></p>
+          <div class="cal-acts">
+            <button id="calSave" class="primary">Save to Arduino</button><button id="calRevert">Undo changes</button><button id="calDefaults">Defaults</button>
+          </div>
+          <p class="cal-p">Saved to the Nano's EEPROM, so it survives power-off and firmware uploads.</p>
+        </div>
+      </div>
+
+      <div class="cal-foot" id="calFoot"><button id="calBack">Back</button><button id="calNext" class="primary">Next</button></div>
+      <div class="cal-confirm" id="calConfirm" hidden>
+        <span>Unsaved changes. They stay on the Nano until it restarts.</span>
+        <span class="cal-acts"><button id="calSaveExit" class="primary">Save &amp; close</button><button id="calDiscardExit">Discard</button><button id="calKeep">Keep editing</button></span>
+      </div>
+    </div>
+  </section>
 </main>
 
 <!-- ======================= MISSION TAB ======================= -->
