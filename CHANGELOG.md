@@ -2,7 +2,7 @@
 
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
-## [Unreleased]
+## [2.4.0] – 2026-11-02
 ### Added
 - Bench: gimbal calibration (Gimbal → Calibrate). A five-step panel over the 3D view: centre each servo, set level, check the sensor's axes, test each servo's direction (flips it or swaps the D9/D10 roles from your answer), then save to the Nano. The rig and gimbal dial follow the servos while it's open. Sent commands show in the serial log.
 - Firmware v1.2.0: serial commands (`CAL`, `RUN`, `GET`, `SET`, `LEVEL`, `PULSE`, `SAVE`, `LOAD`, `DEFAULTS`) and an EEPROM-stored config, so calibrating needs no re-upload. Prints `CFG,…` at boot. Replaces the Serial Monitor `CAL_MODE` helper from v1.1.0.
