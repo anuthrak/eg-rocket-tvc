@@ -124,6 +124,78 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font: 1
 .sat { position: relative; height: 4px; margin: 6px 0 2px; border-radius: 2px; overflow: hidden;
   background: linear-gradient(90deg, var(--pitch), var(--roll) 45%, var(--amber) 75%, var(--warn)); }
 .sat i { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--panel-2); }
+.log .tx { color: var(--dim); }            /* commands sent to the Nano */
+
+/* ---------- Gimbal calibration (floats over the 3D view; nothing around it moves) ---------- */
+/* Panel-header action button: negative margins keep the h2 exactly as tall as the others */
+h2.h2-act { align-items: center; }
+h2 .h2btn { margin: -5px 0; padding: 3px 8px; font-size: 10px; line-height: 12px; letter-spacing: .14em; }
+h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); }
+.cal { grid-area: view; position: relative; z-index: 5; min-width: 0; min-height: 0; padding: 12px;
+  display: flex; justify-content: center; align-items: flex-start; overflow: hidden; pointer-events: none; }
+.cal[hidden] { display: none; }
+.cal-card { pointer-events: auto; width: min(460px, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 10px;
+  background: rgba(11,11,13,.94); border: 1px solid var(--line-2); border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); }
+.cal-head { display: flex; align-items: center; gap: 8px; }
+.cal-head h2 { flex: 1; margin: 0; }
+#calState.warn { color: var(--amber); }
+.cal-x { padding: 4px; line-height: 0; }
+.cal-x .ic { display: block; width: 14px; height: 14px; }
+.cal-msg { margin: 0; padding: 14px 4px; color: var(--muted); font-size: 13px; }
+.cal-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; padding: 2px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 7px; }
+.cal-steps button { border: 0; background: transparent; padding: 5px 2px; border-radius: 5px; color: var(--muted);
+  font-size: 11px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-steps button.done { color: var(--ok); }
+.cal-steps button.active { background: var(--text); color: #000; }
+.cal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.cal-step { display: flex; flex-direction: column; gap: 10px; }
+.cal-step[hidden] { display: none; }
+.cal-p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.cal-p:empty { display: none; }
+.cal-warn { color: var(--warn); }
+.cal-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.cal-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 600 13px var(--cond); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.cal-name small { font: 500 10px var(--label); letter-spacing: .12em; color: var(--dim); }
+.x .cal-name { color: var(--pitch); } .y .cal-name { color: var(--yaw); }
+/* Centre step: name · −5 −1 value +1 +5 */
+.cal-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, 38px) 54px repeat(2, 38px); gap: 4px; align-items: center;
+  padding: 6px 0; border-top: 1px solid var(--line); }
+.cal-row button { padding: 6px 0; letter-spacing: .04em; }
+.cal-row b { text-align: center; font: 500 20px var(--cond); font-variant-numeric: tabular-nums; }
+/* Level + summary tables: label · X · Y */
+.cal-kv { grid-template-columns: minmax(0, 1fr) 72px 72px; }
+.cal-kv .cal-colh { font: 600 10px/1.7 var(--label); letter-spacing: .16em; color: var(--muted); }
+/* Sensor step */
+.cal-prompt { font: 600 17px var(--cond); letter-spacing: .12em; text-transform: uppercase; }
+.cal-meter { display: grid; grid-template-columns: 14px minmax(0, 1fr) 54px 118px; gap: 8px; align-items: center;
+  font: 600 12px var(--cond); }
+.cal-meter.x > span:first-child { color: var(--pitch); } .cal-meter.y > span:first-child { color: var(--yaw); }
+.cal-meter b { text-align: right; font: 500 14px var(--cond); font-variant-numeric: tabular-nums; }
+.cal-bar { position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; }
+.cal-bar::after { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
+.cal-bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: 4px; }
+.cal-meter.x .cal-bar i { background: var(--pitch); } .cal-meter.y .cal-bar i { background: var(--yaw); }
+.cal-res { font: 600 11px var(--label); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+.cal-res.ok { color: var(--ok); } .cal-res.bad { color: var(--warn); }
+/* Direction step */
+.cal-dir { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.cal-dir-h { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.cal-ans { display: flex; flex-wrap: wrap; gap: 6px; }
+.cal-ans[hidden] { display: none; }
+.cal-ans button { padding: 5px 9px; font-size: 11px; letter-spacing: .08em; }
+.cal-note { margin: 0; color: var(--amber); font-size: 12px; }
+.cal-note:empty { display: none; }
+/* Save step */
+.cal-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line);
+  font: 500 10px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.cal-line small { display: block; color: var(--dim); letter-spacing: .08em; }
+.cal-line b { font: 500 14px var(--cond); color: var(--text); letter-spacing: .04em; text-transform: none; }
+.cal-line input { width: 72px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 4px 6px; font: 500 14px var(--cond); text-align: right; }
+.cal-foot { display: flex; justify-content: space-between; gap: 6px; }
+.cal-foot[hidden], .cal-confirm[hidden], #calStepsWrap[hidden], .cal-body[hidden] { display: none; }
+.cal-confirm { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--amber); }
 
 /* ---------- Footer ---------- */
 footer { grid-row: 3; display: flex; flex-wrap: wrap; gap: 2px 22px; align-items: center; padding: 6px 16px;

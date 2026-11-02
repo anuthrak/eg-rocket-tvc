@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
+import { initCalib } from './calib.js';
 
 const $ = id => document.getElementById(id);
 
@@ -182,10 +183,22 @@ export function initBench() {
     lineCount++;
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
+    // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
+    if (/^(CAL|CFG|ERR),/.test(line)) {
+      const cal = line.match(/^CAL,(-?\d+),(-?\d+),/);
+      logLine(line, cal ? undefined : 'msg');
+      calib.handle(line);
+      // Show the held servo positions on the rig and gimbal dial while calibrating
+      if (cal) applySample(target.roll + zero.roll, servoMode.checked ? +cal[1] : cal[1] - 90, servoMode.checked ? +cal[2] : cal[2] - 90);
+      return;
+    }
     const parts = line.split(',').map(s => parseFloat(s));
     if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; logLine(line, 'msg'); return; } // boot messages etc.
     logLine(line);
-    let [roll, pitch, yaw] = parts;
+    applySample(...parts.slice(0, 3));
+  }
+
+  function applySample(roll, pitch, yaw) {
     raw.pitch = pitch; raw.yaw = yaw;
     if (servoMode.checked) { pitch -= 90; yaw -= 90; }
     target.roll = roll - zero.roll;
@@ -230,8 +243,22 @@ export function initBench() {
     $('serialLog').textContent = '';
     linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
+    calib.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; calib.onLink(); }
+
+  // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
+  const enc = new TextEncoder();
+  let writeChain = Promise.resolve();
+  function send(cmd) {
+    if (!port?.writable) return;
+    logLine('› ' + cmd, 'tx');
+    writeChain = writeChain.then(async () => {
+      const w = port.writable.getWriter();
+      try { await w.write(enc.encode(cmd + '\n')); } finally { w.releaseLock(); }
+    }).catch(e => logLine('Send failed: ' + e.message, 'msg'));
+  }
+  const calib = initCalib({ send, link: () => ({ port: !!port, demo: !!demoTimer, fw: fwVersion }) });
   const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
 
   async function connect() {

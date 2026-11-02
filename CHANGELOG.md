@@ -2,6 +2,14 @@
 
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
+## [2.4.0] – 2026-11-02
+### Added
+- Bench: gimbal calibration (Gimbal → Calibrate). A five-step panel over the 3D view: centre each servo, set level, check the sensor's axes, test each servo's direction (flips it or swaps the D9/D10 roles from your answer), then save to the Nano. The rig and gimbal dial follow the servos while it's open. Sent commands show in the serial log.
+- Firmware v1.2.0: serial commands (`CAL`, `RUN`, `GET`, `SET`, `LEVEL`, `PULSE`, `SAVE`, `LOAD`, `DEFAULTS`) and an EEPROM-stored config, so calibrating needs no re-upload. Prints `CFG,…` at boot. Replaces the Serial Monitor `CAL_MODE` helper from v1.1.0.
+- Per-servo centre trim and a `SERVO_RANGE` limit around it.
+### Changed
+- Firmware names the servos by axis: D9 = X-axis servo (visualizer "pitch"), D10 = Y-axis servo (visualizer "yaw"). Same pins and behaviour as before, and the telemetry format is unchanged (servo angles still read 90 = neutral after trimming).
+
 ## [2.3.0] – 2026-10-26
 ### Added
 - Intro transition after the loading screen. Mission: the camera flies in from a wide shot of Earth to the chase view (~1.8 s, controls paused until it lands) while the HUD boots in, with panels fading and rising one after another, the event list cascading and timeline markers lighting up left to right. Bench: HUD boot only. Same-tab reloads skip the fly-in and get a quick HUD fade; "reduce motion" keeps a plain fade.

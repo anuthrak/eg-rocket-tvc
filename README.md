@@ -43,7 +43,21 @@ CHANGELOG.md                     what changed in each version
 
 Open `firmware/nano_tvc/nano_tvc.ino` in the Arduino IDE (board: Arduino Nano; libraries: Adafruit MPU6050, Servo). It runs the same PD gimbal controller as the Mission sim and prints `TVC firmware vX.Y.Z` at boot, which the visualizer shows in its LINK panel.
 
-**Serial format:** `roll,pitch,yaw` (roll in degrees; pitch and yaw as servo angles, 90 = neutral)
+**Wiring:** D9 = X-axis servo (corrects lean toward ±X on the MPU6050), D10 = Y-axis servo (±Y). MPU6050 mounted with Z pointing up the rocket.
+
+**Serial format:** `roll,pitch,yaw` (roll in degrees; pitch = X servo, yaw = Y servo, as servo angles, 90 = neutral)
+
+### Calibration
+
+In the visualizer: **Bench → Connect Arduino → Gimbal → Calibrate** (firmware v1.2.0+). Five steps, applied live on the Nano:
+
+1. **Centre:** nudge each servo until the motor mount is dead straight (refit the horn one spline over if it's way off).
+2. **Level:** rocket upright and still → Set level. Trims out the sensor's mounting angle.
+3. **Sensor:** tilt the top toward +X, then +Y (arrows on the MPU6050). Catches a sensor mounted flipped or rotated.
+4. **Direction:** Test moves a servo the way the controller would for a lean toward +X/+Y; the top of the motor should tilt toward that side. Answer what you saw and it flips the direction or swaps the D9/D10 roles for you.
+5. **Save:** writes everything to the Nano's EEPROM (survives power-off and re-uploads). The `DEFAULTS` block in the sketch is only used until something is saved.
+
+Without the visualizer, type the same commands into the Serial Monitor (115200, newline): `CAL`, `SET XC 92`, `LEVEL`, `PULSE X`, `SAVE`, `RUN`… The full list is at the top of the sketch.
 
 ## Visualizer
 
