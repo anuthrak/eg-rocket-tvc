@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+
+## [2.5.0] – 2026-11-02
 ### Added
 - The whole project is now one repository: CAD models and drawing generators (`cad/`), the batch 001 drawing release with print STLs and STEP files (`releases/`), and the project summary, bill of materials and drawing standard (`docs/`) sit next to the firmware and visualizer. Paths of the existing files are unchanged.
 - Firmware v1.3.0: the MPU6050 can be mounted in any orientation. Level detects which sensor axis points up the rocket and the sensor check turns its X/Y to match (`SET UP`, `SET ROT`; `CFG` gains `up,rot` at the end).
