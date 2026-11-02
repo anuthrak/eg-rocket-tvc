@@ -197,7 +197,8 @@
 
         <!-- 2: level trim -->
         <div class="cal-step" data-step="1" hidden>
-          <p class="cal-p">Stand the rocket upright and hold it still, then press Set level. The sensor is never mounted perfectly straight; this makes upright read 0°.</p>
+          <p class="cal-p">Stand the rocket upright and hold it still, then press Set level. It finds which way the sensor faces (any mounting works) and trims it so upright reads 0°.</p>
+          <div class="cal-line"><span>Sensor axis up the rocket</span><b id="clUp">—</b></div>
           <dl class="kv cal-kv">
             <dt></dt><dd class="cal-colh">X</dd><dd class="cal-colh">Y</dd>
             <dt>Sensor reads</dt><dd id="clRawX">—</dd><dd id="clRawY">—</dd>
@@ -209,7 +210,7 @@
 
         <!-- 3: sensor axes -->
         <div class="cal-step" data-step="2" hidden>
-          <p class="cal-p">Checks the MPU6050 is mounted the way the controller expects. Follow the prompt, using the X and Y arrows printed on the sensor board.</p>
+          <p class="cal-p">Lines the sensor up with the rocket. +X is toward the two M3 screws that hold the TVC mount (body 0°), +Y is a quarter turn from there. Do Level first. If the sensor is turned, it is corrected for you.</p>
           <div class="cal-prompt" id="csPrompt">Tilt the top toward +X</div>
           <div class="cal-meter x"><span>X</span><div class="cal-bar"><i id="csBarX"></i></div><b id="csValX">—</b><span id="csResX" class="cal-res">Not checked</span></div>
           <div class="cal-meter y"><span>Y</span><div class="cal-bar"><i id="csBarY"></i></div><b id="csValY">—</b><span id="csResY" class="cal-res">Not checked</span></div>
@@ -244,7 +245,15 @@
           </dl>
           <div class="cal-line"><span>Pins</span><b id="svPins">—</b></div>
           <label class="cal-line"><span>Linkage ratio<small>servo ° per gimbal °</small></span>
-            <input id="calSpg" type="number" min="0.2" max="5" step="0.1" value="1"></label>
+            <input id="calSpg" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <details class="cal-measure">
+            <summary>Measure it with a laser</summary>
+            <p class="cal-p">Tape a laser pointer along the motor tube, aim it at a wall, press Test, and measure how far the dot moves.</p>
+            <label class="cal-line"><span>Wall distance<small>cm</small></span><input id="cmDist" type="number" min="10" step="1" value="100"></label>
+            <label class="cal-line"><span>Dot moved<small>cm, X servo 20°</small></span><input id="cmMove" type="number" min="0" step="0.1" placeholder="—"></label>
+            <div class="cal-line"><span>Ratio</span><b id="cmRatio">—</b></div>
+            <div class="cal-acts"><button id="cmTest">Test X 20°</button><button id="cmUse" disabled>Use this ratio</button></div>
+          </details>
           <p class="cal-p" id="svChecks"></p>
           <div class="cal-acts">
             <button id="calSave" class="primary">Save to Arduino</button><button id="calRevert">Undo changes</button><button id="calDefaults">Defaults</button>
