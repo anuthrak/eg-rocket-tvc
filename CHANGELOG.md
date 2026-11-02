@@ -2,6 +2,18 @@
 
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
+## [Unreleased]
+### Added
+- The whole project is now one repository: CAD models and drawing generators (`cad/`), the batch 001 drawing release with print STLs and STEP files (`releases/`), and the project summary, bill of materials and drawing standard (`docs/`) sit next to the firmware and visualizer. Paths of the existing files are unchanged.
+- Firmware v1.3.0: the MPU6050 can be mounted in any orientation. Level detects which sensor axis points up the rocket and the sensor check turns its X/Y to match (`SET UP`, `SET ROT`; `CFG` gains `up,rot` at the end).
+- Firmware v1.3.0: tilt abort. Beyond 25° the gimbal centres at once and `ABORT,TILT` is printed; it re-arms after 1 s back within 5° (`ABORT,CLEAR`) or on `RUN`. The serial log shows these lines.
+- Calibrate → Save: a laser helper that measures the linkage ratio from a 20° servo pulse.
+### Changed
+- Firmware v1.3.0: PID with the starting gains from the project summary (Kp 2.5, Kd 0.55, Ki 0.3 clamped to ±2° of gimbal, scaled by thrust) instead of the sim's PD gains; servo pulses via `writeMicroseconds` with fractional degrees; linkage ratio default 4.0 (range 0.2–8). Saved configs from v1.2.0 fall back to defaults once (the EEPROM layout changed), so calibrate again after uploading.
+- Axes are named the same way everywhere: +X is toward the two M3 TVC mount screws (body 0°); the X servo tilts the nozzle toward ±X and drives the drawings' pivot axis Y.
+- Calibration's sensor step corrects a turned sensor instead of asking for a remount (firmware v1.3.0; older firmware keeps the old advice).
+- README covers the whole project (EDF, sled, drawings, axes) instead of the original A2212 plan.
+
 ## [2.4.0] – 2026-11-02
 ### Added
 - Bench: gimbal calibration (Gimbal → Calibrate). A five-step panel over the 3D view: centre each servo, set level, check the sensor's axes, test each servo's direction (flips it or swaps the D9/D10 roles from your answer), then save to the Nano. The rig and gimbal dial follow the servos while it's open. Sent commands show in the serial log.

@@ -1,0 +1,4 @@
+K-9 Rocket Thrust Vector Control Gimbal V8 by CanineRocketTechnologies on Thingiverse: https://www.thingiverse.com/thing:3657663
+
+Summary:
+Our legacy hardware is now in the PUBLIC DOMAIN!Thank you to all your support and feedback! I have attached the Version 8 hardware and full CAD filesThis whole project was inspired and based on Joe Barnard's design: https://bps.space/signalThanks to Rafa for help, encouragement, and inspiration! https://www.thingiverse.com/thing:3343523My video:https://www.youtube.com/watch?v=gU74BF0-DcADisclaimer: ROCKETRY IS DANGEROUS, USE ANY ROCKETRY COMPONENTS, 3D PRINTS, AND FILES BY Canine Rocket Technologies AT YOUR OWN RISK!

@@ -1,0 +1,5 @@
+# CAD exchange files: keep byte-for-byte (no line-ending conversion)
+*.step -text
+*.stp -text
+*.stl binary
+*.3mf binary

@@ -3,3 +3,21 @@
 
 # /brag launch video output
 brag-output/
+
+# Local only: course submissions, old iterations, team admin (not part of the public record)
+/submissions/
+/archive/
+/admin/
+/flight_software/
+
+# CAD: files the scripts regenerate in their own folders (released copies live in releases/)
+/cad/*/*.stl
+/cad/*/*.step
+/cad/*/*.pdf
+/cad/*/*.png
+/cad/*/*.svg
+!/cad/vendor/**
+
+# Python
+__pycache__/
+*.pyc
