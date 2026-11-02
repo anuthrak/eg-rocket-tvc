@@ -184,7 +184,7 @@ export function initBench() {
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
-    if (/^(CAL|CFG|ERR),/.test(line)) {
+    if (/^(CAL|CFG|ERR|ABORT),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort
       const cal = line.match(/^CAL,(-?\d+),(-?\d+),/);
       logLine(line, cal ? undefined : 'msg');
       calib.handle(line);
