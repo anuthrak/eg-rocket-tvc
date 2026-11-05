@@ -12,7 +12,7 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
-- [x] Firmware v1.5.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
+- [x] Firmware v1.6.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
 - [x] Web visualizer: live Bench view, calibration, Mission sim
 - [ ] Joint test, body and sled printed and assembled
 - [ ] EDF + ESC (on order), thrust test, throttle control in firmware
@@ -64,7 +64,7 @@ Open `firmware/nano_tvc/nano_tvc.ino` in the Arduino IDE (board: Arduino Nano; l
 - The MPU6050 can be mounted any way round (on the sled it stands on the vertical breadboard); calibration maps it to the rocket's axes.
 - Throttle output arrives with the ESC; until then the controller runs as if at full throttle.
 
-**Serial format:** `roll,pitch,yaw` (roll in degrees; pitch = X servo, yaw = Y servo, as servo angles, 90 = neutral)
+**Serial format:** `roll,pitch,yaw,tiltX,tiltY` (roll in degrees; pitch = X servo, yaw = Y servo, as servo angles, 90 = neutral; tiltX/tiltY = the rocket's lean toward +X/+Y in degrees, firmware v1.6.0+)
 
 ### Calibration
 

@@ -48,7 +48,7 @@
 // the serial link goes quiet, and the motor stays off after an abort until RUN.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.5.0";
+const char FW_VERSION[] = "1.6.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -464,7 +464,7 @@ void loop() {
   xServo.writeMicroseconds(servoUs(xDeg));
   yServo.writeMicroseconds(servoUs(yDeg));
 
-  // Send comma-separated values for the visualizer: roll,pitch(X),yaw(Y)
+  // Send comma-separated values for the visualizer: roll,pitch(X),yaw(Y),tiltX,tiltY
   // Servo angles are sent relative to 90 so the visualizer's "90 = upright" still holds after trimming.
   if (millis() - lastTelemetry >= TELEMETRY_MS) {
     lastTelemetry = millis();
@@ -473,7 +473,11 @@ void loop() {
     if (TELEMETRY_SERVO) {
       Serial.print(90 + (int)round(xDeg - cfg.xCenter));
       Serial.print(",");
-      Serial.println(90 + (int)round(yDeg - cfg.yCenter));
+      Serial.print(90 + (int)round(yDeg - cfg.yCenter));
+      Serial.print(",");
+      Serial.print(tiltX * RAD_TO_DEG, 1);
+      Serial.print(",");
+      Serial.println(tiltY * RAD_TO_DEG, 1);
     } else {
       Serial.print(tiltX * RAD_TO_DEG, 1);
       Serial.print(",");

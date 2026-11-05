@@ -90,7 +90,7 @@ Known drawing note: TVC-001 lists Ø1 music-wire pushrods; the team uses the 1.2
 - ±8° looks small (tube end moves ~8 mm) — that is normal.
 
 ## 8. Firmware and control
-Current firmware **v1.5.0** (`firmware/nano_tvc`):
+Current firmware **v1.6.0** (`firmware/nano_tvc`):
 - 100 Hz loop, complementary filter (α 0.98), MPU DLPF 44 Hz, gyro ±500 °/s, D-term from the gyro rate.
 - PID per axis with the starting gains below, gimbal clamped to ±8° and slew-limited, servo pulses via
   `writeMicroseconds` (fractional degrees), linkage ratio and trims from EEPROM.

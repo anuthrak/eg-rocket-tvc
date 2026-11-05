@@ -154,7 +154,7 @@
         <dt>Port</dt><dd id="lkPort">—</dd><dd class="u"></dd>
         <dt>Firmware</dt><dd id="lkFw">—</dd><dd class="u"></dd>
         <dt class="lk-extra">Baud</dt><dd class="lk-extra" id="lkBaud">115200</dd><dd class="u lk-extra">bit/s</dd>
-        <dt class="lk-extra">Format</dt><dd class="lk-extra">roll,pitch,yaw</dd><dd class="u lk-extra">csv</dd>
+        <dt class="lk-extra">Format</dt><dd class="lk-extra">roll,p,y,tx,ty</dd><dd class="u lk-extra">csv</dd>
         <dt>Lines received</dt><dd id="lkLines">—</dd><dd class="u"></dd>
         <dt>Unparsed lines</dt><dd id="lkErr">—</dd><dd class="u"></dd>
         <dt>Since last line</dt><dd id="lkAge">—</dd><dd class="u" id="lkAgeU">ms</dd>
@@ -165,7 +165,7 @@
 
     <div class="hint panel">
       Needs <b>Chrome or Edge</b> on desktop. Close the Arduino Serial Monitor first, since only one program
-      can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
+      can hold the port. Expected format: <code>roll,pitch,yaw,tiltX,tiltY\n</code>
     </div>
   </aside>
 

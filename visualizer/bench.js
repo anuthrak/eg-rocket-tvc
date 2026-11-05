@@ -41,7 +41,7 @@ export function initBench() {
     if (_tClamp.lengthSq()) { controls.target.add(_tClamp); camera.position.add(_tClamp); }
   }
   function resetView() {
-    controls.target.set(0, PIVOT_Y, 0);
+    controls.target.set(0, PIVOT_Y + 0.25, 0);   // middle of the rocket: more of it is above the CG
     camera.position.copy(controls.target).addScaledVector(VIEW_DIR, fitDistance());
     controls.update();
   }
@@ -56,61 +56,83 @@ export function initBench() {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.35 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
 
-  // Rocket dimensions; the gimbal pivot is at the middle of the full length (≈ center of mass)
-  const R = 0.2, BODY = 1.6, NOSE = 0.5, TAIL = 0.15;
-  const MID = (TAIL + BODY + NOSE) / 2;
-  const PIVOT_Y = 1.45; // pivot height above the floor (high enough to clear it at ±45°)
+  // Rocket built from the CAD numbers (SLDP-ST-005, in mm from the tail), scaled so 1 mm = MM scene units.
+  // Rough on purpose: no vents, window or screws.
+  const MM = 2.25 / 632;
+  const RO = 39.3, RI = 38.1;                  // body outer / bore radius
+  const CG = 240;                              // desk-rig pivot
+  const GIMBAL = 57;                           // TVC gimbal point
+  const TUBE_R = 18, TUBE_OUT = 18;            // motor tube; sticks out past the tail so it can be seen (flush in the CAD)
+  const Z_C1 = 200, Z_B = 203, Z_C2 = 357, Z_D = 375, Z_NOSE = 515, Z_CONE = 530, Z_TOP = 632;
+  const FIN_ROOT = 75, FIN_TIP = 32, FIN_SPAN = 30;
+  const PIVOT_Y = 1.45; // pivot height above the floor (the rocket clears it at any tilt)
 
   // Vertical reference line through the pivot
   const refGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, PIVOT_Y - MID - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + MID + 0.15, 0)]);
+    new THREE.Vector3(0, PIVOT_Y - (CG + TUBE_OUT) * MM - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + (Z_TOP - CG) * MM + 0.15, 0)]);
   const refLine = new THREE.Line(refGeo, new THREE.LineDashedMaterial({ color: 0x5a6070, dashSize: 0.08, gapSize: 0.06 }));
   refLine.computeLineDistances(); scene.add(refLine);
 
-  // Rocket group origin = pivot. All parts hang off "airframe", shifted down by MID so the middle sits on the pivot.
+  // Rocket group origin = rig pivot at the CG. All parts hang off "airframe", whose origin is the tail.
   const rocket = new THREE.Group();
   rocket.position.y = PIVOT_Y;
-  rocket.rotation.order = 'ZXY'; // roll about own long axis first, then pitch (X), then yaw (Z)
+  rocket.rotation.order = 'ZXY'; // roll about own long axis first, then tilt toward X, then toward Y
   scene.add(rocket);
   const airframe = new THREE.Group();
-  airframe.position.y = -MID;
+  airframe.position.y = -CG * MM;
   rocket.add(airframe);
 
-  // Gimbal collar + pivot pins at the center of mass (they move with the rocket)
+  // Rig collar + pivot pins at the CG (they move with the rocket)
   const metal = new THREE.MeshStandardMaterial({ color: 0x999fab, metalness: 0.7, roughness: 0.3 });
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(R + 0.03, 0.025, 12, 40), metal);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry((RO + 6) * MM, 4 * MM, 12, 40), metal);
   collar.rotation.x = Math.PI / 2; rocket.add(collar);
-  const pinGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.14, 12);
+  const pinGeo = new THREE.CylinderGeometry(5 * MM, 5 * MM, 24 * MM, 12);
   [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([x, z]) => {
     const pin = new THREE.Mesh(pinGeo, metal);
-    pin.position.set(x * (R + 0.1), 0, z * (R + 0.1));
+    pin.position.set(x * (RO + 18) * MM, 0, z * (RO + 18) * MM);
     pin.rotation.set(z ? Math.PI / 2 : 0, 0, x ? Math.PI / 2 : 0);
     rocket.add(pin);
   });
 
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdcdce6, roughness: 0.5 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.5 });
   const noseMat = new THREE.MeshStandardMaterial({ color: 0xc82828, roughness: 0.45 });
   const finMat  = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5, side: THREE.DoubleSide });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, BODY, 32), bodyMat);
-  body.position.y = TAIL + BODY / 2; body.castShadow = true; airframe.add(body);
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 });
+  const bay = new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.9 });
 
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(R, NOSE, 32), noseMat);
-  nose.position.y = TAIL + BODY + NOSE / 2; nose.castShadow = true; airframe.add(nose);
+  // Body parts A, B, D with the C1 and C2 coupler bands between them, then the nose band and cone
+  function section(z0, z1, mat) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(RO * MM, RO * MM, (z1 - z0) * MM, 40), mat);
+    m.position.y = (z0 + z1) / 2 * MM; m.castShadow = true; airframe.add(m);
+  }
+  section(0, Z_C1, bodyMat); section(Z_C1, Z_B, bandMat); section(Z_B, Z_C2, bodyMat);
+  section(Z_C2, Z_D, bandMat); section(Z_D, Z_NOSE, bodyMat); section(Z_NOSE, Z_CONE, noseMat);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(RO * MM, (Z_TOP - Z_CONE) * MM, 40), noseMat);
+  nose.position.y = (Z_CONE + Z_TOP) / 2 * MM; nose.castShadow = true; airframe.add(nose);
 
-  // Motor mount / nozzle under the body (sits in the gimbal)
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, TAIL, 24),
-    new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 }));
-  nozzle.position.y = TAIL / 2; nozzle.castShadow = true; airframe.add(nozzle);
+  // Open tail: the dark bore the motor tube swings in
+  const tailBore = new THREE.Mesh(new THREE.CircleGeometry(RI * MM, 40), bay);
+  tailBore.rotation.x = Math.PI / 2; tailBore.position.y = -0.001; airframe.add(tailBore);
 
-  // Fins: triangle in the radial plane, like the Processing sketch
+  // TVC mount: the motor tube pivots about the gimbal point, in the same rotation sense as the rocket's tilt
+  const tvc = new THREE.Group();
+  tvc.position.y = GIMBAL * MM;
+  tvc.rotation.order = 'ZXY';
+  airframe.add(tvc);
+  const tubeLen = GIMBAL + TUBE_OUT;
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(TUBE_R * MM, TUBE_R * MM, tubeLen * MM, 24), tubeMat);
+  tube.position.y = -tubeLen / 2 * MM; tube.castShadow = true; tvc.add(tube);
+
+  // Fins: root along the body at the tail, swept leading edge, clocked at 45/135/225/315° as in the CAD
   const finShape = new THREE.Shape();
-  finShape.moveTo(0, 0); finShape.lineTo(0.15, 0.2); finShape.lineTo(0, 0.4); finShape.closePath();
+  finShape.moveTo(0, 0); finShape.lineTo(FIN_SPAN * MM, 0); finShape.lineTo(FIN_SPAN * MM, FIN_TIP * MM); finShape.lineTo(0, FIN_ROOT * MM); finShape.closePath();
   const finGeo = new THREE.ShapeGeometry(finShape);
   for (let i = 0; i < 4; i++) {
     const holder = new THREE.Group();
-    holder.rotation.y = (Math.PI / 2) * i;
+    holder.rotation.y = Math.PI / 4 + (Math.PI / 2) * i;
     const fin = new THREE.Mesh(finGeo, finMat);
-    fin.position.set(R, TAIL, 0);
+    fin.position.set(RO * MM, 0, 0);
     fin.castShadow = true;
     holder.add(fin); airframe.add(holder);
   }
@@ -162,9 +184,12 @@ export function initBench() {
   resize();
 
   // ---------- State ----------
-  const target = { roll: 0, pitch: 0, yaw: 0 };
-  const shown  = { roll: 0, pitch: 0, yaw: 0 };
-  const zero   = { roll: 0, pitch: 0, yaw: 0 };
+  // pitch/yaw = X/Y servo deflection from neutral (charts, readouts, dial); tiltX/tiltY = the rocket's attitude (3D view)
+  const target = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const shown  = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const zero   = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4 };
+  let rig = { ...NO_CFG };   // from the Nano's CFG line: servo direction, level trims, servo degrees per gimbal degree
   const history = []; // {t, pitch, yaw}
   const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
   let sampleTimes = [];
@@ -186,22 +211,38 @@ export function initBench() {
     if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
     if (/^(CAL|CFG|ERR|ABORT),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort
-      const cal = line.match(/^CAL,(-?\d+),(-?\d+),/);
+      const cal = line.match(/^CAL,(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+)/);
       logLine(line, cal ? undefined : 'msg');
+      if (line.startsWith('CFG,')) {
+        const p = line.split(',').map(Number);
+        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7] };
+      }
       calib.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
-      if (cal) applySample(target.roll + zero.roll, servoMode.checked ? +cal[1] : cal[1] - 90, servoMode.checked ? +cal[2] : cal[2] - 90);
+      if (cal) {
+        const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
+        if (servoMode.checked) applySample(target.roll + zero.roll, +cal[1], +cal[2], tx, ty);
+        else applySample(target.roll + zero.roll, tx, ty);
+      }
       return;
     }
     const parts = line.split(',').map(s => parseFloat(s));
     if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; logLine(line, 'msg'); return; } // boot messages etc.
     logLine(line);
-    applySample(...parts.slice(0, 3));
+    applySample(...parts.slice(0, 5));   // roll, X servo, Y servo, then tiltX, tiltY from firmware v1.6.0+
   }
 
-  function applySample(roll, pitch, yaw) {
+  function applySample(roll, pitch, yaw, tiltX, tiltY) {
     raw.pitch = pitch; raw.yaw = yaw;
-    if (servoMode.checked) { pitch -= 90; yaw -= 90; }
+    if (servoMode.checked) {
+      pitch -= 90; yaw -= 90;
+      // Older firmware doesn't send the tilt: the rocket stays upright and only the motor tube moves
+      target.tiltX = Number.isFinite(tiltX) ? tiltX - zero.tiltX : 0;
+      target.tiltY = Number.isFinite(tiltY) ? tiltY - zero.tiltY : 0;
+    } else {
+      target.tiltX = pitch - zero.pitch;
+      target.tiltY = yaw - zero.yaw;
+    }
     target.roll = roll - zero.roll;
     target.pitch = pitch - zero.pitch;
     target.yaw = yaw - zero.yaw;
@@ -215,11 +256,10 @@ export function initBench() {
   }
 
   $('zeroBtn').onclick = () => {
-    zero.roll += target.roll; zero.pitch += target.pitch; zero.yaw += target.yaw;
-    target.roll = target.pitch = target.yaw = 0;
+    for (const a of Object.keys(zero)) { zero[a] += target[a]; target[a] = 0; }
     peak.pitch = peak.yaw = 0;
   };
-  servoMode.onchange = () => { zero.roll = zero.pitch = zero.yaw = 0; };
+  servoMode.onchange = () => { for (const a of Object.keys(zero)) zero[a] = 0; };
   $('viewBtn').onclick = resetView;
 
   // ---------- Web Serial ----------
@@ -249,6 +289,7 @@ export function initBench() {
     $('serialLog').textContent = '';
     linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
+    rig = { ...NO_CFG };
     setFree(false); $('freeBtn').disabled = !port;
     calib.onLink();
   }
@@ -340,10 +381,11 @@ export function initBench() {
     const t0 = performance.now();
     demoTimer = setInterval(() => {
       const t = (performance.now() - t0) / 1000;
-      const p = 90 + 35 * Math.sin(t * 0.9) + 6 * Math.sin(t * 3.1);
-      const y = 90 + 30 * Math.sin(t * 0.6 + 1.2);
-      const fake = servoMode.checked ? `0,${Math.round(p)},${Math.round(y)}` : `0,${Math.round(p - 90)},${Math.round(y - 90)}`;
-      handleLine(fake);
+      // A rocket wandering by a few degrees, with servos answering through the firmware's controller at full throttle
+      const tx = 5 * Math.sin(t * 0.9) + 0.8 * Math.sin(t * 3.1), rateX = 4.5 * Math.cos(t * 0.9) + 2.5 * Math.cos(t * 3.1);
+      const ty = 4 * Math.sin(t * 0.6 + 1.2), rateY = 2.4 * Math.cos(t * 0.6 + 1.2);
+      const servo = (tilt, rate) => 90 + Math.round(Math.max(-8, Math.min(8, 0.68 * (2.5 * tilt + 0.55 * rate))) * rig.spg);
+      handleLine(servoMode.checked ? `0,${servo(tx, rateX)},${servo(ty, rateY)},${tx.toFixed(1)},${ty.toFixed(1)}` : `0,${tx.toFixed(1)},${ty.toFixed(1)}`);
     }, 50);
   }
   function stopDemo() {
@@ -401,9 +443,12 @@ export function initBench() {
   function animate(now) {
     requestAnimationFrame(animate);
     const k = smooth.checked ? 0.18 : 1;
-    for (const a of ['roll', 'pitch', 'yaw']) shown[a] += (target[a] - shown[a]) * k;
+    for (const a of Object.keys(shown)) shown[a] += (target[a] - shown[a]) * k;
 
-    rocket.rotation.set(deg(shown.pitch), deg(shown.roll), deg(-shown.yaw));
+    rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
+    // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
+    const servoData = servoMode.checked;
+    tvc.rotation.set(servoData ? deg(shown.pitch * rig.xd / rig.spg) : 0, 0, servoData ? deg(-shown.yaw * rig.yd / rig.spg) : 0);
     controls.update();
     fenceTarget();
     // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
