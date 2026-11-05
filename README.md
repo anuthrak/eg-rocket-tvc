@@ -12,7 +12,7 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
-- [x] Firmware v1.4.0: IMU → PID → servos, calibration over serial, tilt abort (off for hand testing)
+- [x] Firmware v1.5.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
 - [x] Web visualizer: live Bench view, calibration, Mission sim
 - [ ] Joint test, body and sled printed and assembled
 - [ ] EDF + ESC (on order), thrust test, throttle control in firmware
@@ -59,7 +59,8 @@ To regenerate the CAD: `pip install cadquery trimesh shapely rtree scipy matplot
 Open `firmware/nano_tvc/nano_tvc.ino` in the Arduino IDE (board: Arduino Nano; libraries: Adafruit MPU6050, Servo). It prints `TVC firmware vX.Y.Z` at boot, which the visualizer shows in its LINK panel.
 
 - 100 Hz loop, complementary filter, PID per axis (starting gains Kp 2.5, Kd 0.55, Ki 0.3, scaled by thrust), gimbal limited to ±8°, servo pulses in microseconds.
-- The gimbal is clamped to ±8°. The tilt abort is off for hand testing (`TILT_ABORT_ENABLED`). When on, tilt beyond 25° centres the gimbal and prints `ABORT,TILT`; it re-arms after a second back within 5°.
+- Tilt beyond 25° centres the gimbal and prints `ABORT,TILT`; it re-arms after a second back within 5°.
+- **Free-test** (Bench → Gimbal, or `FREE ON|OFF`) is for tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. It starts off every time the Nano restarts.
 - The MPU6050 can be mounted any way round (on the sled it stands on the vertical breadboard); calibration maps it to the rocket's axes.
 - Throttle output arrives with the ESC; until then the controller runs as if at full throttle.
 

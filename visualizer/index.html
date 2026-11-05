@@ -128,7 +128,7 @@
   </aside>
   <aside class="side-r">
     <div class="panel">
-      <h2 class="h2-act">Gimbal<button id="calBtn" class="h2btn serial-only" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></h2>
+      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)">Free-test</button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></div></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>

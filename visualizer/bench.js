@@ -183,6 +183,7 @@ export function initBench() {
     lineCount++;
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
+    if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
     if (/^(CAL|CFG|ERR|ABORT),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort
       const cal = line.match(/^CAL,(-?\d+),(-?\d+),/);
@@ -239,13 +240,19 @@ export function initBench() {
   }
   const gTrail = [];   // recent gimbal dial positions
 
+  // Free-test: the button only follows what the Nano reports, and the Nano starts with it off
+  let freeOn = false;
+  function setFree(on) { freeOn = on; $('freeBtn').classList.toggle('on', on); }
+  $('freeBtn').onclick = () => send(freeOn ? 'FREE OFF' : 'FREE ON');
+
   function startLink(label) {
     $('serialLog').textContent = '';
     linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
+    setFree(false); $('freeBtn').disabled = !port;
     calib.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; calib.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
   const enc = new TextEncoder();

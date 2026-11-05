@@ -3,6 +3,12 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Added
+- Bench: **Free-test** button next to Calibrate, for tilting the rocket by hand. Firmware v1.5.0 `FREE ON|OFF`: no tilt abort and half gains, with the same ±8° limit. It starts off every time the Nano restarts and is never saved.
+### Changed
+- Firmware v1.5.0: the tilt abort is back on by default; `TILT_ABORT_ENABLED` is gone.
+### Fixed
+- Firmware v1.5.0: `SET ROT` now turns the level trims with the sensor mapping, so an upright rocket still reads upright after the sensor step. Run Level once to clear a trim saved before this fix.
 
 ## [2.6.0] – 2026-11-04
 ### Changed
