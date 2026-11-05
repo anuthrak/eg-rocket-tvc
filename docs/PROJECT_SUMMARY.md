@@ -90,11 +90,11 @@ Known drawing note: TVC-001 lists Ø1 music-wire pushrods; the team uses the 1.2
 - ±8° looks small (tube end moves ~8 mm) — that is normal.
 
 ## 8. Firmware and control
-Current firmware **v1.3.0** (`firmware/nano_tvc`):
+Current firmware **v1.4.0** (`firmware/nano_tvc`):
 - 100 Hz loop, complementary filter (α 0.98), MPU DLPF 44 Hz, gyro ±500 °/s, D-term from the gyro rate.
 - PID per axis with the starting gains below, gimbal clamped to ±8° and slew-limited, servo pulses via
   `writeMicroseconds` (fractional degrees), linkage ratio and trims from EEPROM.
-- Tilt abort > 25°: gimbal centres immediately, re-arms after 1 s back within 5° (or `RUN`).
+- Tilt abort > 25°: gimbal centres immediately, re-arms after 1 s back within 5° (or `RUN`). Off for hand testing (`TILT_ABORT_ENABLED = false`); must be on before the motor runs.
 - IMU mounting remap (any orientation), set by calibration.
 - Not yet: ESC/throttle output with the 85 % cap, motor cut on abort / lost link, binary telemetry. These wait
   for the EDF and ESC to arrive.

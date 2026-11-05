@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Changed
+- Firmware v1.4.0: the tilt abort is off for hand testing (`TILT_ABORT_ENABLED = false`); the gimbal keeps steering at any tilt, clamped to ±8°. The abort code is unchanged. Turn it back on before the motor runs.
 
 ## [2.5.0] – 2026-11-02
 ### Added
