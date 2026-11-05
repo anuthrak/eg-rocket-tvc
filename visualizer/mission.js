@@ -624,19 +624,21 @@ export async function initMission(step) {
   function shotAt(t) {
     if (t < -3) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
     if (t < 8) return { id: 'pad-track', fixed: new THREE.Vector3(-1.2, 0.24, 2.7).add(PAD_BASE) };
+    if (t < 22) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
     if (t < 30) return { id: 'onboard-ascent', cam: ONBOARD(-0.25, 0.28), aim: [0, -0.85, 0] };
-    if (t < T_MECO - 2) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
+    if (t < T_MECO - 2) return { id: 'ascent-2', off: [-1.5, 0.2, 0.8] };
     if (t < T_SEP + 1.2) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
     if (t < T_SES + 4) return { id: 'onboard-separation', cam: ONBOARD(-0.02, 0.2), aim: [0, -1.1, 0] };
     if (t < T_ASC) return { id: 'stage2', off: [-0.9, 0.3, 0.45] };
-    if (t < t_tli0) return { id: 'parking', off: [-2.2, 1, 2.4] };
+    if (t < t_tli0 - 14) return { id: 'parking', off: [-2.2, 1, 2.4] };
+    if (t < t_tli0) return { id: 'overhead-earth', off: [-0.25, 1.5, 0], overhead: true };
     if (t < t_tli1) return { id: 'tli', off: [-0.55, 0.12, 0.3] };
     if (t < t_mcc) return { id: 'look-back', off: [2.4, 0.5, 0.8] };
     if (t < t_mcc + 4) return { id: 'mcc', off: [-0.3, 0.1, 0.8] };
     if (t < t_flip) return { id: 'to-moon', off: [-1.6, 0.35, 0.2], toMoon: true };
     if (t < t_coast1) return { id: 'flip', off: [0, 0.25, 1] };
     if (t < t_loi1) return { id: 'loi', off: [0.3, 0.7, 0.9] };
-    if (t < t_desc0 - 26) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
+    if (t < t_desc0 - 14) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
     if (t < t_desc0) return { id: 'overhead-moon', off: [-0.25, 1.5, 0], overhead: true };
     if (t < t_desc0 + 18) return { id: 'descent', off: [0.5, 0.05, 1.2] };
     if (t < t_land - 2) return { id: 'onboard-legs', cam: ONBOARD(0.02, 0.22, 0), aim: [0, -0.32, 0], dim: 0.08 };
