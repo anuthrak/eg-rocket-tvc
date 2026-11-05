@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+
+## [2.8.0] – 2026-11-05
 ### Added
 - Mission: Director camera (now the default) that cuts between shots through the flight, with stage separation in slow motion, onboard cameras mounted against the body near the tail, looking back past it (countdown, ascent, after separation, landing legs) and overhead shots in Earth and lunar orbit. Dragging or zooming takes the camera back as a chase view. The camera button cycles Director, Chase and Overview.
 - Mission: camera shake at ignition, liftoff, Max-Q, separation and hits, plus an engine glow. Shake turns off under the system's reduced-motion setting.
