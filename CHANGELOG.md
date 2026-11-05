@@ -4,6 +4,18 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 
 ## [Unreleased]
 
+## [2.8.0] – 2026-11-05
+### Added
+- Mission: Director camera (now the default) that cuts between shots through the flight, with stage separation in slow motion, onboard cameras mounted against the body near the tail, looking back past it (countdown, ascent, after separation, landing legs) and overhead shots in Earth and lunar orbit. Dragging or zooming takes the camera back as a chase view. The camera button cycles Director, Chase and Overview.
+- Mission: camera shake at ignition, liftoff, Max-Q, separation and hits, plus an engine glow. Shake turns off under the system's reduced-motion setting.
+- Mission: pad smoke, a Max-Q vapour collar, separation puffs and landing dust.
+- Mission: live nozzle close-up in the panel under the mini bench (hidden on phones and whenever it doesn't fit beside the HUD).
+- Mission: **Hit it** button shoves the rocket mid-flight and reports the recovery time and peak angle. The flight path stays scripted, so a hit changes the attitude only.
+### Fixed
+- Mission: the landing legs swung inward through the body and were too short to reach the ground. They now stow against the body, swing outward and reach the surface.
+### Changed
+- Mission and the Bench demo share `controller.js`, the same algorithm and gains as the firmware, replacing the Mission's own PD controller. Thrust authority comes from the design numbers (185 °/s² at 8° and full thrust).
+
 ## [2.7.0] – 2026-11-04
 ### Added
 - Bench: **Free-test** button next to Calibrate, for tilting the rocket by hand. Firmware v1.5.0 `FREE ON|OFF`: no tilt abort and half gains, with the same ±8° limit. It starts off every time the Nano restarts and is never saved.

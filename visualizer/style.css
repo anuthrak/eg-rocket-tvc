@@ -321,7 +321,11 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
 .mb-vals { display: flex; justify-content: space-around; padding: 6px; color: var(--muted); }
 .mb-vals b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .mb-vals .p b { color: var(--pitch); } .mb-vals .y b { color: var(--yaw); }
-.mini-bench.collapsed .mb-slot { display: none; }
+.mini-bench.collapsed .mb-slot, .mini-bench.collapsed .mb-nz { display: none; }
+.mb-nz { border-top: 1px solid var(--line); }
+.mb-nz-h { display: flex; justify-content: space-between; padding: 5px 10px 0; color: var(--muted); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+#nozzleView { position: relative; height: 112px; }
+#nozzleView canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; }
 
 .m-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 48px clamp(12px, 3vw, 36px) 14px;
   background: linear-gradient(to top, rgba(0,0,0,.88), rgba(0,0,0,.6) 55%, transparent);
@@ -395,7 +399,7 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
   stroke-linecap: round; stroke-linejoin: round; }
 .lbl { display: inline-block; }
 #pauseBtn[data-paused] .ic-pause, #pauseBtn:not([data-paused]) .ic-play,
-#camBtn[data-mode="overview"] .ic-chase, #camBtn[data-mode="chase"] .ic-overview { display: none !important; }
+#camBtn[data-mode="overview"] .ic-chase, #camBtn[data-mode="chase"] .ic-overview, #camBtn[data-mode="director"] .ic-overview { display: none !important; }
 body.no-serial .serial-only { display: none; }   /* no Web Serial (e.g. Safari): Connect can't work */
 .m-py { display: none; position: absolute; top: 50px; left: 12px; padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 6px;
   background: rgba(11,11,13,.78); font: 600 11px var(--cond); letter-spacing: .1em; color: var(--muted); text-shadow: none; }
