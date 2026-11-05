@@ -159,7 +159,10 @@ export async function initMission(step) {
     if (gust) {   // report the recovery once the shove has ended and the rocket is back on target
       const off = Math.hypot(e, ec) / DEG;
       gust.peak = Math.max(gust.peak, off);
-      if (t > gust.until && off < 2 && Math.hypot(att.w, att.wc) < 2 * DEG) {   // on target and no longer swinging
+      // On target and no longer swinging. The swing is measured against the target, which itself turns along the flight path.
+      const swing = gust.e === undefined ? Infinity : Math.hypot(wrapPi(e - gust.e) / dt, att.wc);
+      gust.e = e;
+      if (t > gust.until && off < 2 && swing < 2 * DEG) {
         if (gust.peak > 2) callout(`RECOVERED IN ${(t - gust.t0).toFixed(1)} S · PEAK ${gust.peak.toFixed(0)}°`);
         gust = null;
       } else if (t > gust.t0 + 20) gust = null;
@@ -804,7 +807,8 @@ export async function initMission(step) {
 
   // Hit it: shove the rocket sideways for 0.3 s, in a random direction. With the engine burning the gimbal fights back;
   // with it off, the much weaker RCS does, so the shove is smaller. It changes the attitude only: the flight path is scripted.
-  const canHit = () => simState === 'running' && simT > 0.5 && simT < t_land - 3;
+  // One at a time: back-to-back hits would stack up until the rocket tumbles, so the button waits for the recovery.
+  const canHit = () => simState === 'running' && simT > 0.5 && simT < t_land - 3 && !gust;
   $('hitBtn').onclick = () => {
     if (!canHit()) return;
     const eng = engineAt(simT), burning = eng.on && eng.thr > 0.05, push = burning ? 5.8 : 3, a = Math.random() * Math.PI * 2;

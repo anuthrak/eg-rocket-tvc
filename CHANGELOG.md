@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Fixed
+- Mission: **Hit it** waits until the rocket has recovered from the last hit. Back-to-back hits could stack up until it tumbled.
 
 ## [2.8.0] – 2026-11-05
 ### Added
