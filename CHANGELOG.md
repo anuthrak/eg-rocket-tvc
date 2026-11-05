@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+
+## [2.7.0] – 2026-11-04
 ### Added
 - Bench: **Free-test** button next to Calibrate, for tilting the rocket by hand. Firmware v1.5.0 `FREE ON|OFF`: no tilt abort and half gains, with the same ±8° limit. It starts off every time the Nano restarts and is never saved.
 - Bench: the 3D model is built from the CAD numbers: 632 mm × Ø78.6 proportions, parts A, B, D with coupler bands, CAD fins at 45/135/225/315°, pivot at the 240 mm CG, and a motor tube that swings about the gimbal point at 57 mm. The tube sticks out 18 mm past the tail so it can be seen (flush in the CAD).
