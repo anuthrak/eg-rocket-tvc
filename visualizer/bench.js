@@ -429,14 +429,14 @@ export function initBench() {
   }
 
   // ---------- Demo mode (no hardware) ----------
-  let demoTimer = null;
+  let demoTimer = null, demoSim = null;
   function startDemo() {
     if (port) return;
     $('demoBtn').textContent = 'Stop demo';
     $('demoPill').classList.add('on');
     setStatus('Demo feed', true);
     startLink('Demo');
-    const sim = createDemoSim();
+    const sim = demoSim = createDemoSim();
     let simT = performance.now();
     demoTimer = setInterval(() => {
       // Catch up in 10 ms steps; after a pause (hidden tab) carry on from now instead of replaying it
@@ -456,11 +456,70 @@ export function initBench() {
   function stopDemo() {
     if (!demoTimer) return;
     clearInterval(demoTimer); demoTimer = null;
+    endDrag(); demoSim = null;
     $('demoBtn').textContent = 'Demo mode';
     $('demoPill').classList.remove('on');
     if (!port) { setStatus('Not connected', false); endLink(); }
   }
   $('demoBtn').onclick = () => (demoTimer ? stopDemo() : startDemo());
+
+  // ---------- Demo: drag the rocket, then let go ----------
+  // Dragging the rocket tilts it; dragging anywhere else still orbits the camera. The grabbed point follows the pointer on
+  // a plane facing the camera. Grabbing near the pivot would make it twitchy, so that acts like grabbing further along.
+  const ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+  const PIVOT = new THREE.Vector3(0, PIVOT_Y, 0), MIN_LEVER = 0.7;
+  const _plane = new THREE.Plane(), _hit = new THREE.Vector3(), _camDir = new THREE.Vector3(), _axis = new THREE.Vector3();
+  let drag = null;   // { id, lever, offset }
+
+  function aimRay(e) {
+    const r = view.getBoundingClientRect();
+    _ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+    ray.setFromCamera(_ndc, camera);
+  }
+  function rocketHit(e) { aimRay(e); return ray.intersectObjects(rocketMeshes, false)[0] || null; }
+  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on'); }
+
+  view.addEventListener('pointerdown', e => {   // capture phase: decides before OrbitControls sees the press
+    if (drag || !canDrag() || !e.isPrimary || e.button !== 0) return;
+    const hit = rocketHit(e);
+    if (!hit) return;
+    rocket.updateWorldMatrix(true, false);
+    _axis.set(0, 1, 0).transformDirection(rocket.matrixWorld);
+    let lever = hit.point.clone().sub(PIVOT).dot(_axis);
+    if (Math.abs(lever) < MIN_LEVER) lever = MIN_LEVER;
+    const grab = PIVOT.clone().addScaledVector(_axis, lever);
+    camera.getWorldDirection(_camDir);
+    _plane.setFromNormalAndCoplanarPoint(_camDir, grab);
+    if (!ray.ray.intersectPlane(_plane, _hit)) return;
+    drag = { id: e.pointerId, lever, offset: grab.sub(_hit) };
+    controls.enabled = false;
+    view.setPointerCapture(e.pointerId);
+    view.style.cursor = 'grabbing';
+  }, true);
+
+  view.addEventListener('pointermove', e => {
+    if (!drag) {
+      view.style.cursor = canDrag() && e.pointerType === 'mouse' && rocketHit(e) ? 'grab' : '';
+      return;
+    }
+    if (e.pointerId !== drag.id) return;
+    aimRay(e);
+    if (!ray.ray.intersectPlane(_plane, _hit)) return;
+    _axis.copy(_hit).add(drag.offset).sub(PIVOT).normalize().multiplyScalar(Math.sign(drag.lever));
+    // Rocket up = (cos tiltX · sin tiltY, cos tiltX · cos tiltY, sin tiltX) in scene axes: see rocket.rotation in animate()
+    const tiltX = THREE.MathUtils.radToDeg(Math.asin(_axis.z)), tiltY = THREE.MathUtils.radToDeg(Math.atan2(_axis.x, _axis.y));
+    demoSim.hold(tiltX + zero.tiltX, tiltY + zero.tiltY);
+  });
+
+  function endDrag(e) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    drag = null;
+    controls.enabled = true;
+    view.style.cursor = '';
+    demoSim?.release();
+  }
+  view.addEventListener('pointerup', endDrag);
+  view.addEventListener('pointercancel', endDrag);
 
   // ---------- Chart ----------
   const chart = $('chart'), ctx = chart.getContext('2d');
@@ -535,7 +594,7 @@ export function initBench() {
   function updateBenchUI(now) {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
     $('viewNote').textContent = !hasData ? '' : demoTimer
-      ? 'Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
+      ? 'Drag the rocket and let go. Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
       : 'No motor yet: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
