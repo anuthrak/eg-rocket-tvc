@@ -1,14 +1,9 @@
 // Bench demo: the rocket on its CG pivot, simulated with the design numbers and the firmware's controller.
 // It leaves out sensor lag, friction and fan response, so it is a prediction, not a measurement.
 
+import { gimbalStep, AUTHORITY } from './controller.js';
+
 const DEG = Math.PI / 180, DT = 0.01;   // same 100 Hz step as the firmware
-
-// docs/PROJECT_SUMMARY.md §5: 220 g of thrust on a 183 mm lever arm, I_cg 0.017 kg·m² (185 °/s² at 8° of gimbal)
-const THRUST_N = 0.220 * 9.81, ARM_M = 0.183, I_CG = 0.017;
-
-// firmware/nano_tvc: gains, gimbal limit and slew limit at full throttle
-const SCALE = 150 / 220, KP = 2.5, KD = 0.55, KI = 0.3, I_MAX = 2 * DEG;
-const GMAX = 8 * DEG, GRATE = 60 * DEG;
 
 // Gusts: a short sideways shove, as a torque on the rocket. `dir` is the way the top is pushed (0° = +X, 90° = +Y).
 const GUST_EVERY_S = 6;
@@ -28,14 +23,10 @@ const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v));
 function axis() { return { tilt: 0, rate: 0, g: 0, integ: 0 }; }
 
 // One controller + physics step for one axis. `push` is the outside angular acceleration (rad/s²).
-function control(a) {
-  a.integ = Math.max(-I_MAX / KI, Math.min(I_MAX / KI, a.integ + a.tilt * DT));
-  const cmd = Math.max(-GMAX, Math.min(GMAX, SCALE * (KP * a.tilt + KD * a.rate + KI * a.integ)));
-  a.g += Math.max(-GRATE * DT, Math.min(GRATE * DT, cmd - a.g));
-}
+const control = a => gimbalStep(a, a.tilt, a.rate, 1, DT);   // full throttle
 function stepAxis(a, push) {
   control(a);
-  a.rate += (push - THRUST_N * ARM_M * Math.sin(a.g) / I_CG) * DT;
+  a.rate += (push - AUTHORITY * Math.sin(a.g)) * DT;
   a.tilt += a.rate * DT;
 }
 // Held by the mouse: the hand wins, and the controller keeps pushing against it.

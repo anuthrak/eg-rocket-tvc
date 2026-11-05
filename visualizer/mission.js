@@ -2,6 +2,9 @@
 // step(progress, label) reports to the loading screen and yields a frame before the heavy parts.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { gimbalStep, AUTHORITY, GMAX } from './controller.js';
+import { createParticles } from './mission-fx.js';
+import { createNozzleView } from './nozzle-view.js';
 
 const $ = id => document.getElementById(id);
 
@@ -11,6 +14,8 @@ export async function initMission(step) {
   const sstep = s => { s = clamp(s, 0, 1); return s * s * (3 - 2 * s); };
   const smoothstep = (a, b, x) => sstep((x - a) / (b - a));
   const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+  const ZW_AXIS = new THREE.Vector3(0, 0, 1);
 
   // ---------- Geometry (scene units) ----------
   const RE = 10, RM = 3, MX = 110;            // Earth radius, Moon radius, Moon x-position
@@ -92,9 +97,11 @@ export async function initMission(step) {
 
   // ---------- State ----------
   let simState = 'idle';  // idle | running | paused | done
-  let simT = -10, warp = 1, camMode = 'chase';
+  let simT = -10, warp = 1, camMode = 'director';
   const att = { psi: TH_L, w: 0, chi: 0, wc: 0, gp: 0, gy: 0, rcsP: 0, rcsY: 0 };
-  const KT = 30, GMAX = 8 * DEG, GRATE = 60 * DEG; // gimbal authority, limit, slew rate
+  const GRATE = 60 * DEG;                          // slew rate when the nozzle re-centres on the pad or after landing
+  const ctrlP = { g: 0, integ: 0 }, ctrlY = { g: 0, integ: 0 };   // the Nano's controller, one per axis
+  let gust = null;                                 // "Hit it": { p, y, until, t0, peak }
 
   function engineAt(t) {
     if (simState === 'idle' || t < -3) return { on: false, thr: 0 };
@@ -136,7 +143,7 @@ export async function initMission(step) {
   function dynStep(dt) {
     const t = simT;
     const eng = engineAt(t);
-    if (t < 0 || eng.held) { att.psi = TH_L; att.w = att.chi = att.wc = 0; att.gp *= 0.9; att.gy *= 0.9; att.rcsP = att.rcsY = 0; return; }
+    if (t < 0 || eng.held) { att.psi = TH_L; att.w = att.chi = att.wc = 0; att.gp *= 0.9; att.gy *= 0.9; att.rcsP = att.rcsY = 0; ctrlP.integ = ctrlY.integ = 0; return; }
     if (t >= t_land) {
       att.psi = targetPsi(t); att.w = att.wc = 0; att.chi *= 0.9;
       att.gp += clamp(-att.gp, -GRATE * dt, GRATE * dt); att.gy += clamp(-att.gy, -GRATE * dt, GRATE * dt);
@@ -145,25 +152,36 @@ export async function initMission(step) {
     const e = wrapPi(targetPsi(t) - att.psi), ec = -att.chi;
     const q = (t > 0 && t < 45) ? Math.exp(-(((t - 18) / 8) ** 2)) : 0;   // dynamic pressure (peaks at Max-Q)
     const slosh = eng.on ? 1 : 0;
-    const dP = q * (1.9 * noise(t, 1.3) + 0.5) + slosh * 0.12 * noise(t * 1.4, 5.1);
-    const dY = q * (1.6 * noise(t, 7.7) - 0.3) + slosh * 0.10 * noise(t * 1.2, 2.2);
+    let dP = q * (1.9 * noise(t, 1.3) + 0.5) + slosh * 0.12 * noise(t * 1.4, 5.1);
+    let dY = q * (1.6 * noise(t, 7.7) - 0.3) + slosh * 0.10 * noise(t * 1.2, 2.2);
+    const hitP = gust && t < gust.until ? gust.p : 0, hitY = gust && t < gust.until ? gust.y : 0;
+    dP += hitP; dY += hitY;
+    if (gust) {   // report the recovery once the shove has ended and the rocket is back on target
+      const off = Math.hypot(e, ec) / DEG;
+      gust.peak = Math.max(gust.peak, off);
+      if (t > gust.until && off < 2 && Math.hypot(att.w, att.wc) < 2 * DEG) {   // on target and no longer swinging
+        if (gust.peak > 2) callout(`RECOVERED IN ${(t - gust.t0).toFixed(1)} S · PEAK ${gust.peak.toFixed(0)}°`);
+        gust = null;
+      } else if (t > gust.t0 + 20) gust = null;
+    }
     let aP, aY;
     if (eng.on && eng.thr > 0.05) {
-      // PD controller -> gimbal command (thrust torque ≈ -KT·thr·sin(gimbal))
-      const uP = 9 * e - 5 * att.w, uY = 9 * ec - 5 * att.wc;
-      const cP = clamp(-uP / (KT * eng.thr), -GMAX, GMAX), cY = clamp(-uY / (KT * eng.thr), -GMAX, GMAX);
-      att.gp += clamp(cP - att.gp, -GRATE * dt, GRATE * dt);   // servo slew-rate limit
-      att.gy += clamp(cY - att.gy, -GRATE * dt, GRATE * dt);
-      aP = -KT * eng.thr * Math.sin(att.gp) + dP;
-      aY = -KT * eng.thr * Math.sin(att.gy) + dY;
+      // The Nano's controller: tilt away from the target -> gimbal command, scaled by throttle
+      ctrlP.g = att.gp; ctrlY.g = att.gy;
+      gimbalStep(ctrlP, -e, att.w, eng.thr, dt);
+      gimbalStep(ctrlY, -ec, att.wc, eng.thr, dt);
+      att.gp = ctrlP.g; att.gy = ctrlY.g;
+      aP = -AUTHORITY * eng.thr * Math.sin(att.gp) + dP;
+      aY = -AUTHORITY * eng.thr * Math.sin(att.gy) + dY;
       att.rcsP = att.rcsY = 0;
     } else {
       // Engine off: nozzle re-centres, cold-gas RCS thrusters steer instead
       att.gp += clamp(-att.gp, -GRATE * dt, GRATE * dt);
       att.gy += clamp(-att.gy, -GRATE * dt, GRATE * dt);
+      ctrlP.integ = ctrlY.integ = 0;
       att.rcsP = clamp(1.5 * e - 2.2 * att.w, -0.8, 0.8);
       att.rcsY = clamp(1.5 * ec - 2.2 * att.wc, -0.8, 0.8);
-      aP = att.rcsP; aY = att.rcsY;
+      aP = att.rcsP + hitP; aY = att.rcsY + hitY;
     }
     att.w += aP * dt; att.psi += att.w * dt;
     att.wc += aY * dt; att.chi += att.wc * dt;
@@ -176,6 +194,8 @@ export async function initMission(step) {
   mRenderer.outputColorSpace = THREE.SRGBColorSpace;
   mView.appendChild(mRenderer.domElement);
   const mScene = new THREE.Scene();
+  const fx = createParticles(mScene);
+  const nozzleView = createNozzleView($('nozzleView'));
   mScene.background = new THREE.Color(0x000000);
   const mCam = new THREE.PerspectiveCamera(45, 1, 0.02, 5000);
   const mControls = new OrbitControls(mCam, mRenderer.domElement);
@@ -319,6 +339,9 @@ export async function initMission(step) {
   const RR = 0.045;
   const ship = new THREE.Group(); mScene.add(ship);
 
+  const dotTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, '#fff'); gr.addColorStop(0.3, '#ff9a5a'); gr.addColorStop(0.55, 'rgba(255,122,61,.55)'); gr.addColorStop(1, 'rgba(255,122,61,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
   function plumeMaterial(color, strength) {
     return new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -347,7 +370,9 @@ export async function initMission(step) {
     bell.position.y = -bellH / 2; nz.add(bell);
     const plume = makePlume(1); plume.position.y = -bellH; nz.add(plume);
     const light = new THREE.PointLight(0xff9a4d, 0, 2.5, 2); light.position.y = -bellH - 0.08; nz.add(light);
-    nz.userData = { plume, light };
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    glow.position.y = -bellH - 0.02; nz.add(glow);
+    nz.userData = { plume, light, glow };
     return nz;
   }
 
@@ -384,9 +409,6 @@ export async function initMission(step) {
   const puff = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
   ship.add(puff);
   // Overview marker (constant screen size)
-  const dotTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
-    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, '#fff'); gr.addColorStop(0.3, '#ff9a5a'); gr.addColorStop(0.55, 'rgba(255,122,61,.55)'); gr.addColorStop(1, 'rgba(255,122,61,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
   const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, sizeAttenuation: false, depthTest: false, transparent: true }));
   marker.scale.set(0.035, 0.035, 1); marker.renderOrder = 10; marker.visible = false; mScene.add(marker);
 
@@ -421,6 +443,7 @@ export async function initMission(step) {
     boost.vel.addScaledVector(axis, -0.06);
     boost.spin = 0.5; boost.life = 0; boost.free = true;
     att.w += 0.12; att.wc -= 0.08;   // separation kick for the controller to null out
+    puffAt(booster.position, 34, 0.5);
   }
   function boosterStep(dt) {
     if (!boost.free || !booster.visible) return;
@@ -543,14 +566,15 @@ export async function initMission(step) {
     const eng = engineAt(simT), stage1 = simT < T_SEP;
     const inAtmo = clamp(1 - (ship.position.length() - RPAD) / 2.5, 0, 1) * (simT < T_ASC ? 1 : 0);
     [[nz1, stage1], [nz2, !stage1]].forEach(([nz, active]) => {
-      const { plume, light } = nz.userData;
+      const { plume, light, glow } = nz.userData;
       const on = active && eng.on && eng.thr > 0.02;
-      plume.visible = on; light.intensity = on ? 1.6 * eng.thr : 0;
+      plume.visible = glow.visible = on; light.intensity = on ? 1.6 * eng.thr : 0;
       if (!on) return;
       const fl = 0.88 + Math.random() * 0.24;
       const len = eng.thr * (nz === nz1 ? 0.55 : 0.38) * fl;
       const rad = (nz === nz1 ? 0.035 : 0.026) * (1 + (1 - inAtmo) * 1.6);
       plume.scale.set(rad, len, rad);
+      const g = (nz === nz1 ? 0.5 : 0.34) * eng.thr * fl; glow.scale.set(g, g, 1);
     });
     const rcs = Math.max(Math.abs(att.rcsP), Math.abs(att.rcsY));
     puff.material.opacity = (simState === 'running' && !eng.on && rcs > 0.12) ? 0.5 + Math.random() * 0.4 : 0;
@@ -569,12 +593,73 @@ export async function initMission(step) {
     for (const p of planPts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
     mapBounds = { x0, x1, y0, y1 };
   }
-  function setChase() {
-    camMode = 'chase'; marker.visible = false; setCamLabel(); camGuard.offset = null;
+  function chasePose() {
+    marker.visible = false; camGuard.offset = null;
     applyViewOffset();
     const k = clamp(1.25 / mCam.aspect, 1, 2.4);   // back off on tall/narrow windows
     mControls.target.copy(ship.position); mCam.position.copy(ship.position).addScaledVector(CHASE_OFFSET, k); mControls.update();
   }
+  function setChase() { camMode = 'chase'; setCamLabel(); chasePose(); }
+  function setDirector() {
+    camMode = 'director'; shotId = null; setCamLabel();
+    if (simState === 'idle') chasePose(); else { marker.visible = false; camGuard.offset = null; applyViewOffset(); }
+  }
+
+  // ---------- Director: cuts between shots through the flight ----------
+  // Moving shots sit at [forward, up, side] from the rocket, along its path. Fixed shots stand on the pad or the Moon.
+  const _F = new THREE.Vector3(1, 0, 0), _U = new THREE.Vector3(0, 1, 0), _off = new THREE.Vector3(), _want = new THREE.Vector3(), _look = new THREE.Vector3();
+  const PAD_BASE = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0).multiplyScalar(RE);
+  const LAND_N = posAt(t_land).sub(moon.position).normalize(), LAND_T = new THREE.Vector3().crossVectors(LAND_N, ZW_AXIS);
+  let shotId = null;
+  function shotAt(t) {
+    if (t < -3) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
+    if (t < 8) return { id: 'pad-track', fixed: new THREE.Vector3(-1.2, 0.24, 2.7).add(PAD_BASE) };
+    if (t < T_MECO - 2) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
+    if (t < T_SES + 4) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
+    if (t < T_ASC) return { id: 'stage2', off: [-0.9, 0.3, 0.45] };
+    if (t < t_tli0) return { id: 'parking', off: [-2.2, 1, 2.4] };
+    if (t < t_tli1) return { id: 'tli', off: [-0.55, 0.12, 0.3] };
+    if (t < t_mcc) return { id: 'look-back', off: [2.4, 0.5, 0.8] };
+    if (t < t_mcc + 4) return { id: 'mcc', off: [-0.3, 0.1, 0.8] };
+    if (t < t_flip) return { id: 'to-moon', off: [-1.6, 0.35, 0.2], toMoon: true };
+    if (t < t_coast1) return { id: 'flip', off: [0, 0.25, 1] };
+    if (t < t_loi1) return { id: 'loi', off: [0.3, 0.7, 0.9] };
+    if (t < t_desc0) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
+    if (t < t_land - 5) return { id: 'descent', off: [0.5, 0.05, 1.2] };
+    return { id: 'touchdown', fixed: moon.position.clone().addScaledVector(LAND_N, RM + 0.14).addScaledVector(LAND_T, 1.5).addScaledVector(ZW_AXIS, 1.3) };
+  }
+  function directorStep(dt) {
+    const t = simT, shot = shotAt(t), cut = shot.id !== shotId;
+    shotId = shot.id;
+    mControls.target.copy(ship.position);
+    _look.copy(ship.position);
+    if (shot.fixed) mCam.position.copy(shot.fixed);
+    else {
+      // Smooth the path directions so the camera doesn't jerk at staging or when a burn starts
+      const k = cut ? 1 : 1 - Math.exp(-dt * 2.5);
+      velAt(t, _tv);
+      if (_tv.lengthSq() > 1e-6) _F.lerp(_tv.normalize(), k).normalize();
+      _U.lerp(_tp.copy(ship.position).sub(t < t_soi ? _off.set(0, 0, 0) : moon.position).normalize(), k).normalize();
+      const [f, u, s] = shot.off;
+      _want.copy(_F).multiplyScalar(f).addScaledVector(_U, u).addScaledVector(ZW_AXIS, s);
+      if (cut) camOffset.copy(_want); else camOffset.lerp(_want, 1 - Math.exp(-dt * 3));
+      mCam.position.copy(ship.position).add(camOffset);
+      if (shot.toMoon) _look.addScaledVector(_tp.copy(moon.position).sub(ship.position).normalize(), 3);
+    }
+    camGuard.offset = null;
+    collideCamera();
+    mCam.lookAt(_look);
+  }
+  const camOffset = new THREE.Vector3();
+  const directing = () => camMode === 'director' && simState !== 'idle';
+  // Dragging or zooming takes the camera back: it carries on from here as a chase view
+  function takeCamera() {
+    if (!directing() || intro) return;
+    camMode = 'chase'; setCamLabel(); camGuard.offset = null;
+    mControls.target.copy(ship.position);
+  }
+  mRenderer.domElement.addEventListener('pointerdown', takeCamera);
+  mRenderer.domElement.addEventListener('wheel', takeCamera, { passive: true });
   // The part of the mission view not covered by HUD panels (px, relative to the view)
   function overviewRect(w, h) {
     const base = mView.getBoundingClientRect(), box = el => el.getBoundingClientRect();
@@ -614,9 +699,9 @@ export async function initMission(step) {
     mControls.target.set(cx, cy, 0);
     mCam.position.set(cx, cy - dist * 0.18, dist); mControls.update();
   }
-  $('camBtn').onclick = () => (camMode === 'chase' ? setOverview() : setChase());
+  $('camBtn').onclick = () => (camMode === 'director' ? setChase() : camMode === 'chase' ? setOverview() : setDirector());
   function followShip() {
-    if (camMode !== 'chase') { marker.position.copy(ship.position); return; }
+    if (camMode === 'overview') { marker.position.copy(ship.position); return; }
     const d = _tp.copy(ship.position).sub(mControls.target);
     mControls.target.add(d); mCam.position.add(d);
   }
@@ -626,18 +711,28 @@ export async function initMission(step) {
     mRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     mRenderer.setSize(w, h, false);
     mCam.aspect = w / h;
+    fitNozzle();
+    fx.setScale(h * mRenderer.getPixelRatio() / (2 * Math.tan(mCam.fov * DEG / 2)));
     applyViewOffset();
     if (camMode === 'overview') setOverview();
   }
+  // The nozzle close-up only shows when the panel it makes taller still clears the controls and the bottom HUD
+  function fitNozzle() {
+    const nz = document.querySelector('.mb-nz'), mb = $('miniBench');
+    nz.style.display = '';
+    if (!mb.offsetParent || !nz.offsetParent) return;
+    const m = mb.getBoundingClientRect();
+    if (m.top < document.querySelector('.m-controls').getBoundingClientRect().bottom + 8 || m.bottom > $('mBottom').getBoundingClientRect().top + 8) nz.style.display = 'none';
+  }
   new ResizeObserver(mResize).observe(mView);
-  $('mbCollapse').addEventListener('click', () => { if (camMode === 'overview') applyViewOffset(); });
+  $('mbCollapse').addEventListener('click', () => { setTimeout(fitNozzle, 0); if (camMode === 'overview') applyViewOffset(); });
 
   // ---------- Controls ----------
   // Buttons hold an icon (phones) and a text label (desktop); keep both and the accessible name in sync
   function setLabel(btn, text) { btn.querySelector('.lbl').textContent = text; btn.setAttribute('aria-label', text); }
   function setCamLabel() {
     const b = $('camBtn'); b.dataset.mode = camMode;
-    setLabel(b, camMode === 'chase' ? 'Cam: Chase' : 'Cam: Overview');
+    setLabel(b, camMode === 'director' ? 'Cam: Director' : camMode === 'chase' ? 'Cam: Chase' : 'Cam: Overview');
   }
   function refreshButtons() {
     const lb = $('launchBtn'), pb = $('pauseBtn');
@@ -651,11 +746,13 @@ export async function initMission(step) {
     simState = 'idle'; simT = -10;
     hudMax.v = hudMax.alt = hudMax.g = 0;
     Object.assign(att, { psi: TH_L, w: 0, chi: 0, wc: 0, gp: 0, gy: 0, rcsP: 0, rcsY: 0 });
+    ctrlP.integ = ctrlY.integ = 0; gust = null; shotId = null; shakeKick = 0; lastFxT = -10;
+    fx.clear();
     reattachBooster();
     trailN = 0; trail2D.length = 0; lastTrailT = -1; trailGeo.setDrawRange(0, 0);
     $('callout').classList.remove('show');
     placeShip();
-    if (camMode === 'chase') setChase();
+    if (camMode !== 'overview') chasePose();
     refreshButtons();
   }
   $('launchBtn').onclick = () => {
@@ -665,6 +762,18 @@ export async function initMission(step) {
   $('pauseBtn').onclick = () => { simState = simState === 'paused' ? 'running' : 'paused'; refreshButtons(); };
   $('resetSimBtn').onclick = resetSim;
   $('warp').onchange = e => { warp = Number(e.target.value); };
+
+  // Hit it: shove the rocket sideways for 0.3 s, in a random direction. With the engine burning the gimbal fights back;
+  // with it off, the much weaker RCS does, so the shove is smaller. It changes the attitude only: the flight path is scripted.
+  const canHit = () => simState === 'running' && simT > 0.5 && simT < t_land - 3;
+  $('hitBtn').onclick = () => {
+    if (!canHit()) return;
+    const eng = engineAt(simT), burning = eng.on && eng.thr > 0.05, push = burning ? 5.8 : 3, a = Math.random() * Math.PI * 2;
+    gust = { p: push * Math.cos(a), y: push * Math.sin(a), until: simT + 0.3, t0: simT, peak: 0 };
+    shakeKick = 1;
+    callout(burning ? 'HIT · TVC RECOVERING' : 'HIT · RCS RECOVERING');
+    puffAt(ship.position, 22, 0.35);
+  };
 
   // ---------- HUD ----------
   const ARC = 197.9, CIRC = 263.9;
@@ -709,6 +818,7 @@ export async function initMission(step) {
   function updateHUD(now) {
     if (now - lastHud < 60) return; lastHud = now;
     const t = simT, tel = telemetry(t), eng = engineAt(t);
+    $('hitBtn').disabled = !canHit();
     $('met').innerHTML = metHTML(fmtClock(t));
     $('phase').textContent = phaseAt(t);
 
@@ -829,7 +939,7 @@ export async function initMission(step) {
   let intro = null;
   const _iDir = new THREE.Vector3();
   function flyIn(seconds) {
-    setChase();                                                  // the pose to land on
+    chasePose();                                                 // the pose to land on
     const end = mCam.position.clone().sub(ship.position);
     intro = { t0: performance.now(), ms: seconds * 1000, endDist: end.length(), endDir: end.normalize(),
               startDist: 38, startDir: new THREE.Vector3(0.25, 0.55, 1).normalize() };
@@ -846,13 +956,119 @@ export async function initMission(step) {
     if (k >= 1) { intro = null; mControls.enabled = true; camGuard.offset = null; mControls.update(); }
   }
 
-  let mWarmed = false;
+  // ---------- Effects: particles, shake, flash ----------
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pulse = (t, at, width) => Math.exp(-(((t - at) / width) ** 2));
+  const PAD_U = PAD_BASE.clone().normalize(), PAD_E = new THREE.Vector3().crossVectors(PAD_U, ZW_AXIS);
+  const _n = new THREE.Vector3(), _e = new THREE.Vector3(), _d = new THREE.Vector3(), _vel = new THREE.Vector3();
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  // Spray along the ground around `at`, whose surface normal is n
+  function groundSpray(at, n, e, opts) {
+    const a = Math.random() * Math.PI * 2, sp = rnd(opts.v0, opts.v1), up = rnd(opts.up0, opts.up1);
+    _d.copy(e).multiplyScalar(Math.cos(a)).addScaledVector(ZW_AXIS, Math.sin(a));
+    fx.emit({ x: at.x + _d.x * 0.1, y: at.y + _d.y * 0.1, z: at.z + _d.z * 0.1,
+              vx: _d.x * sp + n.x * up, vy: _d.y * sp + n.y * up, vz: _d.z * sp + n.z * up,
+              life: rnd(opts.l0, opts.l1), s0: opts.s0, s1: opts.s1, a: opts.a, c: rnd(opts.c0, opts.c1), drag: opts.drag });
+  }
+  function puffAt(at, count, speed) {
+    for (let i = 0; i < count; i++) {
+      _d.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).normalize().multiplyScalar(rnd(0.2, 1) * speed);
+      fx.emit({ x: at.x, y: at.y, z: at.z, vx: _d.x, vy: _d.y, vz: _d.z, life: rnd(0.5, 1.2), s0: 0.03, s1: 0.16, a: 0.55, c: 0.95, drag: 1.5 });
+    }
+  }
+  const padSmoke = { v0: 0.6, v1: 1.15, up0: 0.04, up1: 0.2, l0: 2, l1: 3.8, s0: 0.12, s1: 0.55, a: 0.34, c0: 0.72, c1: 0.95, drag: 0.8 };
+  const moonDust = { v0: 1, v1: 2, up0: 0.02, up1: 0.07, l0: 0.9, l1: 2, s0: 0.05, s1: 0.38, a: 0.5, c0: 0.5, c1: 0.68, drag: 0.5 };
+  let lastFxT = -10, smokeOwed = 0, vapourOwed = 0, dustOwed = 0;
+  function fxStep(t0, t1) {
+    const dt = t1 - t0;
+    if (dt <= 0) return;
+    const count = (owed, rate) => { const v = owed + rate * dt; return [Math.min(14, Math.floor(v)), v - Math.floor(v)]; };
+    // Pad: smoke rolling out from under the engine until the rocket has climbed away
+    if (t1 > -3) {
+      const h = ship.position.length() - RPAD;
+      if (h < 1.6) {
+        let n; [n, smokeOwed] = count(smokeOwed, 150 * (1 - smoothstep(0.5, 1.6, h)));
+        for (let i = 0; i < n; i++) groundSpray(PAD_BASE, PAD_U, PAD_E, padSmoke);
+      }
+    }
+    // Max-Q: a vapour collar around the body
+    if (t1 > 12 && t1 < 24) {
+      let n; [n, vapourOwed] = count(vapourOwed, 110 * pulse(t1, 18, 3));
+      velAt(t1, _vel).multiplyScalar(0.75);
+      _n.set(0, 1, 0).applyQuaternion(ship.quaternion);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        _d.set(Math.cos(a), 0, Math.sin(a)).applyQuaternion(ship.quaternion).multiplyScalar(RR * 1.5);
+        _e.copy(ship.position).addScaledVector(_n, rnd(-0.3, 0.05)).add(_d);
+        fx.emit({ x: _e.x, y: _e.y, z: _e.z, vx: _vel.x + _d.x, vy: _vel.y + _d.y, vz: _vel.z + _d.z,
+                  life: rnd(0.25, 0.6), s0: 0.03, s1: 0.14, a: 0.3, c: 1, drag: 0.5 });
+      }
+    }
+    // Moon: dust blown out by the engine near the ground, and a burst at touchdown
+    if (t1 > t_desc0 && t0 < t_land) {
+      const h = ship.position.distanceTo(moon.position) - RLAND;
+      if (h < 1.1) {
+        let n; [n, dustOwed] = count(dustOwed, 130 * (1 - smoothstep(0.1, 1.1, h)));
+        _n.copy(ship.position).sub(moon.position).normalize();
+        _e.crossVectors(_n, ZW_AXIS);
+        _d.copy(moon.position).addScaledVector(_n, RM + 0.015);
+        const at = _d.clone();
+        for (let i = 0; i < n; i++) groundSpray(at, _n, _e, moonDust);
+      }
+    }
+    if (t0 < t_land && t1 >= t_land) {
+      const at = moon.position.clone().addScaledVector(LAND_N, RM + 0.015);
+      for (let i = 0; i < 70; i++) groundSpray(at, LAND_N, LAND_T, moonDust);
+      shakeKick = Math.max(shakeKick, 0.5);
+    }
+    lastFxT = t1;
+  }
+
+  let shakeKick = 0;
+  const _shake = new THREE.Vector3(), _cr = new THREE.Vector3(), _cu = new THREE.Vector3();
+  function shakeAmount(t) {
+    if (simState === 'idle') return 0;
+    const eng = engineAt(t);
+    return smoothstep(-3, -0.4, t) * (1 - smoothstep(3, 14, t))   // ignition and liftoff
+      + 0.7 * pulse(t, 18, 6)                                     // Max-Q
+      + 0.9 * pulse(t, T_SEP, 0.3) + 0.4 * pulse(t, T_SES, 0.25)  // separation, second engine start
+      + (eng.on ? 0.06 : 0)                                       // any burn
+      + shakeKick;
+  }
+  // Moves the camera for this frame only; the caller takes _shake off again after drawing
+  function applyShake(now) {
+    if (REDUCED || camMode === 'overview' || simState === 'paused' || intro) return false;
+    const m = Math.min(1.4, shakeAmount(simT));
+    if (m < 0.005) return false;
+    const s = now / 1000, amp = 0.007 * mCam.position.distanceTo(ship.position) * m;
+    _cr.setFromMatrixColumn(mCam.matrixWorld, 0); _cu.setFromMatrixColumn(mCam.matrixWorld, 1);
+    _shake.copy(_cr).multiplyScalar(amp * (Math.sin(s * 71) + 0.6 * Math.sin(s * 113 + 1)))
+      .addScaledVector(_cu, amp * (Math.sin(s * 83 + 2) + 0.6 * Math.sin(s * 127)));
+    mCam.position.add(_shake);
+    mCam.updateMatrixWorld();
+    return true;
+  }
+  let flashShown = 0;
+  function updateFlash() {
+    const t = simT;
+    let f = 0;
+    if (!REDUCED && simState !== 'idle' && camMode !== 'overview') {
+      f = 0.5 * pulse(t, -2.9, 0.3) + 0.6 * pulse(t, 0, 0.35) + 0.65 * pulse(t, T_SEP, 0.18) + 0.3 * pulse(t, T_SES, 0.18) + 0.14 * shakeKick;
+    }
+    f = Math.min(0.8, f);
+    if (Math.abs(f - flashShown) > 0.004) { flashShown = f; $('mFlash').style.opacity = f.toFixed(3); }
+  }
+
+  let mWarmed = false, fitDue = true;
   function missionFrame(now) {
     requestAnimationFrame(missionFrame);
     const realDt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
     if (simState === 'running') {
       const t0 = simT;
-      let rem = realDt * warp;
+      // Director: stage separation plays in slow motion at normal speed
+      const slow = camMode === 'director' && warp === 1 && simT > T_SEP - 1 && simT < T_SEP + 1.5 ? 0.35 : 1;
+      let rem = realDt * warp * slow;
       while (rem > 1e-6 && simState === 'running') {
         const h = Math.min(rem, 1 / 120);
         dynStep(h); boosterStep(h);
@@ -862,20 +1078,32 @@ export async function initMission(step) {
         if (simT >= t_land + 4) { simState = 'done'; refreshButtons(); }
       }
       fireEvents(t0, simT);
+      placeShip();
+      fxStep(t0, simT);
+      fx.update(realDt * warp * slow);
     }
     placeShip();
     updateEngines();
     clouds.rotateY(realDt * 0.004);
-    if (document.body.dataset.tab !== 'mission') return;
+    if (document.body.dataset.tab !== 'mission') { fitDue = true; return; }
+    if (fitDue) { fitDue = false; fitNozzle(); }   // it can't be measured while the Bench tab is showing
     if (intro) introStep(now);
+    else if (directing()) directorStep(realDt);
     else { followShip(); mControls.update(); collideCamera(); }
     // One warm-up frame (uploads the planet textures to the GPU), then skip drawing while the loading screen covers it
     if (mWarmed && window.tvcCovered?.()) return;
+    shakeKick *= Math.exp(-realDt * 5);
+    updateFlash();
+    const shaken = applyShake(now);
     mRenderer.render(mScene, mCam); mWarmed = true;
+    if (shaken) mCam.position.sub(_shake);
+    const eng = engineAt(simT);
+    nozzleView.update(now, att.gp, att.gy, eng.on ? eng.thr : 0);
     updateHUD(now);
   }
   resetSim();
-  setChase();
+  chasePose();
+  setCamLabel();
   requestAnimationFrame(missionFrame);
   return { flyIn };
 }
