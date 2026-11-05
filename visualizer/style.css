@@ -130,6 +130,11 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font: 1
 /* Panel-header action button: negative margins keep the h2 exactly as tall as the others */
 h2.h2-act { align-items: center; }
 .h2-btns { display: flex; gap: 6px; }
+h2 .h2-btns .h2btn { white-space: nowrap; }
+@media (max-width: 1100px), (max-height: 520px) {   /* narrow side panel: both buttons stay on the header line */
+  .h2-btns { gap: 4px; }
+  h2 .h2-btns .h2btn { padding: 3px 4px; letter-spacing: .04em; }
+}
 h2 .h2btn { margin: -5px 0; padding: 3px 8px; font-size: 10px; line-height: 12px; letter-spacing: .14em; }
 h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); }
 .cal { grid-area: view; position: relative; z-index: 5; min-width: 0; min-height: 0; padding: 12px;
