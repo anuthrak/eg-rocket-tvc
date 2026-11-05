@@ -38,15 +38,17 @@
 //   SAVE              write the config to EEPROM
 //   LOAD              discard unsaved changes (reload EEPROM, or the defaults if nothing is saved)
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
+//   FREE ON|OFF       free-test mode on or off; replies FREE,ON or FREE,OFF
 //
-// Safety: the gimbal is always clamped to +-GMAX. The tilt abort is OFF for hand testing (TILT_ABORT_ENABLED):
-// when on, tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT. It re-arms after the
-// rocket is back within REARM_TILT for REARM_MS (prints ABORT,CLEAR), or on RUN.
-// TODO when the ESC arrives: set TILT_ABORT_ENABLED back to true, throttle output capped at THROTTLE_CAP, motor cut on abort and when
+// Safety: the gimbal is always clamped to +-GMAX. Tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT.
+// It re-arms after the rocket is back within REARM_TILT for REARM_MS (prints ABORT,CLEAR), or on RUN.
+// Free-test (FREE ON) is for tilting the rocket by hand: no tilt abort, gains x FREE_TEST_GAIN, same +-GMAX limit.
+// It always starts off at power-up and is never saved.
+// TODO when the ESC arrives: refuse FREE ON while the motor can run, throttle output capped at THROTTLE_CAP, motor cut on abort and when
 // the serial link goes quiet, and the motor stays off after an abort until RUN.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.4.0";
+const char FW_VERSION[] = "1.6.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -77,11 +79,10 @@ const float THRUST_MAX_G = 220.0;         // EDF static thrust at full throttle 
 const float THRUST_REF_G = 150.0;
 const float GMAX  = 8.0 * DEG_TO_RAD;     // design gimbal travel
 const float GRATE = 60.0 * DEG_TO_RAD;    // gimbal slew-rate limit (rad/s)
-// false = hand testing: the gimbal keeps steering at any tilt, held at +-GMAX. Must be true before the motor runs.
-const bool TILT_ABORT_ENABLED = false;
 const float ABORT_TILT = 25.0 * DEG_TO_RAD;
 const float REARM_TILT = 5.0 * DEG_TO_RAD;
 const unsigned long REARM_MS = 1000;
+const float FREE_TEST_GAIN = 0.5;         // free-test only: multiplies Kp, Kd and Ki
 const float THROTTLE_CAP = 0.85;          // for the ESC (EDF draws ~11 A at full throttle, supply is 10 A)
 
 // No motor yet: run as if the engine is at full throttle so the gimbal always steers.
@@ -180,6 +181,7 @@ float ix = 0, iy = 0;                     // integrators (rad·s)
 float biasX = 0, biasY = 0, biasZ = 0;    // gyro bias, sensor frame (rad/s)
 unsigned long lastLoop = 0, lastTelemetry = 0;
 bool aborted = false;
+bool freeTest = false;                    // never saved: every power-up starts with the abort armed
 unsigned long uprightSince = 0;
 
 bool calMode = false;
@@ -241,6 +243,7 @@ void gimbalStep(float angle, float rate, float &g, float &integ, float dt) {
   float step = GRATE * dt;
   if (throttle > 0.05) {
     float scale = THRUST_REF_G / max(THRUST_MAX_G * throttle, 50.0f);
+    if (freeTest) scale *= FREE_TEST_GAIN;
     integ = constrain(integ + angle * dt, -I_MAX / KI_G, I_MAX / KI_G);
     float cmd = constrain(scale * (KP_G * angle + KD_G * rate + KI_G * integ), -GMAX, GMAX);
     g += constrain(cmd - g, -step, step);
@@ -256,7 +259,7 @@ float servoDeg(float g, int dir, int center) {
 }
 
 void checkAbort() {
-  if (!TILT_ABORT_ENABLED) return;
+  if (freeTest) return;
   float tilt = max(fabs(tiltX), fabs(tiltY));
   if (!aborted) {
     if (tilt > ABORT_TILT) { aborted = true; uprightSince = 0; Serial.println("ABORT,TILT"); }
@@ -306,7 +309,16 @@ void runCommand(char *line) {
       if (u != cfg.up) cfg.rot = 0;
       cfg.up = u;
     }
-    else if (!strcmp(arg1, "ROT"))  cfg.rot = (((int)round(v)) % 4 + 4) % 4;
+    else if (!strcmp(arg1, "ROT")) {
+      // The trims are stored in the rocket frame, so they turn with it: each +1 step, X takes Y and Y takes -X.
+      uint8_t r = (((int)round(v)) % 4 + 4) % 4;
+      for (uint8_t n = (r + 4 - cfg.rot) % 4; n > 0; n--) {
+        float t = cfg.tiltXTrim;
+        cfg.tiltXTrim = cfg.tiltYTrim;
+        cfg.tiltYTrim = -t;
+      }
+      cfg.rot = r;
+    }
     else { Serial.println("ERR,unknown key"); return; }
     cfgDirty = true;
     printConfig();
@@ -343,6 +355,10 @@ void runCommand(char *line) {
   } else if (!strcmp(cmd, "DEFAULTS")) {
     loadDefaults(); cfgDirty = true; attachServos();
     printConfig();
+  } else if (!strcmp(cmd, "FREE") && arg1 && (!strcmp(arg1, "ON") || !strcmp(arg1, "OFF"))) {
+    freeTest = !strcmp(arg1, "ON");
+    aborted = false; uprightSince = 0;   // switching on releases a held abort; switching off re-checks the tilt
+    Serial.println(freeTest ? "FREE,ON" : "FREE,OFF");
   } else {
     Serial.println("ERR,unknown command");
   }
@@ -409,6 +425,7 @@ void setup() {
   Serial.println("Calibrating gyro - keep still...");
   calibrateGyro();
   printConfig();
+  Serial.println("FREE,OFF");
   Serial.println("TVC Gimbal Hardware Initialized!");
   lastLoop = micros();
 }
@@ -447,7 +464,7 @@ void loop() {
   xServo.writeMicroseconds(servoUs(xDeg));
   yServo.writeMicroseconds(servoUs(yDeg));
 
-  // Send comma-separated values for the visualizer: roll,pitch(X),yaw(Y)
+  // Send comma-separated values for the visualizer: roll,pitch(X),yaw(Y),tiltX,tiltY
   // Servo angles are sent relative to 90 so the visualizer's "90 = upright" still holds after trimming.
   if (millis() - lastTelemetry >= TELEMETRY_MS) {
     lastTelemetry = millis();
@@ -456,7 +473,11 @@ void loop() {
     if (TELEMETRY_SERVO) {
       Serial.print(90 + (int)round(xDeg - cfg.xCenter));
       Serial.print(",");
-      Serial.println(90 + (int)round(yDeg - cfg.yCenter));
+      Serial.print(90 + (int)round(yDeg - cfg.yCenter));
+      Serial.print(",");
+      Serial.print(tiltX * RAD_TO_DEG, 1);
+      Serial.print(",");
+      Serial.println(tiltY * RAD_TO_DEG, 1);
     } else {
       Serial.print(tiltX * RAD_TO_DEG, 1);
       Serial.print(",");

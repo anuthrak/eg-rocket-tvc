@@ -96,7 +96,7 @@
 
 <!-- ======================= BENCH TAB ======================= -->
 <main id="benchMain">
-  <div id="view"></div>
+  <div id="view"><div id="viewNote"></div></div>
   <!-- Left: live readouts, chart, input options · Right: gimbal + link details -->
   <aside class="side-l">
     <div class="readouts">
@@ -111,9 +111,9 @@
     </div>
 
     <div class="panel chart-panel">
-      <h2>Pitch · Yaw<span>Last 10 s</span></h2>
+      <h2>Pitch · Yaw tilt<span>Last 10 s</span></h2>
       <canvas id="chart"></canvas>
-      <div class="legend"><span><i style="background:var(--pitch)"></i>Pitch</span><span><i style="background:var(--yaw)"></i>Yaw</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±45° servo limit</span></div>
+      <div class="legend"><span><i style="background:var(--pitch)"></i>Pitch</span><span><i style="background:var(--yaw)"></i>Yaw</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±25° abort</span></div>
     </div>
 
     <div class="panel">
@@ -128,7 +128,7 @@
   </aside>
   <aside class="side-r">
     <div class="panel">
-      <h2 class="h2-act">Gimbal<button id="calBtn" class="h2btn serial-only" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></h2>
+      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)">Free-test</button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></div></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
@@ -154,7 +154,7 @@
         <dt>Port</dt><dd id="lkPort">—</dd><dd class="u"></dd>
         <dt>Firmware</dt><dd id="lkFw">—</dd><dd class="u"></dd>
         <dt class="lk-extra">Baud</dt><dd class="lk-extra" id="lkBaud">115200</dd><dd class="u lk-extra">bit/s</dd>
-        <dt class="lk-extra">Format</dt><dd class="lk-extra">roll,pitch,yaw</dd><dd class="u lk-extra">csv</dd>
+        <dt class="lk-extra">Format</dt><dd class="lk-extra">roll,p,y,tx,ty</dd><dd class="u lk-extra">csv</dd>
         <dt>Lines received</dt><dd id="lkLines">—</dd><dd class="u"></dd>
         <dt>Unparsed lines</dt><dd id="lkErr">—</dd><dd class="u"></dd>
         <dt>Since last line</dt><dd id="lkAge">—</dd><dd class="u" id="lkAgeU">ms</dd>
@@ -165,7 +165,7 @@
 
     <div class="hint panel">
       Needs <b>Chrome or Edge</b> on desktop. Close the Arduino Serial Monitor first, since only one program
-      can hold the port. Expected format: <code>roll,pitch,yaw\n</code>
+      can hold the port. Expected format: <code>roll,pitch,yaw,tiltX,tiltY\n</code>
     </div>
   </aside>
 

@@ -4,6 +4,20 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 
 ## [Unreleased]
 
+## [2.7.0] – 2026-11-04
+### Added
+- Bench: **Free-test** button next to Calibrate, for tilting the rocket by hand. Firmware v1.5.0 `FREE ON|OFF`: no tilt abort and half gains, with the same ±8° limit. It starts off every time the Nano restarts and is never saved.
+- Bench: the 3D model is built from the CAD numbers: 632 mm × Ø78.6 proportions, parts A, B, D with coupler bands, CAD fins at 45/135/225/315°, pivot at the 240 mm CG, and a motor tube that swings about the gimbal point at 57 mm. The tube sticks out 18 mm past the tail so it can be seen (flush in the CAD).
+- Bench: thrust plume out of the motor tube and an arrow for the sideways force on the rocket, with a note saying what they show. On the real rig they are dim, because no motor is wired yet and they only show the command.
+- Firmware v1.6.0: telemetry adds the tilt, `roll,pitch,yaw,tiltX,tiltY`. Older visualizers ignore the extra values.
+### Changed
+- Bench: the rocket now leans by its real tilt from the IMU, and the motor tube shows the nozzle angle (servo deflection ÷ linkage ratio). Charts, readouts and the dial still show servo angles. With older firmware the rocket stays upright and only the tube moves.
+- Demo mode is a physics simulation (`demo-sim.js`) using the design numbers and the firmware's gains: every 6 s a gust knocks the rocket 10–19°, the nozzle goes to its limit, and it recovers in about a second. It is a prediction, not a measurement. You can also drag the rocket up to ±24° and let go to watch it recover; dragging anywhere else still orbits the camera.
+- Bench chart shows the rocket's tilt, with the ±25° abort lines, instead of servo angles. Readout cards and the dial still show servo angles.
+- Firmware v1.5.0: the tilt abort is back on by default; `TILT_ABORT_ENABLED` is gone.
+### Fixed
+- Firmware v1.5.0: `SET ROT` now turns the level trims with the sensor mapping, so an upright rocket still reads upright after the sensor step. Run Level once to clear a trim saved before this fix.
+
 ## [2.6.0] – 2026-11-04
 ### Changed
 - Firmware v1.4.0: the tilt abort is off for hand testing (`TILT_ABORT_ENABLED = false`); the gimbal keeps steering at any tilt, clamped to ±8°. The abort code is unchanged. Turn it back on before the motor runs.

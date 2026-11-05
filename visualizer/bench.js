@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { initCalib } from './calib.js';
+import { createDemoSim } from './demo-sim.js';
 
 const $ = id => document.getElementById(id);
 
@@ -41,7 +42,7 @@ export function initBench() {
     if (_tClamp.lengthSq()) { controls.target.add(_tClamp); camera.position.add(_tClamp); }
   }
   function resetView() {
-    controls.target.set(0, PIVOT_Y, 0);
+    controls.target.set(0, PIVOT_Y + 0.25, 0);   // middle of the rocket: more of it is above the CG
     camera.position.copy(controls.target).addScaledVector(VIEW_DIR, fitDistance());
     controls.update();
   }
@@ -56,61 +57,83 @@ export function initBench() {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.35 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
 
-  // Rocket dimensions; the gimbal pivot is at the middle of the full length (≈ center of mass)
-  const R = 0.2, BODY = 1.6, NOSE = 0.5, TAIL = 0.15;
-  const MID = (TAIL + BODY + NOSE) / 2;
-  const PIVOT_Y = 1.45; // pivot height above the floor (high enough to clear it at ±45°)
+  // Rocket built from the CAD numbers (SLDP-ST-005, in mm from the tail), scaled so 1 mm = MM scene units.
+  // Rough on purpose: no vents, window or screws.
+  const MM = 2.25 / 632;
+  const RO = 39.3, RI = 38.1;                  // body outer / bore radius
+  const CG = 240;                              // desk-rig pivot
+  const GIMBAL = 57;                           // TVC gimbal point
+  const TUBE_R = 18, TUBE_OUT = 18;            // motor tube; sticks out past the tail so it can be seen (flush in the CAD)
+  const Z_C1 = 200, Z_B = 203, Z_C2 = 357, Z_D = 375, Z_NOSE = 515, Z_CONE = 530, Z_TOP = 632;
+  const FIN_ROOT = 75, FIN_TIP = 32, FIN_SPAN = 30;
+  const PIVOT_Y = 1.45; // pivot height above the floor (the rocket clears it at any tilt)
 
   // Vertical reference line through the pivot
   const refGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, PIVOT_Y - MID - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + MID + 0.15, 0)]);
+    new THREE.Vector3(0, PIVOT_Y - (CG + TUBE_OUT) * MM - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + (Z_TOP - CG) * MM + 0.15, 0)]);
   const refLine = new THREE.Line(refGeo, new THREE.LineDashedMaterial({ color: 0x5a6070, dashSize: 0.08, gapSize: 0.06 }));
   refLine.computeLineDistances(); scene.add(refLine);
 
-  // Rocket group origin = pivot. All parts hang off "airframe", shifted down by MID so the middle sits on the pivot.
+  // Rocket group origin = rig pivot at the CG. All parts hang off "airframe", whose origin is the tail.
   const rocket = new THREE.Group();
   rocket.position.y = PIVOT_Y;
-  rocket.rotation.order = 'ZXY'; // roll about own long axis first, then pitch (X), then yaw (Z)
+  rocket.rotation.order = 'ZXY'; // roll about own long axis first, then tilt toward X, then toward Y
   scene.add(rocket);
   const airframe = new THREE.Group();
-  airframe.position.y = -MID;
+  airframe.position.y = -CG * MM;
   rocket.add(airframe);
 
-  // Gimbal collar + pivot pins at the center of mass (they move with the rocket)
+  // Rig collar + pivot pins at the CG (they move with the rocket)
   const metal = new THREE.MeshStandardMaterial({ color: 0x999fab, metalness: 0.7, roughness: 0.3 });
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(R + 0.03, 0.025, 12, 40), metal);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry((RO + 6) * MM, 4 * MM, 12, 40), metal);
   collar.rotation.x = Math.PI / 2; rocket.add(collar);
-  const pinGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.14, 12);
+  const pinGeo = new THREE.CylinderGeometry(5 * MM, 5 * MM, 24 * MM, 12);
   [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([x, z]) => {
     const pin = new THREE.Mesh(pinGeo, metal);
-    pin.position.set(x * (R + 0.1), 0, z * (R + 0.1));
+    pin.position.set(x * (RO + 18) * MM, 0, z * (RO + 18) * MM);
     pin.rotation.set(z ? Math.PI / 2 : 0, 0, x ? Math.PI / 2 : 0);
     rocket.add(pin);
   });
 
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdcdce6, roughness: 0.5 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.5 });
   const noseMat = new THREE.MeshStandardMaterial({ color: 0xc82828, roughness: 0.45 });
   const finMat  = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5, side: THREE.DoubleSide });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, BODY, 32), bodyMat);
-  body.position.y = TAIL + BODY / 2; body.castShadow = true; airframe.add(body);
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 });
+  const bay = new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.9 });
 
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(R, NOSE, 32), noseMat);
-  nose.position.y = TAIL + BODY + NOSE / 2; nose.castShadow = true; airframe.add(nose);
+  // Body parts A, B, D with the C1 and C2 coupler bands between them, then the nose band and cone
+  function section(z0, z1, mat) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(RO * MM, RO * MM, (z1 - z0) * MM, 40), mat);
+    m.position.y = (z0 + z1) / 2 * MM; m.castShadow = true; airframe.add(m);
+  }
+  section(0, Z_C1, bodyMat); section(Z_C1, Z_B, bandMat); section(Z_B, Z_C2, bodyMat);
+  section(Z_C2, Z_D, bandMat); section(Z_D, Z_NOSE, bodyMat); section(Z_NOSE, Z_CONE, noseMat);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(RO * MM, (Z_TOP - Z_CONE) * MM, 40), noseMat);
+  nose.position.y = (Z_CONE + Z_TOP) / 2 * MM; nose.castShadow = true; airframe.add(nose);
 
-  // Motor mount / nozzle under the body (sits in the gimbal)
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, TAIL, 24),
-    new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 }));
-  nozzle.position.y = TAIL / 2; nozzle.castShadow = true; airframe.add(nozzle);
+  // Open tail: the dark bore the motor tube swings in
+  const tailBore = new THREE.Mesh(new THREE.CircleGeometry(RI * MM, 40), bay);
+  tailBore.rotation.x = Math.PI / 2; tailBore.position.y = -0.001; airframe.add(tailBore);
 
-  // Fins: triangle in the radial plane, like the Processing sketch
+  // TVC mount: the motor tube pivots about the gimbal point, in the same rotation sense as the rocket's tilt
+  const tvc = new THREE.Group();
+  tvc.position.y = GIMBAL * MM;
+  tvc.rotation.order = 'ZXY';
+  airframe.add(tvc);
+  const tubeLen = GIMBAL + TUBE_OUT;
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(TUBE_R * MM, TUBE_R * MM, tubeLen * MM, 24), tubeMat);
+  tube.position.y = -tubeLen / 2 * MM; tube.castShadow = true; tvc.add(tube);
+
+  // Fins: root along the body at the tail, swept leading edge, clocked at 45/135/225/315° as in the CAD
   const finShape = new THREE.Shape();
-  finShape.moveTo(0, 0); finShape.lineTo(0.15, 0.2); finShape.lineTo(0, 0.4); finShape.closePath();
+  finShape.moveTo(0, 0); finShape.lineTo(FIN_SPAN * MM, 0); finShape.lineTo(FIN_SPAN * MM, FIN_TIP * MM); finShape.lineTo(0, FIN_ROOT * MM); finShape.closePath();
   const finGeo = new THREE.ShapeGeometry(finShape);
   for (let i = 0; i < 4; i++) {
     const holder = new THREE.Group();
-    holder.rotation.y = (Math.PI / 2) * i;
+    holder.rotation.y = Math.PI / 4 + (Math.PI / 2) * i;
     const fin = new THREE.Mesh(finGeo, finMat);
-    fin.position.set(R, TAIL, 0);
+    fin.position.set(RO * MM, 0, 0);
     fin.castShadow = true;
     holder.add(fin); airframe.add(holder);
   }
@@ -143,6 +166,63 @@ export function initBench() {
     });
   }
 
+  // ---------- Thrust: plume out of the motor tube, arrow for the sideways force it puts on the rocket ----------
+  // Added after the outline list above, so outline view leaves them as they are.
+  function plumeMaterial(color, strength) {
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(color) }, uK: { value: strength } },
+      vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV;
+        void main(){ vY = position.y; vec4 mv = modelViewMatrix*vec4(position,1.0);
+          vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uK; varying float vY; varying vec3 vN; varying vec3 vV;
+        void main(){ float along = pow(clamp(1.0 + vY, 0.0, 1.0), 1.6);      // bright at the tube, fades to the tip
+          float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.3);       // soft silhouette
+          gl_FragColor = vec4(uColor * along * edge * uK, 1.0); }`
+    });
+    m.userData.outlineParameters = noOutline;
+    return m;
+  }
+  const PLUME_LEN = 130 * MM, PLUME_R = TUBE_R * 1.1 * MM;   // short enough to clear the floor
+  const plumeGeo = new THREE.ConeGeometry(1, 1, 24, 1, true); plumeGeo.rotateX(Math.PI); plumeGeo.translate(0, -0.5, 0);
+  const plume = new THREE.Group();
+  const plumeOuter = new THREE.Mesh(plumeGeo, plumeMaterial(0x4f8fd8, 0.8));
+  const plumeInner = new THREE.Mesh(plumeGeo, plumeMaterial(0xd8ecff, 1));   // the EDF blows air, so cool colours, not fire
+  plumeInner.scale.set(0.5, 0.6, 0.5);
+  plume.add(plumeOuter, plumeInner);
+  plume.position.y = -tubeLen * MM; plume.visible = false;
+  tvc.add(plume);
+
+  const ARROW_AT_LIMIT = 0.45;   // scene units at the full ±8°
+  const forceArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, GIMBAL * MM, 0), ARROW_AT_LIMIT, 0xf5a623, 0.08, 0.055);
+  [forceArrow.line, forceArrow.cone].forEach(o => {
+    o.material.depthTest = false; o.material.transparent = true;   // the gimbal point is inside the body: draw it on top
+    o.material.userData.outlineParameters = noOutline;
+    o.renderOrder = 5;
+  });
+  forceArrow.visible = false;
+  airframe.add(forceArrow);
+
+  const _lateral = new THREE.Vector3();
+  // gx, gy = nozzle angle in degrees. level = 1 for full thrust, lower when no motor is actually running.
+  function updateThrust(on, gx, gy, level) {
+    plume.visible = on;
+    forceArrow.visible = false;
+    if (!on) return;
+    const flicker = 0.92 + Math.random() * 0.16;
+    plume.scale.set(PLUME_R, PLUME_LEN * flicker, PLUME_R);
+    plumeOuter.material.uniforms.uK.value = 0.8 * level;
+    plumeInner.material.uniforms.uK.value = level;
+    // Rocket +X is scene +Z and +Y is scene +X. A positive nozzle angle pushes the tail toward that side.
+    _lateral.set(Math.sin(gy * Math.PI / 180), 0, Math.sin(gx * Math.PI / 180));
+    const size = _lateral.length() / Math.sin(8 * Math.PI / 180);
+    if (size < 0.03) return;
+    forceArrow.visible = true;
+    forceArrow.setDirection(_lateral.normalize());
+    forceArrow.setLength(Math.max(0.1, size * ARROW_AT_LIMIT), 0.08, 0.055);
+    forceArrow.line.material.opacity = forceArrow.cone.material.opacity = Math.max(level, 0.6);
+  }
+
   let firstFit = true;
   function resize() {
     const w = Math.max(1, view.clientWidth), h = Math.max(1, view.clientHeight);
@@ -162,10 +242,13 @@ export function initBench() {
   resize();
 
   // ---------- State ----------
-  const target = { roll: 0, pitch: 0, yaw: 0 };
-  const shown  = { roll: 0, pitch: 0, yaw: 0 };
-  const zero   = { roll: 0, pitch: 0, yaw: 0 };
-  const history = []; // {t, pitch, yaw}
+  // pitch/yaw = X/Y servo deflection from neutral (charts, readouts, dial); tiltX/tiltY = the rocket's attitude (3D view)
+  const target = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const shown  = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const zero   = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
+  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4 };
+  let rig = { ...NO_CFG };   // from the Nano's CFG line: servo direction, level trims, servo degrees per gimbal degree
+  const history = []; // {t, tiltX, tiltY}
   const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
   let sampleTimes = [];
   let linkStart = null;                // when the current Arduino / demo feed started
@@ -183,24 +266,41 @@ export function initBench() {
     lineCount++;
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
+    if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
     if (/^(CAL|CFG|ERR|ABORT),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort
-      const cal = line.match(/^CAL,(-?\d+),(-?\d+),/);
+      const cal = line.match(/^CAL,(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+)/);
       logLine(line, cal ? undefined : 'msg');
+      if (line.startsWith('CFG,')) {
+        const p = line.split(',').map(Number);
+        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7] };
+      }
       calib.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
-      if (cal) applySample(target.roll + zero.roll, servoMode.checked ? +cal[1] : cal[1] - 90, servoMode.checked ? +cal[2] : cal[2] - 90);
+      if (cal) {
+        const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
+        if (servoMode.checked) applySample(target.roll + zero.roll, +cal[1], +cal[2], tx, ty);
+        else applySample(target.roll + zero.roll, tx, ty);
+      }
       return;
     }
     const parts = line.split(',').map(s => parseFloat(s));
     if (parts.length < 3 || parts.slice(0, 3).some(v => !Number.isFinite(v))) { errCount++; logLine(line, 'msg'); return; } // boot messages etc.
     logLine(line);
-    applySample(...parts.slice(0, 3));
+    applySample(...parts.slice(0, 5));   // roll, X servo, Y servo, then tiltX, tiltY from firmware v1.6.0+
   }
 
-  function applySample(roll, pitch, yaw) {
+  function applySample(roll, pitch, yaw, tiltX, tiltY) {
     raw.pitch = pitch; raw.yaw = yaw;
-    if (servoMode.checked) { pitch -= 90; yaw -= 90; }
+    if (servoMode.checked) {
+      pitch -= 90; yaw -= 90;
+      // Older firmware doesn't send the tilt: the rocket stays upright and only the motor tube moves
+      target.tiltX = Number.isFinite(tiltX) ? tiltX - zero.tiltX : 0;
+      target.tiltY = Number.isFinite(tiltY) ? tiltY - zero.tiltY : 0;
+    } else {
+      target.tiltX = pitch - zero.pitch;
+      target.tiltY = yaw - zero.yaw;
+    }
     target.roll = roll - zero.roll;
     target.pitch = pitch - zero.pitch;
     target.yaw = yaw - zero.yaw;
@@ -209,16 +309,15 @@ export function initBench() {
     const now = performance.now();
     lastLineT = now;
     sampleTimes.push(now);
-    history.push({ t: now, pitch: target.pitch, yaw: target.yaw });
+    history.push({ t: now, tiltX: target.tiltX, tiltY: target.tiltY });
     while (history.length && now - history[0].t > 10000) history.shift();
   }
 
   $('zeroBtn').onclick = () => {
-    zero.roll += target.roll; zero.pitch += target.pitch; zero.yaw += target.yaw;
-    target.roll = target.pitch = target.yaw = 0;
+    for (const a of Object.keys(zero)) { zero[a] += target[a]; target[a] = 0; }
     peak.pitch = peak.yaw = 0;
   };
-  servoMode.onchange = () => { zero.roll = zero.pitch = zero.yaw = 0; };
+  servoMode.onchange = () => { for (const a of Object.keys(zero)) zero[a] = 0; };
   $('viewBtn').onclick = resetView;
 
   // ---------- Web Serial ----------
@@ -239,13 +338,20 @@ export function initBench() {
   }
   const gTrail = [];   // recent gimbal dial positions
 
+  // Free-test: the button only follows what the Nano reports, and the Nano starts with it off
+  let freeOn = false;
+  function setFree(on) { freeOn = on; $('freeBtn').classList.toggle('on', on); }
+  $('freeBtn').onclick = () => send(freeOn ? 'FREE OFF' : 'FREE ON');
+
   function startLink(label) {
     $('serialLog').textContent = '';
     linkStart = performance.now(); lastLineT = null; lineCount = errCount = 0;
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
+    rig = { ...NO_CFG };
+    setFree(false); $('freeBtn').disabled = !port;
     calib.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; calib.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
   const enc = new TextEncoder();
@@ -323,30 +429,97 @@ export function initBench() {
   }
 
   // ---------- Demo mode (no hardware) ----------
-  let demoTimer = null;
+  let demoTimer = null, demoSim = null;
   function startDemo() {
     if (port) return;
     $('demoBtn').textContent = 'Stop demo';
     $('demoPill').classList.add('on');
     setStatus('Demo feed', true);
     startLink('Demo');
-    const t0 = performance.now();
+    const sim = demoSim = createDemoSim();
+    let simT = performance.now();
     demoTimer = setInterval(() => {
-      const t = (performance.now() - t0) / 1000;
-      const p = 90 + 35 * Math.sin(t * 0.9) + 6 * Math.sin(t * 3.1);
-      const y = 90 + 30 * Math.sin(t * 0.6 + 1.2);
-      const fake = servoMode.checked ? `0,${Math.round(p)},${Math.round(y)}` : `0,${Math.round(p - 90)},${Math.round(y - 90)}`;
-      handleLine(fake);
+      // Catch up in 10 ms steps; after a pause (hidden tab) carry on from now instead of replaying it
+      const now = performance.now();
+      if (now - simT > 500) simT = now - 50;
+      for (; simT < now; simT += 10) {
+        const gust = sim.step();
+        if (gust) logLine(`Gust: pushed toward ${gust.dir}°`, 'msg');
+      }
+      const s = sim.read();
+      const servo = g => 90 + Math.round(g * rig.spg);
+      handleLine(servoMode.checked
+        ? `0,${servo(s.gimbalX)},${servo(s.gimbalY)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
+        : `0,${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`);
     }, 50);
   }
   function stopDemo() {
     if (!demoTimer) return;
     clearInterval(demoTimer); demoTimer = null;
+    endDrag(); demoSim = null;
     $('demoBtn').textContent = 'Demo mode';
     $('demoPill').classList.remove('on');
     if (!port) { setStatus('Not connected', false); endLink(); }
   }
   $('demoBtn').onclick = () => (demoTimer ? stopDemo() : startDemo());
+
+  // ---------- Demo: drag the rocket, then let go ----------
+  // Dragging the rocket tilts it; dragging anywhere else still orbits the camera. The grabbed point follows the pointer on
+  // a plane facing the camera. Grabbing near the pivot would make it twitchy, so that acts like grabbing further along.
+  const ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+  const PIVOT = new THREE.Vector3(0, PIVOT_Y, 0), MIN_LEVER = 0.7;
+  const _plane = new THREE.Plane(), _hit = new THREE.Vector3(), _camDir = new THREE.Vector3(), _axis = new THREE.Vector3();
+  let drag = null;   // { id, lever, offset }
+
+  function aimRay(e) {
+    const r = view.getBoundingClientRect();
+    _ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+    ray.setFromCamera(_ndc, camera);
+  }
+  function rocketHit(e) { aimRay(e); return ray.intersectObjects(rocketMeshes, false)[0] || null; }
+  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on'); }
+
+  view.addEventListener('pointerdown', e => {   // capture phase: decides before OrbitControls sees the press
+    if (drag || !canDrag() || !e.isPrimary || e.button !== 0) return;
+    const hit = rocketHit(e);
+    if (!hit) return;
+    rocket.updateWorldMatrix(true, false);
+    _axis.set(0, 1, 0).transformDirection(rocket.matrixWorld);
+    let lever = hit.point.clone().sub(PIVOT).dot(_axis);
+    if (Math.abs(lever) < MIN_LEVER) lever = MIN_LEVER;
+    const grab = PIVOT.clone().addScaledVector(_axis, lever);
+    camera.getWorldDirection(_camDir);
+    _plane.setFromNormalAndCoplanarPoint(_camDir, grab);
+    if (!ray.ray.intersectPlane(_plane, _hit)) return;
+    drag = { id: e.pointerId, lever, offset: grab.sub(_hit) };
+    controls.enabled = false;
+    view.setPointerCapture(e.pointerId);
+    view.style.cursor = 'grabbing';
+  }, true);
+
+  view.addEventListener('pointermove', e => {
+    if (!drag) {
+      view.style.cursor = canDrag() && e.pointerType === 'mouse' && rocketHit(e) ? 'grab' : '';
+      return;
+    }
+    if (e.pointerId !== drag.id) return;
+    aimRay(e);
+    if (!ray.ray.intersectPlane(_plane, _hit)) return;
+    _axis.copy(_hit).add(drag.offset).sub(PIVOT).normalize().multiplyScalar(Math.sign(drag.lever));
+    // Rocket up = (cos tiltX · sin tiltY, cos tiltX · cos tiltY, sin tiltX) in scene axes: see rocket.rotation in animate()
+    const tiltX = THREE.MathUtils.radToDeg(Math.asin(_axis.z)), tiltY = THREE.MathUtils.radToDeg(Math.atan2(_axis.x, _axis.y));
+    demoSim.hold(tiltX + zero.tiltX, tiltY + zero.tiltY);
+  });
+
+  function endDrag(e) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    drag = null;
+    controls.enabled = true;
+    view.style.cursor = '';
+    demoSim?.release();
+  }
+  view.addEventListener('pointerup', endDrag);
+  view.addEventListener('pointercancel', endDrag);
 
   // ---------- Chart ----------
   const chart = $('chart'), ctx = chart.getContext('2d');
@@ -357,13 +530,13 @@ export function initBench() {
     if (chart.width !== w * dpr) { chart.width = w * dpr; chart.height = h * dpr; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const RANGE = 60; // ±60° visible
+    const RANGE = 35; // ±35° of tilt visible
     const L = 22;     // left gutter for axis labels
     const yOf = v => h / 2 - (v / RANGE) * (h / 2 - 6);
-    // Faint grid: every 15° and every 2 s, with small muted axis labels
+    // Faint grid: every 10° and every 2 s, with small muted axis labels
     ctx.lineWidth = 1; ctx.font = '500 9px "Barlow Condensed", sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    for (let v = -45; v <= 45; v += 15) {
+    for (let v = -30; v <= 30; v += 10) {
       const y = Math.round(yOf(v)) + 0.5;
       ctx.strokeStyle = v === 0 ? '#2c2f36' : '#16171b';
       ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w, y); ctx.stroke();
@@ -375,12 +548,12 @@ export function initBench() {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
     }
     ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,77,94,.55)';
-    [45, -45].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
+    [25, -25].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
     ctx.setLineDash([]);
     const now = performance.now();
     const xOf = t => w - ((now - t) / 10000) * (w - L);
     ctx.save(); ctx.beginPath(); ctx.rect(L, 0, w - L, h); ctx.clip();
-    [['pitch', '#5b8cff'], ['yaw', '#ff8a3d']].forEach(([k, c]) => {
+    [['tiltX', '#5b8cff'], ['tiltY', '#ff8a3d']].forEach(([k, c]) => {
       ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.beginPath();
       history.forEach((s, i) => { const x = xOf(s.t), y = yOf(s[k]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke();
@@ -394,9 +567,15 @@ export function initBench() {
   function animate(now) {
     requestAnimationFrame(animate);
     const k = smooth.checked ? 0.18 : 1;
-    for (const a of ['roll', 'pitch', 'yaw']) shown[a] += (target[a] - shown[a]) * k;
+    for (const a of Object.keys(shown)) shown[a] += (target[a] - shown[a]) * k;
 
-    rocket.rotation.set(deg(shown.pitch), deg(shown.roll), deg(-shown.yaw));
+    rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
+    // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
+    const servoData = servoMode.checked;
+    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spg : 0;
+    tvc.rotation.set(deg(gx), 0, deg(-gy));
+    // No motor is wired yet, so on the real rig the plume and arrow stay dim: they show the command, not real thrust
+    updateThrust(linkStart !== null && lastLineT !== null, gx, gy, demoTimer ? 1 : 0.35);
     controls.update();
     fenceTarget();
     // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
@@ -414,6 +593,9 @@ export function initBench() {
   const sgn1 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
   function updateBenchUI(now) {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
+    $('viewNote').textContent = !hasData ? '' : demoTimer
+      ? 'Drag the rocket and let go. Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
+      : 'No motor yet: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
     $('yawVal').textContent = f1(target.yaw);
