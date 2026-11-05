@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Changed
+- Mission: **Hit it** now knocks the rocket off its path as well as turning it. Guidance leans the nose to steer back, using the TVC while the engine burns and the RCS when it's off. It's a simple offset from the scripted path, which fades out before touchdown, not a full trajectory simulation.
 ### Fixed
 - Mission: **Hit it** waits until the rocket has recovered from the last hit. Back-to-back hits could stack up until it tumbled.
 

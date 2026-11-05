@@ -103,6 +103,15 @@ export async function initMission(step) {
   const ctrlP = { g: 0, integ: 0 }, ctrlY = { g: 0, integ: 0 };   // the Nano's controller, one per axis
   let gust = null;                                 // "Hit it": { p, y, until, t0, peak }
 
+  // Off course: how far the rocket is from the scripted path, in scene units. The path stays the reference. Thrust that isn't
+  // along the path and hits move the rocket off it, and guidance leans the nose to steer back. A simple model, not a trajectory.
+  const dev = new THREE.Vector3(), devV = new THREE.Vector3();
+  const LAT_ACCEL = 1.2;     // sideways acceleration per radian of lean at full thrust
+  const BACK_P = 0.64, BACK_D = 1.3;   // guidance: how hard it steers back, and how much it damps the drift
+  const LEAN_MAX = 15 * DEG, RCS_ACCEL = 0.08, TRIM_ACCEL = 0.2;   // limits on the lean, the RCS push and the push along the axis
+  const HIT_KNOCK = 0.35;    // how much of a hit moves the rocket, as well as turning it
+  const _axis = new THREE.Vector3(), _axisT = new THREE.Vector3(), _nrm = new THREE.Vector3(), _ask = new THREE.Vector3();
+
   function engineAt(t) {
     if (simState === 'idle' || t < -3) return { on: false, thr: 0 };
     if (t < 0) return { on: true, thr: 0.85 * (t + 3) / 3, held: true };
@@ -149,7 +158,13 @@ export async function initMission(step) {
       att.gp += clamp(-att.gp, -GRATE * dt, GRATE * dt); att.gy += clamp(-att.gy, -GRATE * dt, GRATE * dt);
       att.rcsP = att.rcsY = 0; return;
     }
-    const e = wrapPi(targetPsi(t) - att.psi), ec = -att.chi;
+    // Guidance: the sideways push it wants, turned into a lean of the nose while the engine is burning
+    const pathPsi = targetPsi(t), burning = eng.on && eng.thr > 0.05;
+    _nrm.set(-Math.sin(pathPsi), Math.cos(pathPsi), 0);
+    _ask.copy(dev).multiplyScalar(-BACK_P).addScaledVector(devV, -BACK_D);
+    const leanP = burning ? clamp(_ask.dot(_nrm) / (LAT_ACCEL * eng.thr), -LEAN_MAX, LEAN_MAX) : 0;
+    const leanY = burning ? clamp(_ask.z / (LAT_ACCEL * eng.thr), -LEAN_MAX, LEAN_MAX) : 0;
+    const e = wrapPi(pathPsi + leanP - att.psi), ec = leanY - att.chi;
     const q = (t > 0 && t < 45) ? Math.exp(-(((t - 18) / 8) ** 2)) : 0;   // dynamic pressure (peaks at Max-Q)
     const slosh = eng.on ? 1 : 0;
     let dP = q * (1.9 * noise(t, 1.3) + 0.5) + slosh * 0.12 * noise(t * 1.4, 5.1);
@@ -162,10 +177,10 @@ export async function initMission(step) {
       // On target and no longer swinging. The swing is measured against the target, which itself turns along the flight path.
       const swing = gust.e === undefined ? Infinity : Math.hypot(wrapPi(e - gust.e) / dt, att.wc);
       gust.e = e;
-      if (t > gust.until && off < 2 && swing < 2 * DEG) {
-        if (gust.peak > 2) callout(`RECOVERED IN ${(t - gust.t0).toFixed(1)} S · PEAK ${gust.peak.toFixed(0)}°`);
+      if (t > gust.until && off < 2 && swing < 2 * DEG && dev.length() < 0.06 && devV.length() < 0.03) {
+        callout(`BACK ON COURSE IN ${(t - gust.t0).toFixed(1)} S · PEAK ${gust.peak.toFixed(0)}°`);
         gust = null;
-      } else if (t > gust.t0 + 20) gust = null;
+      } else if (t > gust.t0 + 30) gust = null;
     }
     let aP, aY;
     if (eng.on && eng.thr > 0.05) {
@@ -186,6 +201,18 @@ export async function initMission(step) {
       att.rcsY = clamp(1.5 * ec - 2.2 * att.wc, -0.8, 0.8);
       aP = att.rcsP + hitP; aY = att.rcsY + hitY;
     }
+    // Off the path: thrust away from the path direction, the push along the axis or from the RCS, and the hit itself
+    const cc = Math.cos(att.chi);
+    _axis.set(Math.cos(att.psi) * cc, Math.sin(att.psi) * cc, Math.sin(att.chi));
+    if (burning) {
+      _axisT.set(Math.cos(pathPsi), Math.sin(pathPsi), 0);
+      devV.addScaledVector(_tv.subVectors(_axis, _axisT), LAT_ACCEL * eng.thr * dt);
+      devV.addScaledVector(_axis, clamp(_ask.dot(_axis), -TRIM_ACCEL, TRIM_ACCEL) * dt);
+    } else if (_ask.length() > 1e-6) {
+      devV.addScaledVector(_ask, Math.min(1, RCS_ACCEL / _ask.length()) * dt);
+    }
+    if (hitP || hitY) { devV.addScaledVector(_nrm, hitP * HIT_KNOCK * dt); devV.z += hitY * HIT_KNOCK * dt; }
+    dev.addScaledVector(devV, dt);
     att.w += aP * dt; att.psi += att.w * dt;
     att.wc += aY * dt; att.chi += att.wc * dt;
   }
@@ -559,8 +586,18 @@ export async function initMission(step) {
 
   // ---------- Visual update ----------
   const ZW = new THREE.Vector3(0, 0, 1), _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+  // The scripted path plus the offset, which fades out before touchdown and never takes the rocket below the ground
+  function flightPos(t, out) {
+    posAt(Math.max(t, 0), out);
+    const fade = 1 - smoothstep(t_land - 6, t_land - 1, t);
+    if (fade <= 0) return out;
+    out.addScaledVector(dev, fade);
+    if (t < t_soi) { const r = out.length(); if (r < RPAD) out.multiplyScalar(RPAD / r); }
+    else { _bx.subVectors(out, moon.position); const r = _bx.length(); if (r < RLAND) out.copy(moon.position).addScaledVector(_bx, RLAND / r); }
+    return out;
+  }
   function placeShip() {
-    posAt(Math.max(simT, 0), ship.position);
+    flightPos(simT, ship.position);
     const cp = Math.cos(att.psi), sp = Math.sin(att.psi), cc = Math.cos(att.chi), sc = Math.sin(att.chi);
     _by.set(cp * cc, sp * cc, sc);
     _bz.copy(ZW).addScaledVector(_by, -_by.z).normalize();
@@ -788,7 +825,7 @@ export async function initMission(step) {
     simState = 'idle'; simT = -10;
     hudMax.v = hudMax.alt = hudMax.g = 0;
     Object.assign(att, { psi: TH_L, w: 0, chi: 0, wc: 0, gp: 0, gy: 0, rcsP: 0, rcsY: 0 });
-    ctrlP.integ = ctrlY.integ = 0; gust = null; shotId = null; shakeKick = 0; lastFxT = -10;
+    ctrlP.integ = ctrlY.integ = 0; gust = null; dev.set(0, 0, 0); devV.set(0, 0, 0); shotId = null; shakeKick = 0; lastFxT = -10;
     fx.clear();
     reattachBooster();
     trailN = 0; trail2D.length = 0; lastTrailT = -1; trailGeo.setDrawRange(0, 0);
@@ -805,8 +842,8 @@ export async function initMission(step) {
   $('resetSimBtn').onclick = resetSim;
   $('warp').onchange = e => { warp = Number(e.target.value); };
 
-  // Hit it: shove the rocket sideways for 0.3 s, in a random direction. With the engine burning the gimbal fights back;
-  // with it off, the much weaker RCS does, so the shove is smaller. It changes the attitude only: the flight path is scripted.
+  // Hit it: shove the rocket sideways for 0.3 s, in a random direction. It turns and knocks it off course, then the gimbal
+  // and guidance bring it back. With the engine off, the much weaker RCS does it, so the shove is smaller.
   // One at a time: back-to-back hits would stack up until the rocket tumbles, so the button waits for the recovery.
   const canHit = () => simState === 'running' && simT > 0.5 && simT < t_land - 3 && !gust;
   $('hitBtn').onclick = () => {
@@ -1107,7 +1144,7 @@ export async function initMission(step) {
         dynStep(h); boosterStep(h);
         simT += h; rem -= h;
         if (!boost.free && simT >= T_SEP) { placeShip(); separate(); }
-        if (simT >= 0 && simT - lastTrailT >= 0.25) { lastTrailT = simT; pushTrail(posAt(simT, _tp)); }
+        if (simT >= 0 && simT - lastTrailT >= 0.25) { lastTrailT = simT; pushTrail(flightPos(simT, _tp)); }
         if (simT >= t_land + 4) { simState = 'done'; refreshButtons(); }
       }
       fireEvents(t0, simT);
