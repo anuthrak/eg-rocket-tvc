@@ -247,7 +247,6 @@ footer .tmp button { padding: 1px 8px; font-size: 10px; margin-left: 4px; }   /*
 #mission { position: relative; min-height: 0; overflow: hidden; background: #000; color: #fff;
   font-family: 'Barlow', system-ui, sans-serif; }
 #missionView { position: absolute; inset: 0; }
-#mFlash { position: absolute; inset: 0; z-index: 1; opacity: 0; pointer-events: none; background: radial-gradient(circle at 50% 55%, #fff6e0, #ffb066 55%, #ff7a2f); }
 #missionView canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; touch-action: none; }
 .m-ui { position: absolute; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
 .m-ui button, .m-ui select, .mini-bench { pointer-events: auto; }

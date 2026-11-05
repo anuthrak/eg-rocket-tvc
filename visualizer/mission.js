@@ -956,7 +956,7 @@ export async function initMission(step) {
     if (k >= 1) { intro = null; mControls.enabled = true; camGuard.offset = null; mControls.update(); }
   }
 
-  // ---------- Effects: particles, shake, flash ----------
+  // ---------- Effects: particles, shake ----------
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pulse = (t, at, width) => Math.exp(-(((t - at) / width) ** 2));
   const PAD_U = PAD_BASE.clone().normalize(), PAD_E = new THREE.Vector3().crossVectors(PAD_U, ZW_AXIS);
@@ -1030,7 +1030,7 @@ export async function initMission(step) {
   function shakeAmount(t) {
     if (simState === 'idle') return 0;
     const eng = engineAt(t);
-    return smoothstep(-3, -0.4, t) * (1 - smoothstep(3, 14, t))   // ignition and liftoff
+    return 0.55 * smoothstep(-3, -0.4, t) * (1 - smoothstep(3, 14, t))   // ignition and liftoff
       + 0.7 * pulse(t, 18, 6)                                     // Max-Q
       + 0.9 * pulse(t, T_SEP, 0.3) + 0.4 * pulse(t, T_SES, 0.25)  // separation, second engine start
       + (eng.on ? 0.06 : 0)                                       // any burn
@@ -1048,16 +1048,6 @@ export async function initMission(step) {
     mCam.position.add(_shake);
     mCam.updateMatrixWorld();
     return true;
-  }
-  let flashShown = 0;
-  function updateFlash() {
-    const t = simT;
-    let f = 0;
-    if (!REDUCED && simState !== 'idle' && camMode !== 'overview') {
-      f = 0.5 * pulse(t, -2.9, 0.3) + 0.6 * pulse(t, 0, 0.35) + 0.65 * pulse(t, T_SEP, 0.18) + 0.3 * pulse(t, T_SES, 0.18) + 0.14 * shakeKick;
-    }
-    f = Math.min(0.8, f);
-    if (Math.abs(f - flashShown) > 0.004) { flashShown = f; $('mFlash').style.opacity = f.toFixed(3); }
   }
 
   let mWarmed = false, fitDue = true;
@@ -1093,7 +1083,6 @@ export async function initMission(step) {
     // One warm-up frame (uploads the planet textures to the GPU), then skip drawing while the loading screen covers it
     if (mWarmed && window.tvcCovered?.()) return;
     shakeKick *= Math.exp(-realDt * 5);
-    updateFlash();
     const shaken = applyShake(now);
     mRenderer.render(mScene, mCam); mWarmed = true;
     if (shaken) mCam.position.sub(_shake);

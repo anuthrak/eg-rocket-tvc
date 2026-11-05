@@ -5,7 +5,7 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 ## [Unreleased]
 ### Added
 - Mission: Director camera (now the default) that cuts between shots through the flight, with stage separation in slow motion. Dragging or zooming takes the camera back as a chase view. The camera button cycles Director, Chase and Overview.
-- Mission: camera shake and screen flash at ignition, liftoff, Max-Q, separation and hits, plus an engine glow. Shake and flash turn off under the system's reduced-motion setting.
+- Mission: camera shake at ignition, liftoff, Max-Q, separation and hits, plus an engine glow. Shake turns off under the system's reduced-motion setting.
 - Mission: pad smoke, a Max-Q vapour collar, separation puffs and landing dust.
 - Mission: live nozzle close-up in the panel under the mini bench (hidden on phones and whenever it doesn't fit beside the HUD).
 - Mission: **Hit it** button shoves the rocket mid-flight and reports the recovery time and peak angle. The flight path stays scripted, so a hit changes the attitude only.
