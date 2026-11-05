@@ -378,9 +378,9 @@ export async function initMission(step) {
 
   // Upper stage (y −0.2 … +0.2)
   {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(RR, RR, 0.24, 24), white); b.position.y = -0.04; ship.add(b);
-    const n = new THREE.Mesh(new THREE.ConeGeometry(RR, 0.12, 24), white); n.position.y = 0.14; ship.add(n);
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.025, 24), black); band.position.y = 0.06; ship.add(band);
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(RR, RR, 0.24, 72), white); b.position.y = -0.04; ship.add(b);
+    const n = new THREE.Mesh(new THREE.ConeGeometry(RR, 0.12, 72), white); n.position.y = 0.14; ship.add(n);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.025, 72), black); band.position.y = 0.06; ship.add(band);
   }
   const nz2 = makeNozzle(0.03, 0.04); nz2.position.y = -0.16; ship.add(nz2);
   // Landing legs: stowed folded up against the body, they swing out and down for descent.
@@ -397,9 +397,9 @@ export async function initMission(step) {
   const BOOST_Y = -0.16 - B_L / 2;
   const booster = new THREE.Group(); booster.position.y = BOOST_Y; ship.add(booster);
   {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(RR, RR, B_L - 0.05, 24), white); b.position.y = 0.025; booster.add(b);
-    const inter = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.07, 24), black); inter.position.y = B_L / 2 - 0.035; booster.add(inter);
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.05, 24), black); base.position.y = -B_L / 2 + 0.075; booster.add(base);
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(RR, RR, B_L - 0.05, 72), white); b.position.y = 0.025; booster.add(b);
+    const inter = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.07, 72), black); inter.position.y = B_L / 2 - 0.035; booster.add(inter);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.05, 72), black); base.position.y = -B_L / 2 + 0.075; booster.add(base);
     const fs = new THREE.Shape(); fs.moveTo(0, 0); fs.lineTo(0.05, -0.02); fs.lineTo(0.05, -0.08); fs.lineTo(0, -0.1); fs.closePath();
     const fg = new THREE.ShapeGeometry(fs);
     for (let i = 0; i < 4; i++) {
@@ -581,7 +581,7 @@ export async function initMission(step) {
       // Onboard cameras see the plume end-on, where its cone shows hard edges: a soft glow past the body stands in for it
       plume.visible = !onboard;
       glow.position.y = glow.userData.y - (onboard ? 0.2 : 0);
-      glow.material.opacity = onboard ? onboard.dim ?? 0.6 : 1;
+      glow.material.opacity = onboard ? onboard.dim ?? 0.8 : 1;
       const g = (onboard ? (nz === nz1 ? 0.95 : 0.75) : (nz === nz1 ? 0.5 : 0.34)) * eng.thr * fl; glow.scale.set(g, g, 1);
     });
     const rcs = Math.max(Math.abs(att.rcsP), Math.abs(att.rcsY));
@@ -616,28 +616,29 @@ export async function initMission(step) {
   // ---------- Director: cuts between shots through the flight ----------
   // Moving shots sit at [forward, up, side] from the rocket, along its path. Fixed shots stand on the pad or the Moon.
   // Onboard shots are bolted to the rocket at `cam` and look back down the body at `aim` (both in rocket coordinates).
-  // They sit on the rocket's +X side, away from the planet, so the horizon stays level and the fins look even.
+  // Like a real rocket camera they sit right against the body near the tail with a wide lens, tilted slightly outward, so the
+  // body is a low dome across the bottom of the picture with the fins and engine glow beyond it. They're off to one side, so the
+  // horizon runs diagonally and the fins look uneven.
   // Overhead shots look straight down on the rocket.
   const _F = new THREE.Vector3(1, 0, 0), _U = new THREE.Vector3(0, 1, 0), _off = new THREE.Vector3(), _want = new THREE.Vector3(), _look = new THREE.Vector3();
   const PAD_BASE = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0).multiplyScalar(RE);
   const LAND_N = posAt(t_land).sub(moon.position).normalize(), LAND_T = new THREE.Vector3().crossVectors(LAND_N, ZW_AXIS);
   let shotId = null;
-  // Mounted on the side of the body and pointing straight back along it, like a real rocket camera
-  // aimR: how far from the centreline it aims, 1 unit back. The upper stage is short, so those shots tilt in a little to keep it in frame.
-  const ONBOARD = (y, r, deg = 0, aimR = r * 0.85) => {
+  // y and r: where it's mounted. deg: which side of the body. aimR: how far from the centreline it aims, 1 unit back.
+  const ONBOARD = (y, deg = 33, r = 0.06, aimR = 0.12) => {
     const a = deg * DEG, x = Math.cos(a), z = Math.sin(a);
     return { cam: [r * x, y, r * z], aim: [aimR * x, y - 1, aimR * z] };
   };
   const _bolt = new THREE.Vector3();
   function shotAt(t) {
     if (t < -6) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
-    if (t < -3.5) return { id: 'onboard-countdown', ...ONBOARD(-0.1, 0.13, 180) };   // the side away from the tower
+    if (t < -3.5) return { id: 'onboard-countdown', ...ONBOARD(-0.5, 213) };   // the side away from the tower
     if (t < 8) return { id: 'pad-track', fixed: new THREE.Vector3(-1.2, 0.24, 2.7).add(PAD_BASE) };
     if (t < 22) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
-    if (t < 30) return { id: 'onboard-ascent', ...ONBOARD(-0.1, 0.13) };
+    if (t < 30) return { id: 'onboard-ascent', ...ONBOARD(-0.5) };
     if (t < T_MECO - 2) return { id: 'ascent-2', off: [-1.5, 0.2, 0.8] };
     if (t < T_SEP + 1.2) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
-    if (t < T_SES + 4) return { id: 'onboard-separation', ...ONBOARD(0.06, 0.13, 0, 0) };
+    if (t < T_SES + 4) return { id: 'onboard-separation', ...ONBOARD(-0.1, 12) };
     if (t < T_ASC) return { id: 'stage2', off: [-0.9, 0.3, 0.45] };
     if (t < t_tli0 - 14) return { id: 'parking', off: [-2.2, 1, 2.4] };
     if (t < t_tli0) return { id: 'overhead-earth', off: [-0.25, 1.5, 0], overhead: true };
@@ -650,7 +651,7 @@ export async function initMission(step) {
     if (t < t_desc0 - 14) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
     if (t < t_desc0) return { id: 'overhead-moon', off: [-0.25, 1.5, 0], overhead: true };
     if (t < t_desc0 + 18) return { id: 'descent', off: [0.5, 0.05, 1.2] };
-    if (t < t_land - 2) return { id: 'onboard-legs', ...ONBOARD(0.12, 0.13, 0, -0.12), dim: 0.08 };
+    if (t < t_land - 2) return { id: 'onboard-legs', ...ONBOARD(-0.1, 12), dim: 0.08 };
     return { id: 'touchdown', fixed: moon.position.clone().addScaledVector(LAND_N, RM + 0.14).addScaledVector(LAND_T, 1.5).addScaledVector(ZW_AXIS, 1.3) };
   }
   function directorStep(dt) {
@@ -1120,7 +1121,7 @@ export async function initMission(step) {
     else { followShip(); mControls.update(); collideCamera(); }
     // One warm-up frame (uploads the planet textures to the GPU), then skip drawing while the loading screen covers it
     if (mWarmed && window.tvcCovered?.()) return;
-    const lens = !intro && directing() && shotAt(simT).cam ? 62 : 45;   // onboard cameras have a wide lens
+    const lens = !intro && directing() && shotAt(simT).cam ? 78 : 45;   // onboard cameras have a wide lens
     if (mCam.fov !== lens) { mCam.fov = lens; mCam.updateProjectionMatrix(); }
     shakeKick *= Math.exp(-realDt * 5);
     const shaken = applyShake(now);
