@@ -588,7 +588,7 @@ export function initBench() {
     $('gSat').textContent = hasData ? sat.toFixed(0) : DASH;
     $('gSatBar').style.width = (100 - sat) + '%';
 
-    // Gimbal dial: Y servo to the right, X servo up, ring = ±45°
+    // Gimbal dial: +Y to the right, +P up, ring = ±45°
     $('gDial').classList.toggle('on', hasData);
     if (hasData) {
       const k = v => Math.max(-1, Math.min(1, v / 45)) * 44, x = k(target.yaw), y = -k(target.pitch);

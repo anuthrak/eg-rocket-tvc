@@ -11,7 +11,7 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 ### Changed
 - Bench: the rocket now leans by its real tilt from the IMU, and the motor tube shows the nozzle angle (servo deflection ÷ linkage ratio). Charts, readouts and the dial still show servo angles. With older firmware the rocket stays upright and only the tube moves.
 - Demo mode is a physics simulation (`demo-sim.js`) using the design numbers and the firmware's gains: every 6 s a gust knocks the rocket 10–19°, the nozzle goes to its limit, and it recovers in about a second. It is a prediction, not a measurement.
-- Bench chart shows the rocket's tilt, with the ±25° abort lines, instead of servo angles. Readout cards and the dial still show servo angles, now labelled X servo and Y servo instead of Pitch and Yaw.
+- Bench chart shows the rocket's tilt, with the ±25° abort lines, instead of servo angles. Readout cards and the dial still show servo angles.
 - Firmware v1.5.0: the tilt abort is back on by default; `TILT_ABORT_ENABLED` is gone.
 ### Fixed
 - Firmware v1.5.0: `SET ROT` now turns the level trims with the sensor mapping, so an upright rocket still reads upright after the sensor step. Run Level once to clear a trim saved before this fix.
