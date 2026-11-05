@@ -96,7 +96,7 @@
 
 <!-- ======================= BENCH TAB ======================= -->
 <main id="benchMain">
-  <div id="view"></div>
+  <div id="view"><div id="viewNote"></div></div>
   <!-- Left: live readouts, chart, input options · Right: gimbal + link details -->
   <aside class="side-l">
     <div class="readouts">
@@ -111,9 +111,9 @@
     </div>
 
     <div class="panel chart-panel">
-      <h2>Pitch · Yaw<span>Last 10 s</span></h2>
+      <h2>Tilt X · Y<span>Last 10 s</span></h2>
       <canvas id="chart"></canvas>
-      <div class="legend"><span><i style="background:var(--pitch)"></i>Pitch</span><span><i style="background:var(--yaw)"></i>Yaw</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±45° servo limit</span></div>
+      <div class="legend"><span><i style="background:var(--pitch)"></i>Tilt X</span><span><i style="background:var(--yaw)"></i>Tilt Y</span><span><i style="background:none;border-top:1px dashed var(--warn);height:0;vertical-align:3px"></i>±25° abort</span></div>
     </div>
 
     <div class="panel">

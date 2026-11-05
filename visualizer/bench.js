@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { initCalib } from './calib.js';
+import { createDemoSim } from './demo-sim.js';
 
 const $ = id => document.getElementById(id);
 
@@ -165,6 +166,63 @@ export function initBench() {
     });
   }
 
+  // ---------- Thrust: plume out of the motor tube, arrow for the sideways force it puts on the rocket ----------
+  // Added after the outline list above, so outline view leaves them as they are.
+  function plumeMaterial(color, strength) {
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(color) }, uK: { value: strength } },
+      vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV;
+        void main(){ vY = position.y; vec4 mv = modelViewMatrix*vec4(position,1.0);
+          vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uK; varying float vY; varying vec3 vN; varying vec3 vV;
+        void main(){ float along = pow(clamp(1.0 + vY, 0.0, 1.0), 1.6);      // bright at the tube, fades to the tip
+          float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.3);       // soft silhouette
+          gl_FragColor = vec4(uColor * along * edge * uK, 1.0); }`
+    });
+    m.userData.outlineParameters = noOutline;
+    return m;
+  }
+  const PLUME_LEN = 130 * MM, PLUME_R = TUBE_R * 1.1 * MM;   // short enough to clear the floor
+  const plumeGeo = new THREE.ConeGeometry(1, 1, 24, 1, true); plumeGeo.rotateX(Math.PI); plumeGeo.translate(0, -0.5, 0);
+  const plume = new THREE.Group();
+  const plumeOuter = new THREE.Mesh(plumeGeo, plumeMaterial(0x4f8fd8, 0.8));
+  const plumeInner = new THREE.Mesh(plumeGeo, plumeMaterial(0xd8ecff, 1));   // the EDF blows air, so cool colours, not fire
+  plumeInner.scale.set(0.5, 0.6, 0.5);
+  plume.add(plumeOuter, plumeInner);
+  plume.position.y = -tubeLen * MM; plume.visible = false;
+  tvc.add(plume);
+
+  const ARROW_AT_LIMIT = 0.45;   // scene units at the full ±8°
+  const forceArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, GIMBAL * MM, 0), ARROW_AT_LIMIT, 0xf5a623, 0.08, 0.055);
+  [forceArrow.line, forceArrow.cone].forEach(o => {
+    o.material.depthTest = false; o.material.transparent = true;   // the gimbal point is inside the body: draw it on top
+    o.material.userData.outlineParameters = noOutline;
+    o.renderOrder = 5;
+  });
+  forceArrow.visible = false;
+  airframe.add(forceArrow);
+
+  const _lateral = new THREE.Vector3();
+  // gx, gy = nozzle angle in degrees. level = 1 for full thrust, lower when no motor is actually running.
+  function updateThrust(on, gx, gy, level) {
+    plume.visible = on;
+    forceArrow.visible = false;
+    if (!on) return;
+    const flicker = 0.92 + Math.random() * 0.16;
+    plume.scale.set(PLUME_R, PLUME_LEN * flicker, PLUME_R);
+    plumeOuter.material.uniforms.uK.value = 0.8 * level;
+    plumeInner.material.uniforms.uK.value = level;
+    // Rocket +X is scene +Z and +Y is scene +X. A positive nozzle angle pushes the tail toward that side.
+    _lateral.set(Math.sin(gy * Math.PI / 180), 0, Math.sin(gx * Math.PI / 180));
+    const size = _lateral.length() / Math.sin(8 * Math.PI / 180);
+    if (size < 0.03) return;
+    forceArrow.visible = true;
+    forceArrow.setDirection(_lateral.normalize());
+    forceArrow.setLength(Math.max(0.1, size * ARROW_AT_LIMIT), 0.08, 0.055);
+    forceArrow.line.material.opacity = forceArrow.cone.material.opacity = Math.max(level, 0.6);
+  }
+
   let firstFit = true;
   function resize() {
     const w = Math.max(1, view.clientWidth), h = Math.max(1, view.clientHeight);
@@ -190,7 +248,7 @@ export function initBench() {
   const zero   = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
   const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4 };
   let rig = { ...NO_CFG };   // from the Nano's CFG line: servo direction, level trims, servo degrees per gimbal degree
-  const history = []; // {t, pitch, yaw}
+  const history = []; // {t, tiltX, tiltY}
   const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
   let sampleTimes = [];
   let linkStart = null;                // when the current Arduino / demo feed started
@@ -251,7 +309,7 @@ export function initBench() {
     const now = performance.now();
     lastLineT = now;
     sampleTimes.push(now);
-    history.push({ t: now, pitch: target.pitch, yaw: target.yaw });
+    history.push({ t: now, tiltX: target.tiltX, tiltY: target.tiltY });
     while (history.length && now - history[0].t > 10000) history.shift();
   }
 
@@ -378,14 +436,21 @@ export function initBench() {
     $('demoPill').classList.add('on');
     setStatus('Demo feed', true);
     startLink('Demo');
-    const t0 = performance.now();
+    const sim = createDemoSim();
+    let simT = performance.now();
     demoTimer = setInterval(() => {
-      const t = (performance.now() - t0) / 1000;
-      // A rocket wandering by a few degrees, with servos answering through the firmware's controller at full throttle
-      const tx = 5 * Math.sin(t * 0.9) + 0.8 * Math.sin(t * 3.1), rateX = 4.5 * Math.cos(t * 0.9) + 2.5 * Math.cos(t * 3.1);
-      const ty = 4 * Math.sin(t * 0.6 + 1.2), rateY = 2.4 * Math.cos(t * 0.6 + 1.2);
-      const servo = (tilt, rate) => 90 + Math.round(Math.max(-8, Math.min(8, 0.68 * (2.5 * tilt + 0.55 * rate))) * rig.spg);
-      handleLine(servoMode.checked ? `0,${servo(tx, rateX)},${servo(ty, rateY)},${tx.toFixed(1)},${ty.toFixed(1)}` : `0,${tx.toFixed(1)},${ty.toFixed(1)}`);
+      // Catch up in 10 ms steps; after a pause (hidden tab) carry on from now instead of replaying it
+      const now = performance.now();
+      if (now - simT > 500) simT = now - 50;
+      for (; simT < now; simT += 10) {
+        const gust = sim.step();
+        if (gust) logLine(`Gust: pushed toward ${gust.dir}°`, 'msg');
+      }
+      const s = sim.read();
+      const servo = g => 90 + Math.round(g * rig.spg);
+      handleLine(servoMode.checked
+        ? `0,${servo(s.gimbalX)},${servo(s.gimbalY)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
+        : `0,${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`);
     }, 50);
   }
   function stopDemo() {
@@ -406,13 +471,13 @@ export function initBench() {
     if (chart.width !== w * dpr) { chart.width = w * dpr; chart.height = h * dpr; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const RANGE = 60; // ±60° visible
+    const RANGE = 35; // ±35° of tilt visible
     const L = 22;     // left gutter for axis labels
     const yOf = v => h / 2 - (v / RANGE) * (h / 2 - 6);
-    // Faint grid: every 15° and every 2 s, with small muted axis labels
+    // Faint grid: every 10° and every 2 s, with small muted axis labels
     ctx.lineWidth = 1; ctx.font = '500 9px "Barlow Condensed", sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    for (let v = -45; v <= 45; v += 15) {
+    for (let v = -30; v <= 30; v += 10) {
       const y = Math.round(yOf(v)) + 0.5;
       ctx.strokeStyle = v === 0 ? '#2c2f36' : '#16171b';
       ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w, y); ctx.stroke();
@@ -424,12 +489,12 @@ export function initBench() {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
     }
     ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,77,94,.55)';
-    [45, -45].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
+    [25, -25].forEach(v => { ctx.beginPath(); ctx.moveTo(L, yOf(v)); ctx.lineTo(w, yOf(v)); ctx.stroke(); });
     ctx.setLineDash([]);
     const now = performance.now();
     const xOf = t => w - ((now - t) / 10000) * (w - L);
     ctx.save(); ctx.beginPath(); ctx.rect(L, 0, w - L, h); ctx.clip();
-    [['pitch', '#5b8cff'], ['yaw', '#ff8a3d']].forEach(([k, c]) => {
+    [['tiltX', '#5b8cff'], ['tiltY', '#ff8a3d']].forEach(([k, c]) => {
       ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.beginPath();
       history.forEach((s, i) => { const x = xOf(s.t), y = yOf(s[k]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke();
@@ -448,7 +513,10 @@ export function initBench() {
     rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
     // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
     const servoData = servoMode.checked;
-    tvc.rotation.set(servoData ? deg(shown.pitch * rig.xd / rig.spg) : 0, 0, servoData ? deg(-shown.yaw * rig.yd / rig.spg) : 0);
+    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spg : 0;
+    tvc.rotation.set(deg(gx), 0, deg(-gy));
+    // No motor is wired yet, so on the real rig the plume and arrow stay dim: they show the command, not real thrust
+    updateThrust(linkStart !== null && lastLineT !== null, gx, gy, demoTimer ? 1 : 0.35);
     controls.update();
     fenceTarget();
     // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
@@ -466,6 +534,9 @@ export function initBench() {
   const sgn1 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
   function updateBenchUI(now) {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
+    $('viewNote').textContent = !hasData ? '' : demoTimer
+      ? 'Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
+      : 'No motor yet: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
     $('yawVal').textContent = f1(target.yaw);
