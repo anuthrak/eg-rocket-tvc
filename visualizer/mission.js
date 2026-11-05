@@ -1041,7 +1041,7 @@ export async function initMission(step) {
     if (REDUCED || camMode === 'overview' || simState === 'paused' || intro) return false;
     const m = Math.min(1.4, shakeAmount(simT));
     if (m < 0.005) return false;
-    const s = now / 1000, amp = 0.007 * mCam.position.distanceTo(ship.position) * m;
+    const s = now / 1000, amp = 0.0056 * mCam.position.distanceTo(ship.position) * m;
     _cr.setFromMatrixColumn(mCam.matrixWorld, 0); _cu.setFromMatrixColumn(mCam.matrixWorld, 1);
     _shake.copy(_cr).multiplyScalar(amp * (Math.sin(s * 71) + 0.6 * Math.sin(s * 113 + 1)))
       .addScaledVector(_cu, amp * (Math.sin(s * 83 + 2) + 0.6 * Math.sin(s * 127)));
