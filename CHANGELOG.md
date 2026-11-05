@@ -4,7 +4,7 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 
 ## [Unreleased]
 ### Added
-- Mission: Director camera (now the default) that cuts between shots through the flight, with stage separation in slow motion, onboard cameras looking back down the rocket (ascent, after separation, landing legs) and overhead shots in Earth and lunar orbit. Dragging or zooming takes the camera back as a chase view. The camera button cycles Director, Chase and Overview.
+- Mission: Director camera (now the default) that cuts between shots through the flight, with stage separation in slow motion, onboard cameras looking straight back down the rocket (countdown, ascent, after separation, landing legs) and overhead shots in Earth and lunar orbit. Dragging or zooming takes the camera back as a chase view. The camera button cycles Director, Chase and Overview.
 - Mission: camera shake at ignition, liftoff, Max-Q, separation and hits, plus an engine glow. Shake turns off under the system's reduced-motion setting.
 - Mission: pad smoke, a Max-Q vapour collar, separation puffs and landing dust.
 - Mission: live nozzle close-up in the panel under the mini bench (hidden on phones and whenever it doesn't fit beside the HUD).

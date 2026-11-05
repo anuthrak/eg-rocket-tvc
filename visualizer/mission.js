@@ -619,16 +619,22 @@ export async function initMission(step) {
   const PAD_BASE = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0).multiplyScalar(RE);
   const LAND_N = posAt(t_land).sub(moon.position).normalize(), LAND_T = new THREE.Vector3().crossVectors(LAND_N, ZW_AXIS);
   let shotId = null;
-  const ONBOARD = (y, r, deg = 22.5) => { const a = deg * DEG; return [r * Math.cos(a), y, r * Math.sin(a)]; };
+  // Mounted on the side of the body and pointing straight back along it, like a real rocket camera
+  // aimR: how far from the centreline it aims, 1 unit back. The upper stage is short, so those shots tilt in a little to keep it in frame.
+  const ONBOARD = (y, r, deg = 22.5, aimR = r * 0.85) => {
+    const a = deg * DEG, x = Math.cos(a), z = Math.sin(a);
+    return { cam: [r * x, y, r * z], aim: [aimR * x, y - 1, aimR * z] };
+  };
   const _bolt = new THREE.Vector3();
   function shotAt(t) {
-    if (t < -3) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
+    if (t < -6) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
+    if (t < -3.5) return { id: 'onboard-countdown', ...ONBOARD(-0.1, 0.13, 202.5) };   // the side away from the tower
     if (t < 8) return { id: 'pad-track', fixed: new THREE.Vector3(-1.2, 0.24, 2.7).add(PAD_BASE) };
     if (t < 22) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
-    if (t < 30) return { id: 'onboard-ascent', cam: ONBOARD(-0.25, 0.28), aim: [0, -0.85, 0] };
+    if (t < 30) return { id: 'onboard-ascent', ...ONBOARD(-0.1, 0.13) };
     if (t < T_MECO - 2) return { id: 'ascent-2', off: [-1.5, 0.2, 0.8] };
     if (t < T_SEP + 1.2) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
-    if (t < T_SES + 4) return { id: 'onboard-separation', cam: ONBOARD(-0.02, 0.2), aim: [0, -1.1, 0] };
+    if (t < T_SES + 4) return { id: 'onboard-separation', ...ONBOARD(0.06, 0.13, 22.5, 0) };
     if (t < T_ASC) return { id: 'stage2', off: [-0.9, 0.3, 0.45] };
     if (t < t_tli0 - 14) return { id: 'parking', off: [-2.2, 1, 2.4] };
     if (t < t_tli0) return { id: 'overhead-earth', off: [-0.25, 1.5, 0], overhead: true };
@@ -641,7 +647,7 @@ export async function initMission(step) {
     if (t < t_desc0 - 14) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
     if (t < t_desc0) return { id: 'overhead-moon', off: [-0.25, 1.5, 0], overhead: true };
     if (t < t_desc0 + 18) return { id: 'descent', off: [0.5, 0.05, 1.2] };
-    if (t < t_land - 2) return { id: 'onboard-legs', cam: ONBOARD(0.02, 0.22, 0), aim: [0, -0.32, 0], dim: 0.08 };
+    if (t < t_land - 2) return { id: 'onboard-legs', ...ONBOARD(0.12, 0.13, 0, -0.12), dim: 0.08 };
     return { id: 'touchdown', fixed: moon.position.clone().addScaledVector(LAND_N, RM + 0.14).addScaledVector(LAND_T, 1.5).addScaledVector(ZW_AXIS, 1.3) };
   }
   function directorStep(dt) {
