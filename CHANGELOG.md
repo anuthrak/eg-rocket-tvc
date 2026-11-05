@@ -9,6 +9,8 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 - Mission: pad smoke, a Max-Q vapour collar, separation puffs and landing dust.
 - Mission: live nozzle close-up in the panel under the mini bench (hidden on phones and whenever it doesn't fit beside the HUD).
 - Mission: **Hit it** button shoves the rocket mid-flight and reports the recovery time and peak angle. The flight path stays scripted, so a hit changes the attitude only.
+### Fixed
+- Mission: the landing legs swung inward through the body and were too short to reach the ground. They now stow against the body, swing outward and reach the surface.
 ### Changed
 - Mission and the Bench demo share `controller.js`, the same algorithm and gains as the firmware, replacing the Mission's own PD controller. Thrust authority comes from the design numbers (185 °/s² at 8° and full thrust).
 

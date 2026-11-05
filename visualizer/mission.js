@@ -383,12 +383,15 @@ export async function initMission(step) {
     const band = new THREE.Mesh(new THREE.CylinderGeometry(RR * 1.01, RR * 1.01, 0.025, 24), black); band.position.y = 0.06; ship.add(band);
   }
   const nz2 = makeNozzle(0.03, 0.04); nz2.position.y = -0.16; ship.add(nz2);
-  // Landing legs (fold out for descent)
+  // Landing legs: stowed folded up against the body, they swing out and down for descent.
+  // At full deployment the feet reach the bottom of the nozzle, which is where the rocket touches the Moon (y = −0.2).
+  const LEG_L = 0.115, LEG_HINGE = -0.14, LEG_STOWED = Math.PI, LEG_OUT = 1;
   const legs = [];
   for (let i = 0; i < 4; i++) {
     const hold = new THREE.Group(); hold.rotation.y = i * Math.PI / 2 + Math.PI / 4; ship.add(hold);
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.1, 0.008), black);
-    leg.geometry.translate(0, -0.05, 0); leg.position.set(RR, -0.1, 0); hold.add(leg); legs.push(leg);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.008, LEG_L, 0.008), black);
+    leg.geometry.translate(0, -LEG_L / 2, 0); leg.position.set(RR, LEG_HINGE, 0); leg.rotation.z = LEG_STOWED; hold.add(leg); legs.push(leg);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.009, 10, 8), black); foot.position.y = -LEG_L; leg.add(foot);
   }
   // Booster (group origin at its own centre so it tumbles naturally after separation)
   const BOOST_Y = -0.16 - B_L / 2;
@@ -581,7 +584,7 @@ export async function initMission(step) {
     puff.position.set(Math.sign(att.rcsP) * (Math.abs(att.rcsP) > 0.12 ? RR + 0.012 : 0), 0.1,
                       -Math.sign(att.rcsY) * (Math.abs(att.rcsY) > 0.12 ? RR + 0.012 : 0));
     const legOut = simT > t_desc0 + 18 ? smoothstep(t_desc0 + 18, t_desc0 + 21, simT) : 0;
-    legs.forEach(l => l.rotation.z = -legOut * 0.6);
+    legs.forEach(l => l.rotation.z = LEG_STOWED + (LEG_OUT - LEG_STOWED) * legOut);
   }
 
   // ---------- Camera ----------
