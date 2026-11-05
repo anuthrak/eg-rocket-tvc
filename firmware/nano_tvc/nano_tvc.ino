@@ -39,13 +39,14 @@
 //   LOAD              discard unsaved changes (reload EEPROM, or the defaults if nothing is saved)
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
 //
-// Safety: tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT. It re-arms after the
+// Safety: the gimbal is always clamped to +-GMAX. The tilt abort is OFF for hand testing (TILT_ABORT_ENABLED):
+// when on, tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT. It re-arms after the
 // rocket is back within REARM_TILT for REARM_MS (prints ABORT,CLEAR), or on RUN.
-// TODO when the ESC arrives: throttle output capped at THROTTLE_CAP, motor cut on abort and when
+// TODO when the ESC arrives: set TILT_ABORT_ENABLED back to true, throttle output capped at THROTTLE_CAP, motor cut on abort and when
 // the serial link goes quiet, and the motor stays off after an abort until RUN.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.3.0";
+const char FW_VERSION[] = "1.4.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -76,6 +77,8 @@ const float THRUST_MAX_G = 220.0;         // EDF static thrust at full throttle 
 const float THRUST_REF_G = 150.0;
 const float GMAX  = 8.0 * DEG_TO_RAD;     // design gimbal travel
 const float GRATE = 60.0 * DEG_TO_RAD;    // gimbal slew-rate limit (rad/s)
+// false = hand testing: the gimbal keeps steering at any tilt, held at +-GMAX. Must be true before the motor runs.
+const bool TILT_ABORT_ENABLED = false;
 const float ABORT_TILT = 25.0 * DEG_TO_RAD;
 const float REARM_TILT = 5.0 * DEG_TO_RAD;
 const unsigned long REARM_MS = 1000;
@@ -253,6 +256,7 @@ float servoDeg(float g, int dir, int center) {
 }
 
 void checkAbort() {
+  if (!TILT_ABORT_ENABLED) return;
   float tilt = max(fabs(tiltX), fabs(tiltY));
   if (!aborted) {
     if (tilt > ABORT_TILT) { aborted = true; uprightSince = 0; Serial.println("ABORT,TILT"); }
