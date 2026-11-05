@@ -567,16 +567,19 @@ export async function initMission(step) {
   }
   function updateEngines() {
     const eng = engineAt(simT), stage1 = simT < T_SEP;
+    const onboard = directing() && shotAt(simT).cam ? shotAt(simT) : null, dim = onboard ? onboard.dim ?? 0.3 : 1;   // onboard cameras sit right by the engine: don't let it wash out the view
     const inAtmo = clamp(1 - (ship.position.length() - RPAD) / 2.5, 0, 1) * (simT < T_ASC ? 1 : 0);
     [[nz1, stage1], [nz2, !stage1]].forEach(([nz, active]) => {
       const { plume, light, glow } = nz.userData;
       const on = active && eng.on && eng.thr > 0.02;
-      plume.visible = glow.visible = on; light.intensity = on ? 1.6 * eng.thr : 0;
+      plume.visible = glow.visible = on; light.intensity = on ? 1.6 * eng.thr * dim : 0;
       if (!on) return;
       const fl = 0.88 + Math.random() * 0.24;
       const len = eng.thr * (nz === nz1 ? 0.55 : 0.38) * fl;
       const rad = (nz === nz1 ? 0.035 : 0.026) * (1 + (1 - inAtmo) * 1.6);
       plume.scale.set(rad, len, rad);
+      plume.children[0].material.uniforms.uK.value = 0.75 * dim; plume.children[1].material.uniforms.uK.value = dim;
+      glow.material.opacity = dim;
       const g = (nz === nz1 ? 0.5 : 0.34) * eng.thr * fl; glow.scale.set(g, g, 1);
     });
     const rcs = Math.max(Math.abs(att.rcsP), Math.abs(att.rcsY));
@@ -610,15 +613,21 @@ export async function initMission(step) {
 
   // ---------- Director: cuts between shots through the flight ----------
   // Moving shots sit at [forward, up, side] from the rocket, along its path. Fixed shots stand on the pad or the Moon.
+  // Onboard shots are bolted to the rocket at `cam` and look back down the body at `aim` (both in rocket coordinates).
+  // Overhead shots look straight down on the rocket. Onboard cameras sit between the fins (0°, 90°…) and the legs (45°, 135°…).
   const _F = new THREE.Vector3(1, 0, 0), _U = new THREE.Vector3(0, 1, 0), _off = new THREE.Vector3(), _want = new THREE.Vector3(), _look = new THREE.Vector3();
   const PAD_BASE = new THREE.Vector3(Math.cos(TH_L), Math.sin(TH_L), 0).multiplyScalar(RE);
   const LAND_N = posAt(t_land).sub(moon.position).normalize(), LAND_T = new THREE.Vector3().crossVectors(LAND_N, ZW_AXIS);
   let shotId = null;
+  const ONBOARD = (y, r, deg = 22.5) => { const a = deg * DEG; return [r * Math.cos(a), y, r * Math.sin(a)]; };
+  const _bolt = new THREE.Vector3();
   function shotAt(t) {
     if (t < -3) return { id: 'pad-wide', fixed: new THREE.Vector3(-2.6, 0.55, 5.2).add(PAD_BASE) };
     if (t < 8) return { id: 'pad-track', fixed: new THREE.Vector3(-1.2, 0.24, 2.7).add(PAD_BASE) };
+    if (t < 30) return { id: 'onboard-ascent', cam: ONBOARD(-0.25, 0.28), aim: [0, -0.85, 0] };
     if (t < T_MECO - 2) return { id: 'ascent', off: [-1.5, 0.2, 0.8] };
-    if (t < T_SES + 4) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
+    if (t < T_SEP + 1.2) return { id: 'separation', off: [-0.2, 0.15, 1.3] };
+    if (t < T_SES + 4) return { id: 'onboard-separation', cam: ONBOARD(-0.02, 0.2), aim: [0, -1.1, 0] };
     if (t < T_ASC) return { id: 'stage2', off: [-0.9, 0.3, 0.45] };
     if (t < t_tli0) return { id: 'parking', off: [-2.2, 1, 2.4] };
     if (t < t_tli1) return { id: 'tli', off: [-0.55, 0.12, 0.3] };
@@ -627,8 +636,10 @@ export async function initMission(step) {
     if (t < t_flip) return { id: 'to-moon', off: [-1.6, 0.35, 0.2], toMoon: true };
     if (t < t_coast1) return { id: 'flip', off: [0, 0.25, 1] };
     if (t < t_loi1) return { id: 'loi', off: [0.3, 0.7, 0.9] };
-    if (t < t_desc0) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
-    if (t < t_land - 5) return { id: 'descent', off: [0.5, 0.05, 1.2] };
+    if (t < t_desc0 - 26) return { id: 'lunar-orbit', off: [-1, 1.6, 2.6] };
+    if (t < t_desc0) return { id: 'overhead-moon', off: [-0.25, 1.5, 0], overhead: true };
+    if (t < t_desc0 + 18) return { id: 'descent', off: [0.5, 0.05, 1.2] };
+    if (t < t_land - 2) return { id: 'onboard-legs', cam: ONBOARD(0.02, 0.22, 0), aim: [0, -0.32, 0], dim: 0.08 };
     return { id: 'touchdown', fixed: moon.position.clone().addScaledVector(LAND_N, RM + 0.14).addScaledVector(LAND_T, 1.5).addScaledVector(ZW_AXIS, 1.3) };
   }
   function directorStep(dt) {
@@ -636,6 +647,16 @@ export async function initMission(step) {
     shotId = shot.id;
     mControls.target.copy(ship.position);
     _look.copy(ship.position);
+    if (shot.cam) {
+      ship.updateMatrixWorld();
+      mCam.position.set(...shot.cam).applyMatrix4(ship.matrixWorld);
+      camOffset.subVectors(mCam.position, ship.position);
+      mCam.up.copy(_bolt.set(shot.cam[0], 0, shot.cam[2]).normalize().transformDirection(ship.matrixWorld));
+      mCam.lookAt(_look.set(...shot.aim).applyMatrix4(ship.matrixWorld));
+      mCam.up.set(0, 1, 0);
+      camGuard.offset = null;
+      return;
+    }
     if (shot.fixed) mCam.position.copy(shot.fixed);
     else {
       // Smooth the path directions so the camera doesn't jerk at staging or when a burn starts
@@ -651,7 +672,9 @@ export async function initMission(step) {
     }
     camGuard.offset = null;
     collideCamera();
+    if (shot.overhead) mCam.up.copy(_F);   // looking straight down: the top of the picture is the way it's flying
     mCam.lookAt(_look);
+    mCam.up.set(0, 1, 0);
   }
   const camOffset = new THREE.Vector3();
   const directing = () => camMode === 'director' && simState !== 'idle';
@@ -1044,7 +1067,7 @@ export async function initMission(step) {
     if (REDUCED || camMode === 'overview' || simState === 'paused' || intro) return false;
     const m = Math.min(1.4, shakeAmount(simT));
     if (m < 0.005) return false;
-    const s = now / 1000, amp = 0.0056 * mCam.position.distanceTo(ship.position) * m;
+    const s = now / 1000, amp = 0.0056 * Math.max(0.6, mCam.position.distanceTo(ship.position)) * m;   // onboard cameras are close: keep some shake
     _cr.setFromMatrixColumn(mCam.matrixWorld, 0); _cu.setFromMatrixColumn(mCam.matrixWorld, 1);
     _shake.copy(_cr).multiplyScalar(amp * (Math.sin(s * 71) + 0.6 * Math.sin(s * 113 + 1)))
       .addScaledVector(_cu, amp * (Math.sin(s * 83 + 2) + 0.6 * Math.sin(s * 127)));
