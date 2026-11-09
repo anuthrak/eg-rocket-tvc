@@ -19,6 +19,8 @@ export function initCalib({ send, link }) {
   const sensor = { phase: 'x', x: null, y: null };   // results: 'ok' | 'rev' | 'cross'
   const dir = { x: null, y: null };                   // null | 'tested' | 'ok'
   const dirNote = { x: '', y: '' };
+  let sweeping = false;        // a SWEEP is running on the Nano (firmware v1.7.0+)
+  let sweepNote = '';
 
   // ---------- Firmware lines ----------
   function handle(line) {
@@ -31,6 +33,8 @@ export function initCalib({ send, link }) {
       if (open && !calOn) send('CAL');
     } else if (p[0] === 'CAL' && p[1] === 'ON') calOn = true;
     else if (p[0] === 'CAL' && p[1] === 'OFF') calOn = false;
+    else if (p[0] === 'SWEEP') sweeping = false;
+    else if (p[0] === 'ERR' && sweeping) { sweeping = false; sweepNote = 'This needs firmware v1.7.0 or newer. Upload firmware/nano_tvc.'; }
     else if (p[0] === 'CAL' && p.length >= 5) {
       const [xa, ya, rx, ry] = p.slice(1, 5).map(Number);
       live = { xa, ya, rx, ry };
@@ -42,7 +46,7 @@ export function initCalib({ send, link }) {
 
   // New link (or link lost): the Nano restarts when the port opens, so forget everything
   function onLink() {
-    cfg = null; calOn = false; live = null; levelBusy = false;
+    cfg = null; calOn = false; live = null; levelBusy = false; sweeping = false; sweepNote = '';
     if (open) render();
   }
 
@@ -60,7 +64,7 @@ export function initCalib({ send, link }) {
     panel.hidden = true;
     $('calBtn').classList.remove('on');
     if (calOn) send('RUN');
-    calOn = false;
+    calOn = false; sweeping = false;
   }
   function requestClose() {
     if (cfg && cfg.state === 'UNSAVED' && link().port) { confirming = true; render(); }
@@ -152,6 +156,12 @@ export function initCalib({ send, link }) {
       render();
     };
   }
+
+  // Motion test: both servos through the full gimbal range. The Nano times it and answers SWEEP,DONE.
+  function sweep(kind) { send(`SWEEP ${kind}`); sweeping = true; sweepNote = ''; render(); }
+  $('calSweepCircle').onclick = () => sweep('CIRCLE');
+  $('calSweepCorners').onclick = () => sweep('CORNERS');
+  $('calSweepStop').onclick = () => send('SWEEP OFF');
 
   // ---------- Step 5: save ----------
   function setSpg(v) {
@@ -265,6 +275,10 @@ export function initCalib({ send, link }) {
       st.className = 'cal-res ' + (dir[ax] === 'ok' ? 'ok' : '');
       setText(`cdNote${AX}`, dirNote[ax]);
     }
+    setText('cdSweepSt', sweeping ? 'Moving' : 'Ready');
+    $('calSweepCircle').disabled = $('calSweepCorners').disabled = sweeping || !calOn;
+    $('calSweepStop').disabled = !sweeping;
+    setText('cdSweepNote', sweepNote);
     // Step 5
     setText('svXc', cfg.xc + '°'); setText('svYc', cfg.yc + '°');
     setText('svXd', cfg.xd > 0 ? 'Normal' : 'Reversed'); setText('svYd', cfg.yd > 0 ? 'Normal' : 'Reversed');
