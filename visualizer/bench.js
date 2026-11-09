@@ -268,7 +268,7 @@ export function initBench() {
     if (fw) fwVersion = fw[1];
     if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
-    if (/^(CAL|CFG|ERR|ABORT),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort
+    if (/^(CAL|CFG|ERR|ABORT|SWEEP),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort; SWEEP,DONE: v1.7.0+
       const cal = line.match(/^CAL,(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+)/);
       logLine(line, cal ? undefined : 'msg');
       if (line.startsWith('CFG,')) {

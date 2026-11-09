@@ -35,6 +35,8 @@
 //                           ROT (0-3: turn the sensor's X/Y by 90° steps about the up axis)
 //   LEVEL             rocket upright and still: detect the up axis, capture TX/TY
 //   PULSE X|Y [deg]   (CAL only) move one servo the way the controller would for a lean toward +X/+Y
+//   SWEEP CIRCLE|CORNERS|OFF   (CAL only) move both servos through the full +-GMAX, about 3 s, then back to centre;
+//                     replies SWEEP,DONE when it ends or is stopped
 //   SAVE              write the config to EEPROM
 //   LOAD              discard unsaved changes (reload EEPROM, or the defaults if nothing is saved)
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
@@ -48,7 +50,7 @@
 // the serial link goes quiet, and the motor stays off after an abort until RUN.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.6.0";
+const char FW_VERSION[] = "1.7.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -188,6 +190,10 @@ bool calMode = false;
 char pulseAxis = 0;                       // 'X' / 'Y' while a PULSE is running
 int pulseDeg = 15;
 unsigned long pulseEnd = 0;
+char sweepMode = 0;                       // 'C' circle / 'K' corners while a SWEEP is running
+unsigned long sweepStart = 0;
+const unsigned long SWEEP_TURN_MS = 1500, SWEEP_RAMP_MS = 300;   // circle: 2 turns, radius eased in and out
+const unsigned long SWEEP_CORNER_MS = 350;                       // corners: 8 moves, held this long each
 
 // ---------- Sensor frame -> rocket frame ----------
 // up = ±(axis index + 1); the other two sensor axes, in right-handed order, become rocket X0/Y0,
@@ -274,6 +280,12 @@ void checkAbort() {
 char cmdBuf[40];
 byte cmdLen = 0;
 
+void endSweep() {
+  if (!sweepMode) return;
+  sweepMode = 0;
+  Serial.println("SWEEP,DONE");
+}
+
 void runCommand(char *line) {
   for (char *p = line; *p; p++) *p = toupper(*p);
   char *cmd = strtok(line, " ");
@@ -282,12 +294,12 @@ void runCommand(char *line) {
   char *arg2 = strtok(NULL, " ");
 
   if (!strcmp(cmd, "CAL")) {
-    calMode = true; pulseAxis = 0;
+    calMode = true; pulseAxis = 0; endSweep();
     xServo.writeMicroseconds(servoUs(cfg.xCenter)); yServo.writeMicroseconds(servoUs(cfg.yCenter));
     Serial.println("CAL,ON");
     printConfig();
   } else if (!strcmp(cmd, "RUN")) {
-    calMode = false; pulseAxis = 0;
+    calMode = false; pulseAxis = 0; endSweep();
     seedAttitude();
     lastLoop = micros();
     Serial.println("CAL,OFF");
@@ -343,9 +355,17 @@ void runCommand(char *line) {
   } else if (!strcmp(cmd, "PULSE") && arg1) {
     if (!calMode) { Serial.println("ERR,PULSE needs CAL"); return; }
     if (arg1[0] != 'X' && arg1[0] != 'Y') { Serial.println("ERR,PULSE X or Y"); return; }
+    endSweep();
     pulseAxis = arg1[0];
     pulseDeg = arg2 ? constrain(atoi(arg2), 3, 30) : 15;
     pulseEnd = millis() + 1200;
+  } else if (!strcmp(cmd, "SWEEP") && arg1) {
+    if (!calMode) { Serial.println("ERR,SWEEP needs CAL"); return; }
+    if (!strcmp(arg1, "OFF")) { endSweep(); return; }
+    if (strcmp(arg1, "CIRCLE") && strcmp(arg1, "CORNERS")) { Serial.println("ERR,SWEEP CIRCLE, CORNERS or OFF"); return; }
+    pulseAxis = 0;
+    sweepMode = arg1[1] == 'I' ? 'C' : 'K';
+    sweepStart = millis();
   } else if (!strcmp(cmd, "SAVE")) {
     saveConfig();
     printConfig();
@@ -382,6 +402,27 @@ void calLoop() {
   // the same sign as the tilt, so the servo goes centre + dir*deg.
   int xa = cfg.xCenter + (pulseAxis == 'X' ? cfg.xDir * pulseDeg : 0);
   int ya = cfg.yCenter + (pulseAxis == 'Y' ? cfg.yDir * pulseDeg : 0);
+  if (sweepMode) {
+    // Both axes move together, each limited to +-GMAX like the controller, whatever the linkage ratio
+    const float amp = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbal, (float)SERVO_RANGE);
+    float ux = 0, uy = 0;
+    unsigned long t = millis() - sweepStart;
+    if (sweepMode == 'C') {
+      const unsigned long total = 2 * SWEEP_TURN_MS;
+      if (t < total) {
+        float r = min(1.0f, min((float)t, (float)(total - t)) / SWEEP_RAMP_MS);
+        float a = TWO_PI * t / SWEEP_TURN_MS;
+        ux = r * cos(a); uy = r * sin(a);
+      } else endSweep();
+    } else {
+      static const int8_t CORNERS[4][2] = { {1, 1}, {-1, -1}, {1, -1}, {-1, 1} };   // across the diagonals
+      unsigned long i = t / SWEEP_CORNER_MS;
+      if (i < 8) { ux = CORNERS[i % 4][0]; uy = CORNERS[i % 4][1]; }
+      else endSweep();
+    }
+    xa = cfg.xCenter + (int)round(cfg.xDir * amp * ux);
+    ya = cfg.yCenter + (int)round(cfg.yDir * amp * uy);
+  }
   xServo.writeMicroseconds(servoUs(xa));
   yServo.writeMicroseconds(servoUs(ya));
 

@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Added
+- Calibrate → Direction: **Motion test** moves both servos through the full ±8° gimbal range, as a circle or corner to corner, then back to centre. Needs firmware v1.7.0 (`SWEEP CIRCLE|CORNERS|OFF`).
 ### Fixed
 - Mission: **Hit it** waits until the rocket has recovered from the last hit. Back-to-back hits could stack up until it tumbled.
 
