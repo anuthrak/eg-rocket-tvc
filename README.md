@@ -12,7 +12,7 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
-- [x] Firmware v1.6.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
+- [x] Firmware v1.7.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
 - [x] Web visualizer: live Bench view, calibration, Mission sim
 - [ ] Joint test, body and sled printed and assembled
 - [ ] EDF + ESC (on order), thrust test, throttle control in firmware
