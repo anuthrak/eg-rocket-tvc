@@ -73,8 +73,9 @@ export function initLaser({ send, link, calib }) {
   let open = false, tab = 0;
   let cfg = null, calOn = false;
   // The test being run. meas[axis] = 18 measured angles (deg) or null.
-  const newRun = () => ({ id: Date.now(), t: Date.now(), dist: Number($('lzDist').value) || 1000, fw: '', cfg: null, meas: { X: null, Y: null } });
-  let run = load(KEY_CUR, null);
+  const newRun = () => ({ id: Date.now(), t: Date.now(), dist: run?.dist || 1000, fw: '', cfg: null, meas: { X: null, Y: null } });
+  let run = null;
+  run = load(KEY_CUR, null);
   if (!run?.meas) run = newRun();
   let history = load(KEY_HIST, []);
   // Live state of a running axis
@@ -84,6 +85,7 @@ export function initLaser({ send, link, calib }) {
   let work = null;         // the axis being measured; replaces run.meas[axis] only once all 18 points are in
   let settleTimer = 0, replyTimer = 0;
   let mmText = '';
+  let distMsg = null;      // { text, warn } after the distance field is edited
 
   $('lzDist').value = run.dist;
 
@@ -133,7 +135,7 @@ export function initLaser({ send, link, calib }) {
     if (!calOn) return;
     axis = a;
     if (run.meas.X == null && run.meas.Y == null) { run.t = Date.now(); run.fw = link().fw; run.cfg = cfg && { ...cfg }; }
-    run.dist = Number($('lzDist').value) || 1000;
+    commitDist();
     work = Array(N).fill(null);
     note = ''; phase = 'pre';
     gim(0, 0);   // from the centre, then out to -8: the limit stops us approaching -8 from below
@@ -179,7 +181,7 @@ export function initLaser({ send, link, calib }) {
   }
   function newTest() {
     stopTimers(); phase = 'idle'; note = ''; redo = false;
-    run = newRun(); save();
+    run = newRun(); distMsg = null; save();
     tab = 0; render();
   }
 
@@ -213,12 +215,33 @@ export function initLaser({ send, link, calib }) {
   $('lzNext').onclick = () => (tab === 2 ? hide() : go(tab + 1));
 
   // Setup
-  $('lzDist').onchange = () => {
-    const v = Math.max(100, Math.min(10000, Number($('lzDist').value) || 1000));
-    $('lzDist').value = v;
-    if (phase === 'idle' || phase === 'done') { run.dist = v; save(); }
+  // Wall distance. It is fixed for a test once an axis has been measured with it (the angles depend on it),
+  // and the field never quietly rewrites what was typed: a bad entry is explained and the old value kept.
+  const DIST_MIN = 200, DIST_MAX = 5000;
+  const distLocked = () => running() || !!(run.meas.X || run.meas.Y);
+  function checkDist(text) {
+    const t = String(text).trim().replace(',', '.');
+    if (!t) return { err: 'Type the distance in mm.' };
+    if (!/^\d+(\.\d*)?$/.test(t)) return { err: 'Numbers only, in mm.' };
+    const v = Number(t);
+    if (v > 0 && v < 20) return { err: `That looks like metres. Type it in mm: ${t} m = ${Math.round(v * 1000)} mm.` };
+    if (v < DIST_MIN || v > DIST_MAX) return { err: `Use ${DIST_MIN}–${DIST_MAX} mm (1000 mm is ideal).` };
+    return { v: Math.round(v) };
+  }
+  function commitDist() {
+    if (distLocked()) return;
+    const c = checkDist($('lzDist').value);
+    if (c.err) { distMsg = { text: `${c.err} Still using ${run.dist} mm.`, warn: true }; $('lzDist').value = run.dist; }
+    else { run.dist = c.v; save(); distMsg = { text: `✓ Saved: ${run.dist} mm. Used for every point in this test.`, warn: false }; }
+    render();
+  }
+  $('lzDist').oninput = () => {
+    const c = checkDist($('lzDist').value);
+    distMsg = c.err ? { text: c.err, warn: true } : { text: `Press Enter or click away to use ${c.v} mm.`, warn: false };
     render();
   };
+  $('lzDist').onchange = commitDist;
+  $('lzDist').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('lzDist').blur(); } };
   $('lzCentre').onclick = () => { if (phase === 'idle' || phase === 'done' || phase === 'error') { phase = 'idle'; send('GIM 0 0'); } };
   $('lzShowX').onclick = () => { if (phase === 'idle' || phase === 'done' || phase === 'error') { phase = 'idle'; send('GIM 8 0'); } };
   $('lzShowY').onclick = () => { if (phase === 'idle' || phase === 'done' || phase === 'error') { phase = 'idle'; send('GIM 0 8'); } };
@@ -280,7 +303,13 @@ export function initLaser({ send, link, calib }) {
 
     // Setup
     const idle = !running();
-    $('lzDist').disabled = !idle;
+    const locked = distLocked();
+    $('lzDist').disabled = locked;
+    if (document.activeElement !== $('lzDist') && $('lzDist').value !== String(run.dist)) $('lzDist').value = run.dist;
+    const ds = locked ? { text: `Locked at ${run.dist} mm: this test was measured with it. To change it, press New test on the Results tab.`, warn: false }
+      : distMsg || { text: `Using ${run.dist} mm.`, warn: false };
+    setText('lzDistSt', ds.text);
+    $('lzDistSt').classList.toggle('cal-warn', ds.warn);
     ['lzCentre', 'lzShowX', 'lzShowY'].forEach(id => { $(id).disabled = !idle || !calOn; });
     if (cfg) {
       setText('lzCfg', `SPG ${cfg.spg} · centres ${cfg.xc}°/${cfg.yc}°`);
@@ -321,10 +350,10 @@ export function initLaser({ send, link, calib }) {
     $('lzPrompt').classList.toggle('dim', phase === 'moving' || phase === 'settling' || phase === 'pre');
     const other = axis === 'X' ? 'Y' : 'X';
     const subs = {
-      idle: run.meas[axis] && axisStats(run.meas[axis]) ? '' : `Centre the gimbal, check the zero mark, then press Start ${axis}. It steps −8° → +8° (up), then back down to −8°: 18 points.`,
+      idle: run.meas[axis] && axisStats(run.meas[axis]) ? '' : `Pivot to wall: ${run.dist} mm. Centre the gimbal, check the zero mark, then press Start ${axis}. It steps −8° → +8° (up), then back down to −8°: 18 points.`,
       pre: '', moving: '', settling: '',
       ready: redo ? `Type the distance for the mark you made at point ${shown + 1} (the gimbal has moved on).`
-        : `Point ${idx + 1} of ${N} · going ${dirOf(idx)}. Mark the dot, measure from the zero mark along ${axis} (+ is the side the dot went for +8°), type mm, press Enter.`,
+        : `Point ${idx + 1} of ${N} · going ${dirOf(idx)} · wall ${run.dist} mm. Mark the dot, measure from the zero mark along ${axis} (+ is the side the dot went for +8°), type mm, press Enter.`,
       done: axisStats(run.meas[other]) ? 'Both axes done. See Results.' : `Now axis ${other}: pick it above and press Start ${other}.`,
       error: '',
     };

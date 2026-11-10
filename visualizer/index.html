@@ -294,11 +294,12 @@
           <p class="cal-p">Checks that the gimbal goes where the flight code tells it to. A laser on the motor tube marks each angle on a wall. Only the gimbal moves (±8°). No motor.</p>
           <ol class="lz-list">
             <li>Tape a laser pointer along the motor tube.</li>
-            <li>Square the rocket to a flat wall and measure from the <b>gimbal pivot</b> to the wall.</li>
+            <li>Square the rocket to a flat wall. Measure from the <b>gimbal pivot</b> (where the pivot screw axes cross) to the wall, <b>not from the laser tip</b>.</li>
             <li>Press <b>Centre</b> and mark the dot. That is the <b>zero mark</b>.</li>
             <li>Press <b>+X 8°</b>, then <b>+Y 8°</b>. Mark which side the dot goes: that side is <b>+</b> for that axis.</li>
           </ol>
-          <label class="cal-line"><span>Pivot to wall<small>mm</small></span><input id="lzDist" type="number" min="100" max="10000" step="1" value="1000"></label>
+          <label class="cal-line"><span>Gimbal pivot to wall<small>mm, not from the laser tip</small></span><input id="lzDist" type="text" inputmode="decimal" autocomplete="off" value="1000"></label>
+          <p class="cal-p lz-dist-st" id="lzDistSt"></p>
           <div class="cal-line"><span>Calibration on the Nano</span><b id="lzCfg">—</b></div>
           <p class="cal-p cal-warn" id="lzCfgWarn"></p>
           <div class="cal-acts"><button id="lzCentre">Centre</button><button id="lzShowX">+X 8°</button><button id="lzShowY">+Y 8°</button></div>

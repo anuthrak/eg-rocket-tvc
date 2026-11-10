@@ -17,14 +17,19 @@ There are two ways to run it. Both give the same 18 points, the same pass criter
 
 ## What you need
 - A laser pointer and tape, a flat wall, a tape measure, a pencil or sticky notes.
-- The rocket held still on the rig or bench, **pivot 1000 mm from the wall** (another distance works: enter it).
+- The rocket held still on the rig or bench, with the **gimbal pivot 1000 mm from the wall** (another distance works: enter it).
+  Measure from the **pivot** (where the two pivot-screw axes cross), **not from the laser tip**. The dot lands at
+  distance × tan(angle) measured from the pivot, wherever the laser sits along the tube. Using the tip distance
+  would make every angle read a few percent large (e.g. tip 60 mm past the pivot → about 6 %, 0.5° at 8°).
 - The calibration done and **saved** first (Bench → Gimbal → Calibrate → Save). The test measures what is saved on the Nano.
 
 ## Run it from the website
 1. **Connect:** open the visualizer in Chrome/Edge, **Connect Arduino**, then Bench → Gimbal → **Laser**.
 2. **Setup tab:**
    - Tape the laser along the motor tube and aim it at the wall.
-   - Measure from the gimbal pivot to the wall and type it in.
+   - Measure from the gimbal pivot to the wall (not the laser tip), type it in mm, press Enter. The line under it
+     says **✓ Saved: … mm**. It is kept in the browser, and it is locked once an axis is measured, so both axes use
+     the same distance. **New test** unlocks it.
    - Press **Centre** and mark the dot: that is the **zero mark**.
    - Press **+X 8°** and mark which side the dot goes: that side is **+** for X. Do the same with **+Y 8°**.
    - If the panel warns that the calibration is unsaved or default, save it in Calibrate first.
