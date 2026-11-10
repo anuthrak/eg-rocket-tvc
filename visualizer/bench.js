@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { initCalib } from './calib.js';
+import { initLaser } from './laser.js';
 import { createDemoSim } from './demo-sim.js';
 
 const $ = id => document.getElementById(id);
@@ -268,7 +269,7 @@ export function initBench() {
     if (fw) fwVersion = fw[1];
     if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
-    if (/^(CAL|CFG|ERR|ABORT|SWEEP),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort; SWEEP,DONE: v1.7.0+
+    if (/^(CAL|CFG|ERR|ABORT|SWEEP|GIM),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort; SWEEP,DONE: v1.7.0+; GIM,x,y: v1.8.0+ (laser test)
       const cal = line.match(/^CAL,(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+)/);
       logLine(line, cal ? undefined : 'msg');
       if (line.startsWith('CFG,')) {
@@ -276,6 +277,7 @@ export function initBench() {
         rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7] };
       }
       calib.handle(line);
+      laser.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
       if (cal) {
         const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
@@ -349,9 +351,9 @@ export function initBench() {
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
     rig = { ...NO_CFG };
     setFree(false); $('freeBtn').disabled = !port;
-    calib.onLink();
+    calib.onLink(); laser.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
   const enc = new TextEncoder();
@@ -364,7 +366,11 @@ export function initBench() {
       try { await w.write(enc.encode(cmd + '\n')); } finally { w.releaseLock(); }
     }).catch(e => logLine('Send failed: ' + e.message, 'msg'));
   }
-  const calib = initCalib({ send, link: () => ({ port: !!port, demo: !!demoTimer, fw: fwVersion }) });
+  const linkInfo = () => ({ port: !!port, demo: !!demoTimer, fw: fwVersion });
+  const calib = initCalib({ send, link: linkInfo });
+  const laser = initLaser({ send, link: linkInfo, calib });
+  // Calibrate and the laser test both use the Nano's CAL mode: opening one closes the other
+  $('calBtn').addEventListener('click', () => { if (laser.isOpen()) laser.close(); }, true);
   const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
 
   async function connect() {
@@ -477,7 +483,7 @@ export function initBench() {
     ray.setFromCamera(_ndc, camera);
   }
   function rocketHit(e) { aimRay(e); return ray.intersectObjects(rocketMeshes, false)[0] || null; }
-  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on'); }
+  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on') && !$('lzBtn').classList.contains('on'); }
 
   view.addEventListener('pointerdown', e => {   // capture phase: decides before OrbitControls sees the press
     if (drag || !canDrag() || !e.isPrimary || e.button !== 0) return;

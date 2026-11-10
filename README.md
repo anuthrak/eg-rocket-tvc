@@ -25,6 +25,7 @@ Due: Benchmark B Nov 13 · Commissioning Dec 4 · Final submission Dec 11 (2026)
 
 ```
 firmware/nano_tvc/nano_tvc.ino   Arduino Nano: MPU6050 → PID → 2 gimbal servos
+tests/ct1_laser_gimbal/          CT-1 laser gimbal-accuracy test: sketch, logger (laser_log.py), procedure
 visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── index.html                   markup
 ├── style.css                    all styles
@@ -32,6 +33,7 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── main.js                      entry point: start-up order, tabs, app version
 ├── bench.js                     Bench tab: 3D rig, Web Serial / demo feed, readouts, chart
 ├── calib.js                     Bench → Gimbal → Calibrate panel
+├── laser.js                     Bench → Gimbal → Laser: CT-1 laser accuracy test, CSV + past runs
 ├── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
 └── public/                      static assets: favicon, app icons, images
 cad/                             CadQuery models + drawing generators (Python)
@@ -75,6 +77,8 @@ In the visualizer: **Bench → Connect Arduino → Gimbal → Calibrate**. Five 
 3. **Sensor:** tilt the top toward +X, then +Y. If the sensor is turned on its mount, firmware v1.3.0 corrects it for you.
 4. **Direction:** Test moves a servo the way the controller would for a lean toward +X/+Y; the top of the motor should tilt toward that side. Answer what you saw and it flips the direction or swaps the D9/D10 roles for you.
 5. **Save:** check the linkage ratio (servo degrees per gimbal degree, about 4; a laser helper measures it), then write everything to the Nano's EEPROM.
+
+**Laser test (CT-1):** Bench → Gimbal → **Laser** steps each axis through 18 points and asks where the laser dot landed. It gives PASS/FAIL (error and backlash ≤ 1°) and a CSV for the run sheet. Needs firmware v1.8.0 (`GIM`). Full procedure: [tests/ct1_laser_gimbal](tests/ct1_laser_gimbal/README.md).
 
 Without the visualizer, type the same commands into the Serial Monitor (115200, newline): `CAL`, `SET XC 92`, `LEVEL`, `PULSE X`, `SAVE`, `RUN`… The full list is at the top of the sketch.
 

@@ -139,6 +139,10 @@ h2 .h2-btns .h2btn { white-space: nowrap; }
 }
 h2 .h2btn { margin: -5px 0; padding: 3px 8px; font-size: 10px; line-height: 12px; letter-spacing: .14em; }
 h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); }
+/* Gimbal header: three buttons. When the side panel is too narrow for the full labels, short ones (same buttons, same place) */
+.gimbal-panel { container-type: inline-size; }
+.h2btn .sm { display: none; }
+@container (max-width: 181px) { .h2btn .lg { display: none; } .h2btn .sm { display: inline; } }
 .cal { grid-area: view; position: relative; z-index: 5; min-width: 0; min-height: 0; padding: 12px;
   display: flex; justify-content: center; align-items: flex-start; overflow: hidden; pointer-events: none; }
 .cal[hidden] { display: none; }
@@ -207,6 +211,58 @@ h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); 
 .cal-foot { display: flex; justify-content: space-between; gap: 6px; }
 .cal-foot[hidden], .cal-confirm[hidden], #calStepsWrap[hidden], .cal-body[hidden] { display: none; }
 .cal-confirm { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--amber); }
+
+/* ---------- Laser test (same card as calibration; laser.js) ---------- */
+.lz-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#lzState.ok { color: var(--ok); } #lzState.bad { color: var(--warn); }
+.lz .cal-foot[hidden], .lz-step[hidden], #lzBody[hidden] { display: none; }
+.lz-list { margin: 0; padding-left: 20px; color: var(--muted); font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.lz-list b { color: var(--text); font-weight: 600; }
+.lz-axes { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 6px; }
+.lz-axes [data-lzaxis] { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 9px;
+  font: 600 13px var(--cond); letter-spacing: .1em; text-transform: uppercase; }
+.lz-axes [data-lzaxis].x { color: var(--pitch); } .lz-axes [data-lzaxis].y { color: var(--yaw); }
+.lz-axes [data-lzaxis].active { border-color: currentColor; background: var(--panel-2); }
+.lz-axes small { font: 500 10px var(--label); letter-spacing: .1em; color: var(--dim); }
+.lz-axes small.ok { color: var(--ok); } .lz-axes small.bad { color: var(--warn); }
+/* Progress: 9 dots going up, 9 coming down */
+.lz-dots { display: grid; grid-template-columns: 38px repeat(9, minmax(0, 1fr)); gap: 4px 3px; align-items: center; }
+.lz-dots span { font: 500 10px var(--label); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.lz-dots i { height: 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line-2); }
+.lz-dots i.ok { background: var(--ok); border-color: var(--ok); }
+.lz-dots i.bad { background: var(--warn); border-color: var(--warn); }
+.lz-dots i.cur { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.cal-prompt.dim { color: var(--muted); }
+.lz-entry { display: grid; grid-template-columns: minmax(0, 1fr) 96px 92px; gap: 8px; align-items: center;
+  padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.lz-entry.off { opacity: .45; }
+.lz-entry label { font: 500 10px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.lz-entry label small { display: block; color: var(--dim); letter-spacing: .08em; }
+.lz-entry input { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 6px 8px; font: 500 20px var(--cond); text-align: right; font-variant-numeric: tabular-nums; }
+.lz-entry input:focus { outline: none; border-color: var(--text); }
+.lz-conv { display: flex; flex-direction: column; align-items: flex-end; }
+.lz-conv b { font: 500 18px var(--cond); font-variant-numeric: tabular-nums; }
+.lz-conv small { font: 500 11px var(--label); letter-spacing: .06em; color: var(--dim); white-space: nowrap; min-height: 14px; }
+.lz-conv small.ok { color: var(--ok); } .lz-conv small.bad { color: var(--warn); }
+.lz-overall { font: 600 17px var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.lz-overall.ok { color: var(--ok); } .lz-overall.bad { color: var(--warn); }
+.lz-sum, .lz-tab { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.lz-sum th, .lz-sum td, .lz-tab th, .lz-tab td { padding: 4px 6px; border-top: 1px solid var(--line); text-align: right; }
+.lz-sum thead th, .lz-tab thead th { border-top: 0; font: 500 10px var(--label); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.lz-sum thead small { display: block; color: var(--dim); letter-spacing: .06em; }
+.lz-sum tbody th { text-align: left; font: 600 14px var(--cond); }
+.lz-sum tr.x th, .lz-tab th.x { color: var(--pitch); } .lz-sum tr.y th, .lz-tab th.y { color: var(--yaw); }
+.lz-sum td { font: 500 15px var(--cond); }
+.lz-tab td { font: 500 13px var(--cond); }
+.lz-tab td:first-child { text-align: left; color: var(--muted); }
+.lz-sum td.bad, .lz-tab td.bad { color: var(--warn); }
+.lz-hist { list-style: none; margin: 0; padding: 0; }
+.lz-hist li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 4px 0;
+  border-top: 1px solid var(--line); font: 500 12px var(--label); color: var(--muted); }
+.lz-hist li.empty { display: block; }
+.lz-hist .ok { color: var(--ok); } .lz-hist .bad { color: var(--warn); }
+.lz-hist button { padding: 3px 8px; font-size: 10px; }
 
 /* ---------- Footer ---------- */
 footer { grid-row: 3; display: flex; flex-wrap: wrap; gap: 2px 22px; align-items: center; padding: 6px 16px;

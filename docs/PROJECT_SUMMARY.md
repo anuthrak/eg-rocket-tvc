@@ -136,6 +136,8 @@ under offset load; abort < 100 ms; 100 Hz control loop; 5-min run with servos < 
 Tests: CT-1…5 (servo/linkage cal, IMU at rest, loop timing, EDF thrust vs throttle, kill switch); IT-1…5 (fit,
 balance/CG, swing for I + friction, motor-on noise, open-loop gimbal step → b); ST-1…7 (hold, tap recovery,
 offset weight, throttle sweep, aborts, endurance, catch tower).
+CT-1 laser gimbal accuracy: `tests/ct1_laser_gimbal/` (18-point step test per axis; pass = error ≤ 1.0°,
+backlash ≤ 1.0°).
 Record every run: CSV log (t, dt, mode, throttle, raw gyro/accel, filtered angles, setpoints, errors, P/I/D terms,
 gimbal commands in ° and µs, abort flag), a run sheet (test ID, firmware version, gains, filters, throttle,
 rig config, pass/fail, notes) and synced video (tap/LED marker).

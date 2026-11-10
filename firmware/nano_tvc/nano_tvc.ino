@@ -37,6 +37,9 @@
 //   PULSE X|Y [deg]   (CAL only) move one servo the way the controller would for a lean toward +X/+Y
 //   SWEEP CIRCLE|CORNERS|OFF   (CAL only) move both servos through the full +-GMAX, about 3 s, then back to centre;
 //                     replies SWEEP,DONE when it ends or is stopped
+//   GIM <x> <y> | GIM OFF  (CAL only) hold the gimbal at x, y gimbal degrees (clamped to +-GMAX), through the
+//                     same conversion as flight (centre, direction, linkage ratio) at the GRATE slew limit.
+//                     Replies GIM,<x>,<y> once it gets there. For the laser test (CT-1). OFF = GIM 0 0.
 //   SAVE              write the config to EEPROM
 //   LOAD              discard unsaved changes (reload EEPROM, or the defaults if nothing is saved)
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
@@ -50,7 +53,7 @@
 // the serial link goes quiet, and the motor stays off after an abort until RUN.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.7.0";
+const char FW_VERSION[] = "1.8.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -194,6 +197,11 @@ char sweepMode = 0;                       // 'C' circle / 'K' corners while a SW
 unsigned long sweepStart = 0;
 const unsigned long SWEEP_TURN_MS = 1500, SWEEP_RAMP_MS = 300;   // circle: 2 turns, radius eased in and out
 const unsigned long SWEEP_CORNER_MS = 350;                       // corners: 8 moves, held this long each
+bool gimOn = false;                       // GIM: holding a commanded gimbal angle (laser test)
+bool gimReported = true;                  // GIM,<x>,<y> already sent for the current target
+float gimTX = 0, gimTY = 0;               // target gimbal angles (deg)
+float gimX = 0, gimY = 0;                 // gimbal angles now on the servos (deg), slewed toward the target
+unsigned long gimLastMs = 0;
 
 // ---------- Sensor frame -> rocket frame ----------
 // up = ±(axis index + 1); the other two sensor axes, in right-handed order, become rocket X0/Y0,
@@ -280,6 +288,18 @@ void checkAbort() {
 char cmdBuf[40];
 byte cmdLen = 0;
 
+void endGim() { gimOn = false; gimX = gimY = gimTX = gimTY = 0; gimReported = true; }
+
+// Strict number: the whole token must parse
+bool parseNum(const char *s, float &out) {
+  if (!s) return false;
+  char *end;
+  double v = strtod(s, &end);
+  if (end == s || *end != 0 || isnan(v) || isinf(v)) return false;
+  out = v;
+  return true;
+}
+
 void endSweep() {
   if (!sweepMode) return;
   sweepMode = 0;
@@ -294,12 +314,12 @@ void runCommand(char *line) {
   char *arg2 = strtok(NULL, " ");
 
   if (!strcmp(cmd, "CAL")) {
-    calMode = true; pulseAxis = 0; endSweep();
+    calMode = true; pulseAxis = 0; endSweep(); endGim();
     xServo.writeMicroseconds(servoUs(cfg.xCenter)); yServo.writeMicroseconds(servoUs(cfg.yCenter));
     Serial.println("CAL,ON");
     printConfig();
   } else if (!strcmp(cmd, "RUN")) {
-    calMode = false; pulseAxis = 0; endSweep();
+    calMode = false; pulseAxis = 0; endSweep(); endGim();
     seedAttitude();
     lastLoop = micros();
     Serial.println("CAL,OFF");
@@ -355,7 +375,7 @@ void runCommand(char *line) {
   } else if (!strcmp(cmd, "PULSE") && arg1) {
     if (!calMode) { Serial.println("ERR,PULSE needs CAL"); return; }
     if (arg1[0] != 'X' && arg1[0] != 'Y') { Serial.println("ERR,PULSE X or Y"); return; }
-    endSweep();
+    endSweep(); endGim();
     pulseAxis = arg1[0];
     pulseDeg = arg2 ? constrain(atoi(arg2), 3, 30) : 15;
     pulseEnd = millis() + 1200;
@@ -363,9 +383,18 @@ void runCommand(char *line) {
     if (!calMode) { Serial.println("ERR,SWEEP needs CAL"); return; }
     if (!strcmp(arg1, "OFF")) { endSweep(); return; }
     if (strcmp(arg1, "CIRCLE") && strcmp(arg1, "CORNERS")) { Serial.println("ERR,SWEEP CIRCLE, CORNERS or OFF"); return; }
-    pulseAxis = 0;
+    pulseAxis = 0; endGim();
     sweepMode = arg1[1] == 'I' ? 'C' : 'K';
     sweepStart = millis();
+  } else if (!strcmp(cmd, "GIM") && arg1) {
+    if (!calMode) { Serial.println("ERR,GIM needs CAL"); return; }
+    float x = 0, y = 0;   // GIM OFF = slew back to centre (same as GIM 0 0)
+    if (strcmp(arg1, "OFF") && (!parseNum(arg1, x) || !parseNum(arg2, y))) { Serial.println("ERR,GIM <x> <y> in gimbal degrees"); return; }
+    const float lim = GMAX * RAD_TO_DEG;
+    pulseAxis = 0; endSweep();
+    if (!gimOn) { gimOn = true; gimX = gimY = 0; gimLastMs = millis(); }   // CAL holds the servos at centre
+    gimTX = constrain(x, -lim, lim); gimTY = constrain(y, -lim, lim);
+    gimReported = false;
   } else if (!strcmp(cmd, "SAVE")) {
     saveConfig();
     printConfig();
@@ -423,8 +452,26 @@ void calLoop() {
     xa = cfg.xCenter + (int)round(cfg.xDir * amp * ux);
     ya = cfg.yCenter + (int)round(cfg.yDir * amp * uy);
   }
-  xServo.writeMicroseconds(servoUs(xa));
-  yServo.writeMicroseconds(servoUs(ya));
+  float xs = xa, ys = ya;
+  if (gimOn) {
+    // Slew toward the target at GRATE, then convert exactly as the flight loop does (fractional degrees kept)
+    unsigned long now = millis();
+    float step = GRATE * RAD_TO_DEG * (now - gimLastMs) * 1e-3;
+    gimLastMs = now;
+    gimX += constrain(gimTX - gimX, -step, step);
+    gimY += constrain(gimTY - gimY, -step, step);
+    if (fabs(gimTX - gimX) < 1e-3) gimX = gimTX;
+    if (fabs(gimTY - gimY) < 1e-3) gimY = gimTY;
+    xs = servoDeg(gimX * DEG_TO_RAD, cfg.xDir, cfg.xCenter);
+    ys = servoDeg(gimY * DEG_TO_RAD, cfg.yDir, cfg.yCenter);
+    xa = (int)round(xs); ya = (int)round(ys);
+    if (!gimReported && gimX == gimTX && gimY == gimTY) {
+      gimReported = true;
+      Serial.print("GIM,"); Serial.print(gimX, 2); Serial.print(','); Serial.println(gimY, 2);
+    }
+  }
+  xServo.writeMicroseconds(servoUs(xs));
+  yServo.writeMicroseconds(servoUs(ys));
 
   if (millis() - lastTelemetry >= TELEMETRY_MS) {
     lastTelemetry = millis();

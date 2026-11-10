@@ -32,7 +32,7 @@ export function initCalib({ send, link }) {
       levelBusy = false;
       if (open && !calOn) send('CAL');
     } else if (p[0] === 'CAL' && p[1] === 'ON') calOn = true;
-    else if (p[0] === 'CAL' && p[1] === 'OFF') calOn = false;
+    else if (p[0] === 'CAL' && p[1] === 'OFF') { calOn = false; if (open) send('CAL'); }   // e.g. the laser test just closed
     else if (p[0] === 'SWEEP') sweeping = false;
     else if (p[0] === 'ERR' && sweeping) { sweeping = false; sweepNote = 'This needs firmware v1.7.0 or newer. Upload firmware/nano_tvc.'; }
     else if (p[0] === 'CAL' && p.length >= 5) {
@@ -298,5 +298,5 @@ export function initCalib({ send, link }) {
     $('calRevert').disabled = cfg.state !== 'UNSAVED';
   }
 
-  return { handle, onLink, refresh: () => open && render() };
+  return { handle, onLink, refresh: () => open && render(), isOpen: () => open, close: requestClose };
 }

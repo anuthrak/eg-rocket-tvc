@@ -127,8 +127,8 @@
     </div>
   </aside>
   <aside class="side-r">
-    <div class="panel">
-      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)">Free-test</button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></div></h2>
+    <div class="panel gimbal-panel">
+      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)"><span class="lg">Free-test</span><span class="sm">Free</span></button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)"><span class="lg">Calibrate</span><span class="sm">Cal</span></button><button id="lzBtn" class="h2btn" title="Laser accuracy test (CT-1): check the gimbal goes where it is told (firmware v1.8.0+)">Laser</button></div></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
@@ -274,6 +274,79 @@
         <span>Unsaved changes. They stay on the Nano until it restarts.</span>
         <span class="cal-acts"><button id="calSaveExit" class="primary">Save &amp; close</button><button id="calDiscardExit">Discard</button><button id="calKeep">Keep editing</button></span>
       </div>
+    </div>
+  </section>
+  <!-- Laser accuracy test (CT-1): same floating card as Calibrate. Drives the firmware's GIM command (laser.js). -->
+  <section id="lzPanel" class="cal lz" hidden aria-label="Laser gimbal test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Laser test<span id="lzState">CT-1</span></h2>
+        <button id="lzClose" class="cal-x" title="Close (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="lzTabs">
+        <button data-tab="0">1 · Setup</button><button data-tab="1">2 · Measure</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="lzMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="lzBody">
+        <!-- 1 Setup -->
+        <div class="cal-step lz-step" data-tab="0">
+          <p class="cal-p">Checks that the gimbal goes where the flight code tells it to. A laser on the motor tube marks each angle on a wall. Only the gimbal moves (±8°). No motor.</p>
+          <ol class="lz-list">
+            <li>Tape a laser pointer along the motor tube.</li>
+            <li>Square the rocket to a flat wall and measure from the <b>gimbal pivot</b> to the wall.</li>
+            <li>Press <b>Centre</b> and mark the dot. That is the <b>zero mark</b>.</li>
+            <li>Press <b>+X 8°</b>, then <b>+Y 8°</b>. Mark which side the dot goes: that side is <b>+</b> for that axis.</li>
+          </ol>
+          <label class="cal-line"><span>Pivot to wall<small>mm</small></span><input id="lzDist" type="number" min="100" max="10000" step="1" value="1000"></label>
+          <div class="cal-line"><span>Calibration on the Nano</span><b id="lzCfg">—</b></div>
+          <p class="cal-p cal-warn" id="lzCfgWarn"></p>
+          <div class="cal-acts"><button id="lzCentre">Centre</button><button id="lzShowX">+X 8°</button><button id="lzShowY">+Y 8°</button></div>
+        </div>
+        <!-- 2 Measure -->
+        <div class="cal-step lz-step" data-tab="1" hidden>
+          <div class="lz-axes">
+            <button data-lzaxis="X" class="x">X axis<small>Not run</small></button>
+            <button data-lzaxis="Y" class="y">Y axis<small>Not run</small></button>
+            <button id="lzStart" class="primary">Start X</button>
+          </div>
+          <div class="lz-dots" id="lzDots" aria-hidden="true"><span>Up</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>Down</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="cal-prompt" id="lzPrompt">Ready</div>
+          <p class="cal-p" id="lzSub"></p>
+          <div class="lz-entry" id="lzEntry">
+            <label for="lzMm">Dot from zero mark<small>mm, signed</small></label>
+            <input id="lzMm" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+            <div class="lz-conv"><b id="lzDeg">—</b><small id="lzErr"></small></div>
+          </div>
+          <div class="cal-acts"><button id="lzRec" class="primary">Record &amp; next</button><button id="lzRedo">Redo last point</button></div>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step lz-step" data-tab="2" hidden>
+          <div class="lz-overall" id="lzOverall">No axis measured yet.</div>
+          <table class="lz-sum">
+            <thead><tr><th></th><th>Max error<small>≤ 1.0°</small></th><th>Backlash<small>≤ 1.0°</small></th><th></th></tr></thead>
+            <tbody>
+              <tr class="x"><th>X</th><td id="lzEX">—</td><td id="lzBX">—</td><td><span id="lzVX" class="cal-res">Not run</span></td></tr>
+              <tr class="y"><th>Y</th><td id="lzEY">—</td><td id="lzBY">—</td><td><span id="lzVY" class="cal-res">Not run</span></td></tr>
+            </tbody>
+          </table>
+          <details class="cal-measure">
+            <summary>All 18 points per axis</summary>
+            <table class="lz-tab">
+              <thead><tr><th>Cmd</th><th class="x">X up</th><th class="x">X down</th><th class="y">Y up</th><th class="y">Y down</th></tr></thead>
+              <tbody id="lzRows"></tbody>
+            </table>
+          </details>
+          <p class="cal-p" id="lzMeta"></p>
+          <div class="cal-acts"><button id="lzCsv" class="primary">Download CSV</button><button id="lzCopy">Copy summary</button><button id="lzNew">New test</button></div>
+          <p class="cal-p">Runs are also kept in this browser. Download the CSV for the run sheet.</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="lzHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="lzBack">Back</button><button id="lzNext" class="primary">Next</button></div>
     </div>
   </section>
 </main>
