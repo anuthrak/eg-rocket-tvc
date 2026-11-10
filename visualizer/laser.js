@@ -369,6 +369,9 @@ export function initLaser({ send, link, calib }) {
     setText('lzDeg', deg == null ? DASH : sdeg(deg));
     setText('lzErr', deg == null ? '' : `error ${sdeg(deg - c)}`);
     $('lzErr').className = deg == null ? '' : Math.abs(deg - c) <= LIMIT_ERR ? 'ok' : 'bad';
+    // Sign check: a negative command puts the dot on the − side. Warn (don't block) when the typed sign disagrees.
+    const wrongSign = ready && mm != null && c !== 0 && Math.abs(deg) >= 0.3 && Math.sign(deg) !== Math.sign(c);
+    setText('lzSign', wrongSign ? `${c < 0 ? 'Negative' : 'Positive'} command, so the dot should be on the ${c < 0 ? '−' : '+'} side. Forgot the ${c < 0 ? 'minus' : 'sign'}? Check, then Enter anyway if it really is.` : '');
     $('lzRec').disabled = !ready || mm == null;
     setText('lzRec', redo ? 'Replace' : idx === N - 1 ? 'Record & finish' : 'Record & next');
     $('lzRedo').disabled = !ready || idx === 0;
