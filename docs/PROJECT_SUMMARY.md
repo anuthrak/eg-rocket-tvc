@@ -142,8 +142,15 @@ backlash ≤ 1.0°).
 CT-4 first spin-up (Nov 16, firmware v1.10.0, Bench → Throttle, EDF clamped, ≤ 25 %): ESC arms normally (3 beeps,
 tune, silence); D3 → ESC → motor works; fan starts at **15 %** (1150 µs), so the ESC range calibration is still to
 do. Spun backwards at first: swapped 2 of the 3 motor wires, now blows out the tail (label the joints).
-Wiring lessons: the Nano's 5V pin must **not** be on the ESC BEC rail while on USB (it made the ESC beep
-continuously); share ground only. ESC and motor bullets don't match (joined by hand for now).
+Bench wiring (battery pack retired): 12 V → ESC (XT60); ESC BEC 5.5 V (thin red) → + rail → both servos;
+Nano on USB (power + visualizer link); MPU VCC on the Nano 5V pin only; one common ground rail (ESC, servos,
+Nano, MPU); D3 ESC, D9 X servo, D10 Y servo. The servos only have power with the 12 V on, even with the motor off.
+Never put the Nano 5V pin or VIN on the + rail: 5V clashes with USB (the ESC beeped continuously), and VIN needs
+7–12 V (at 5.5 V the Nano browns out and resets). Running without USB = 12 V to VIN from the thick supply wire,
+added with the kill-switch rewire. ESC and motor bullets don't match (joined by hand for now).
+Power-up: Nano on USB → connect the visualizer → 12 V on (ESC tune, then silence) → test. Power-down: stop the
+motor → 12 V off → disconnect → unplug USB. Next: watch for servo jitter with the motor at 15–20 %; if so, add
+470–1000 µF across the rails.
 Record every run: CSV log (t, dt, mode, throttle, raw gyro/accel, filtered angles, setpoints, errors, P/I/D terms,
 gimbal commands in ° and µs, abort flag), a run sheet (test ID, firmware version, gains, filters, throttle,
 rig config, pass/fail, notes) and synced video (tap/LED marker).
