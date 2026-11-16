@@ -32,7 +32,7 @@ Changes since the PDI / Milestone 1 (Oct 26–28): A2212 + propeller → 30 mm E
   linkage-stopper kit $9.98. 3D printing is free (NYU), so filament doesn't count.
 - Already on hand (no purchase): M3 screws (6, 8, 12 mm) + nylon lock nuts, half-size breadboard + jumpers,
   CA / epoxy / hot glue, Nano USB cable.
-- Delivery: the cart (EDF, ESC, supply, adapter, fuse holder) hasn't arrived yet.
+- Delivery: the cart (EDF, ESC, supply, adapter, fuse holder) has arrived; first motor spin-up Nov 16 (see §11).
 - Power caution: EDF full throttle ≈ 11+ A > 10 A supply → cap throttle at 85 % in firmware.
 
 ## 4. Drawings (ASME Y14 style, ANSI B, house standard in [drawing-standard.md](drawing-standard.md))
@@ -139,6 +139,11 @@ balance/CG, swing for I + friction, motor-on noise, open-loop gimbal step → b)
 offset weight, throttle sweep, aborts, endurance, catch tower).
 CT-1 laser gimbal accuracy: `tests/ct1_laser_gimbal/` (18-point step test per axis; pass = error ≤ 1.0°,
 backlash ≤ 1.0°).
+CT-4 first spin-up (Nov 16, firmware v1.10.0, Bench → Throttle, EDF clamped, ≤ 25 %): ESC arms normally (3 beeps,
+tune, silence); D3 → ESC → motor works; fan starts at **15 %** (1150 µs), so the ESC range calibration is still to
+do. Spun backwards at first: swapped 2 of the 3 motor wires, now blows out the tail (label the joints).
+Wiring lessons: the Nano's 5V pin must **not** be on the ESC BEC rail while on USB (it made the ESC beep
+continuously); share ground only. ESC and motor bullets don't match (joined by hand for now).
 Record every run: CSV log (t, dt, mode, throttle, raw gyro/accel, filtered angles, setpoints, errors, P/I/D terms,
 gimbal commands in ° and µs, abort flag), a run sheet (test ID, firmware version, gains, filters, throttle,
 rig config, pass/fail, notes) and synced video (tap/LED marker).
@@ -150,11 +155,15 @@ higher outdoor hops (FAA recreational rules, TRUST, registration > 250 g) → pr
 tower catch with the chopstick tower → full reusable mini mission.
 
 ## 13. Open items
-- EDF + ESC not received: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
+- Kill switch / fuse holder has female XT60 on both ends and doesn't fit the adapter's female XT60: cut one end of
+  each and join the wires (or get a male XT60), check polarity with a meter, then CT-5. Until then, runs ≤ 25 %
+  only, with the 12 V plug as the stop.
+- CT-4 next: ESC range calibration (Throttle → Safety), then the full step test 10 → 85 % on the scale with
+  hearing protection.
+- EDF + ESC arrived: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
   (assumed ~172 mm in part A) and design the EDF retainer.
 - Weigh every part and update COMPONENTS in the body model (real CG, mass).
 - Rig collar position vs the sled screws at 232 mm (CG ~240 mm).
 - Check the 2× M3×6 TVC mount screws grip in the outer gimbal's Ø3 holes.
 - Desk rig GS-001 (Systems) and wiring diagram EL-001 (Propulsion).
-- Firmware: throttle in flight mode (gains scaled by the real thrust). Check the ESC's throttle range matches
-  1000–2000 µs on the bench; the wiring diagram EL-001 should show the ESC signal on D3.
+- Firmware: throttle in flight mode (gains scaled by the real thrust). The wiring diagram EL-001 should show the ESC signal on D3.
