@@ -7,8 +7,9 @@
 // TVC gimbal controller for the SLDP 45 desk-rig rocket.
 //   IMU -> complementary filter -> PID per axis -> gimbal command (clamped to ±GMAX, slew-limited
 //   to GRATE) -> servo pulse via the linkage ratio. Gains from docs/PROJECT_SUMMARY.md §7.
-// Hardware: Arduino Nano + MPU6050 on the avionic sled (SLDP-AV-001) + 2 MG90S servos.
-// The EDF + ESC haven't arrived, so there is no motor output yet and throttle is fixed at 1.0.
+// Hardware: Arduino Nano + MPU6050 on the avionic sled (SLDP-AV-001) + 2 MG90S servos + the EDF's ESC on D3.
+// The motor only runs in the throttle test (Bench → Throttle, calibration mode). In flight mode the ESC is held at
+// zero and the controller still assumes full thrust for its gain scaling.
 //
 // Axes (rocket body frame, same as the drawings: z = rocket axis up, +X = toward the 2X M3 TVC mount
 // screws at body 0°, +Y = 90° from that). Servos are named by the direction they tilt the nozzle:
@@ -45,19 +46,41 @@
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
 //   FREE ON|OFF       free-test mode on or off; replies FREE,ON or FREE,OFF
 //
+// Throttle test (CT-4, calibration mode only; the visualizer's Bench → Throttle panel drives these):
+//   ARM               allow the motor to run (throttle must be 0). Replies with a THR status line.
+//   THR <pct>         target throttle 0..85 (capped at THROTTLE_CAP). Rises at THR_RAMP_UP, drops at once.
+//                     Every line received counts as a heartbeat: the motor is cut if nothing arrives for THR_LINK_MS.
+//   DISARM            motor to zero at once, disarmed.
+//   Status, 5 Hz while armed and on every change:  THR,<ARMED|SAFE>,<target %>,<actual %>,<ESC µs>
+//   Cuts (motor to zero, disarmed, then a SAFE status line):  THR,CUT,LINK | THR,CUT,TILT | THR,CUT,MODE
+//     LINK = no serial line for THR_LINK_MS, TILT = beyond ABORT_TILT for 3 readings in a row,
+//     MODE = CAL or RUN received (leaving or re-entering calibration).
+//   The ESC sees ESC_MIN_US from the first moment of setup(), so it arms safely and never starts the fan on boot.
+//   HB                heartbeat only, no reply (keeps the link watchdog fed while nothing else is being sent)
+//
+// ESC throttle-range calibration (calibration mode only, disarmed, 12 V OFF when starting):
+//   ESCCAL HIGH       ESC signal to ESC_MAX_US (full throttle) so the ESC stores it as 100 % when it powers up.
+//                     Replies ESCCAL,HIGH. Falls back to ESC_MIN_US by itself after ESCCAL_MAX_MS (ESCCAL,TIMEOUT),
+//                     when no serial line arrives for THR_LINK_MS (ESCCAL,LINK), or on CAL / RUN / ARM (ESCCAL,MODE).
+//   ESCCAL LOW        ESC signal back to ESC_MIN_US so the ESC stores it as 0 %. Replies ESCCAL,LOW.
+//   DANGER: if the ESC is already powered and armed, ESCCAL HIGH is full throttle. Only start it with the 12 V off.
+//
 // Safety: the gimbal is always clamped to +-GMAX. Tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT.
 // It re-arms after the rocket is back within REARM_TILT for REARM_MS (prints ABORT,CLEAR), or on RUN.
 // Free-test (FREE ON) is for tilting the rocket by hand: no tilt abort, gains x FREE_TEST_GAIN, same +-GMAX limit.
 // It always starts off at power-up and is never saved.
-// TODO when the ESC arrives: refuse FREE ON while the motor can run, throttle output capped at THROTTLE_CAP, motor cut on abort and when
-// the serial link goes quiet, and the motor stays off after an abort until RUN.
+// Motor safety: the motor can only run in calibration mode after ARM, never above THROTTLE_CAP, and is cut on a lost link,
+// a tilt beyond ABORT_TILT or any mode change. After a cut it stays off until ARM. (FREE only affects flight mode.)
+// Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.8.0";
+const char FW_VERSION[] = "1.10.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
 const int Y_SERVO_PIN = 10;
+const int ESC_PIN = 3;                      // ESC signal (white/yellow); ESC ground to Nano GND
+const int ESC_MIN_US = 1000, ESC_MAX_US = 2000;   // ESC throttle range: 0 % and 100 %
 const int   X_CENTER = 90, Y_CENTER = 90;   // servo angle with the nozzle dead straight (deg)
 const int   X_DIR = 1, Y_DIR = 1;           // -1 if that servo pushes the wrong way
 const float SERVO_PER_GIMBAL = 4.0;         // linkage ratio: servo degrees per gimbal degree (~4 for the K-9)
@@ -72,6 +95,7 @@ const int SERVO_MIN_US = 544, SERVO_MAX_US = 2400;   // Servo library's 0° and 
 Adafruit_MPU6050 mpu;
 Servo xServo;
 Servo yServo;
+Servo esc;                                // the ESC takes a servo pulse: ESC_MIN_US = stop
 
 // ---------- Controller (docs/PROJECT_SUMMARY.md §7) ----------
 // Gimbal degrees per degree of tilt (and per °/s, and per °·s), tuned at THRUST_REF_G and scaled by
@@ -89,6 +113,10 @@ const float REARM_TILT = 5.0 * DEG_TO_RAD;
 const unsigned long REARM_MS = 1000;
 const float FREE_TEST_GAIN = 0.5;         // free-test only: multiplies Kp, Kd and Ki
 const float THROTTLE_CAP = 0.85;          // for the ESC (EDF draws ~11 A at full throttle, supply is 10 A)
+const float THR_RAMP_UP = 0.5;            // throttle rise limit (fraction per second): 0 → 85 % in 1.7 s
+const unsigned long THR_LINK_MS = 500;    // motor cut when no serial line arrives for this long
+const unsigned long THR_REPORT_MS = 200;  // THR status line rate while armed
+const unsigned long ESCCAL_MAX_MS = 15000; // ESC calibration: longest the full-throttle signal is held
 
 // No motor yet: run as if the engine is at full throttle so the gimbal always steers.
 float throttle = 1.0;
@@ -202,6 +230,13 @@ bool gimReported = true;                  // GIM,<x>,<y> already sent for the cu
 float gimTX = 0, gimTY = 0;               // target gimbal angles (deg)
 float gimX = 0, gimY = 0;                 // gimbal angles now on the servos (deg), slewed toward the target
 unsigned long gimLastMs = 0;
+bool motorArmed = false;                  // throttle test: ARM received and no cut since
+float thrTarget = 0, thrNow = 0;          // throttle (0..1): commanded, and what the ESC gets after the ramp
+unsigned long lastRxMs = 0;               // last complete serial line (motor heartbeat)
+unsigned long thrLastMs = 0, thrReportMs = 0;
+uint8_t tiltHits = 0;                     // consecutive over-tilt readings while armed
+bool escCalHigh = false;                  // ESCCAL HIGH: sending ESC_MAX_US for the ESC's range calibration
+unsigned long escCalStart = 0;
 
 // ---------- Sensor frame -> rocket frame ----------
 // up = ±(axis index + 1); the other two sensor axes, in right-handed order, become rocket X0/Y0,
@@ -284,6 +319,50 @@ void checkAbort() {
   else if (millis() - uprightSince >= REARM_MS) { aborted = false; uprightSince = 0; Serial.println("ABORT,CLEAR"); }
 }
 
+// ---------- Motor (throttle test) ----------
+int escUs(float t) { return ESC_MIN_US + (int)(constrain(t, 0.0f, THROTTLE_CAP) * (ESC_MAX_US - ESC_MIN_US) + 0.5); }
+
+void printThr() {
+  Serial.print("THR,"); Serial.print(motorArmed ? "ARMED" : "SAFE"); Serial.print(',');
+  Serial.print(thrTarget * 100, 1); Serial.print(',');
+  Serial.print(thrNow * 100, 1); Serial.print(',');
+  Serial.println(escUs(thrNow));
+}
+
+void motorCut(const char *why) {
+  bool was = motorArmed || thrNow > 0;
+  motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+  esc.writeMicroseconds(ESC_MIN_US);
+  if (!was) return;
+  Serial.print("THR,CUT,"); Serial.println(why);
+  printThr();
+}
+
+void escCalEnd(const char *why) {
+  if (!escCalHigh) return;
+  escCalHigh = false;
+  esc.writeMicroseconds(ESC_MIN_US);
+  Serial.print("ESCCAL,"); Serial.println(why);
+}
+
+// Every loop, in both modes: watchdog, ramp, ESC pulse, status line
+void motorUpdate() {
+  unsigned long now = millis();
+  if (escCalHigh) {
+    if (now - lastRxMs > THR_LINK_MS) escCalEnd("LINK");
+    else if (now - escCalStart > ESCCAL_MAX_MS) escCalEnd("TIMEOUT");
+    else { esc.writeMicroseconds(ESC_MAX_US); return; }
+  }
+  if (motorArmed && now - lastRxMs > THR_LINK_MS) motorCut("LINK");
+  float dt = (now - thrLastMs) * 1e-3;
+  thrLastMs = now;
+  if (!motorArmed) thrTarget = 0;
+  if (thrTarget <= thrNow) thrNow = thrTarget;
+  else thrNow = min(thrTarget, thrNow + THR_RAMP_UP * dt);
+  esc.writeMicroseconds(escUs(thrNow));
+  if (motorArmed && now - thrReportMs >= THR_REPORT_MS) { thrReportMs = now; printThr(); }
+}
+
 // ---------- Serial commands ----------
 char cmdBuf[40];
 byte cmdLen = 0;
@@ -313,12 +392,15 @@ void runCommand(char *line) {
   char *arg1 = strtok(NULL, " ");
   char *arg2 = strtok(NULL, " ");
 
+  if (!strcmp(cmd, "HB")) return;   // heartbeat: receiving it was enough
   if (!strcmp(cmd, "CAL")) {
+    motorCut("MODE"); escCalEnd("MODE");
     calMode = true; pulseAxis = 0; endSweep(); endGim();
     xServo.writeMicroseconds(servoUs(cfg.xCenter)); yServo.writeMicroseconds(servoUs(cfg.yCenter));
     Serial.println("CAL,ON");
     printConfig();
   } else if (!strcmp(cmd, "RUN")) {
+    motorCut("MODE"); escCalEnd("MODE");
     calMode = false; pulseAxis = 0; endSweep(); endGim();
     seedAttitude();
     lastLoop = micros();
@@ -395,6 +477,33 @@ void runCommand(char *line) {
     if (!gimOn) { gimOn = true; gimX = gimY = 0; gimLastMs = millis(); }   // CAL holds the servos at centre
     gimTX = constrain(x, -lim, lim); gimTY = constrain(y, -lim, lim);
     gimReported = false;
+  } else if (!strcmp(cmd, "ARM")) {
+    if (!calMode) { Serial.println("ERR,ARM needs CAL"); return; }
+    if (escCalHigh) { escCalEnd("MODE"); Serial.println("ERR,ARM during ESCCAL"); return; }
+    if (!motorArmed) { motorArmed = true; thrTarget = thrNow = 0; tiltHits = 0; }
+    thrReportMs = millis();
+    printThr();
+  } else if (!strcmp(cmd, "THR") && arg1) {
+    float v;
+    if (!motorArmed) { Serial.println("ERR,THR needs ARM"); return; }
+    if (!parseNum(arg1, v) || v < 0) { Serial.println("ERR,THR <percent>"); return; }
+    float t = constrain(v / 100.0f, 0.0f, THROTTLE_CAP);
+    if (t != thrTarget) { thrTarget = t; printThr(); }
+  } else if (!strcmp(cmd, "ESCCAL") && arg1) {
+    if (!strcmp(arg1, "LOW") || !strcmp(arg1, "OFF")) {
+      escCalHigh = false; esc.writeMicroseconds(ESC_MIN_US);
+      Serial.println("ESCCAL,LOW");
+    } else if (!strcmp(arg1, "HIGH")) {
+      if (!calMode) { Serial.println("ERR,ESCCAL needs CAL"); return; }
+      if (motorArmed || thrNow > 0) { Serial.println("ERR,ESCCAL needs DISARM"); return; }
+      escCalHigh = true; escCalStart = millis();
+      esc.writeMicroseconds(ESC_MAX_US);
+      Serial.println("ESCCAL,HIGH");
+    } else Serial.println("ERR,ESCCAL HIGH or LOW");
+  } else if (!strcmp(cmd, "DISARM")) {
+    motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+    esc.writeMicroseconds(ESC_MIN_US);
+    printThr();
   } else if (!strcmp(cmd, "SAVE")) {
     saveConfig();
     printConfig();
@@ -417,7 +526,7 @@ void pollSerial() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
-      if (cmdLen) { cmdBuf[cmdLen] = 0; runCommand(cmdBuf); cmdLen = 0; }
+      if (cmdLen) { cmdBuf[cmdLen] = 0; lastRxMs = millis(); runCommand(cmdBuf); cmdLen = 0; }
     } else if (cmdLen < sizeof(cmdBuf) - 1) {
       cmdBuf[cmdLen++] = c;
     }
@@ -478,6 +587,12 @@ void calLoop() {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     float b[3]; bodyAccel(a, b);
+    // Throttle test: cut the motor if the rocket leans past the abort angle (3 readings in a row, so one
+    // vibration spike doesn't trip it)
+    if (motorArmed) {
+      if (max(fabs(accelTiltX(b)), fabs(accelTiltY(b))) > ABORT_TILT) { if (++tiltHits >= 3) motorCut("TILT"); }
+      else tiltHits = 0;
+    }
     Serial.print("CAL,");
     Serial.print(xa); Serial.print(',');
     Serial.print(ya); Serial.print(',');
@@ -487,6 +602,9 @@ void calLoop() {
 }
 
 void setup() {
+  // ESC first: it must see zero throttle from power-up, before anything slow (serial wait, gyro calibration)
+  esc.attach(ESC_PIN, ESC_MIN_US, ESC_MAX_US);
+  esc.writeMicroseconds(ESC_MIN_US);
   Serial.begin(115200);
   while (!Serial) {
     delay(10);
@@ -520,6 +638,7 @@ void setup() {
 
 void loop() {
   pollSerial();
+  motorUpdate();
   if (calMode) { calLoop(); return; }
 
   unsigned long now = micros();

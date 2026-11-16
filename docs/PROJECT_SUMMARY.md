@@ -97,8 +97,9 @@ Current firmware **v1.6.0** (`firmware/nano_tvc`):
 - Tilt abort > 25°: gimbal centres immediately, re-arms after 1 s back within 5° (or `RUN`).
 - Free-test (`FREE ON|OFF`) for tilting by hand: no abort, half gains, same ±8° limit; off at every restart, never saved.
 - IMU mounting remap (any orientation), set by calibration.
-- Not yet: ESC/throttle output with the 85 % cap, motor cut on abort / lost link, binary telemetry. These wait
-  for the EDF and ESC to arrive.
+- Throttle test (v1.9.0): ESC on D3, motor runs only in calibration mode after `ARM`, 85 % cap, 50 %/s ramp-up, cut on
+  lost link (0.5 s), tilt > 25° or mode change. Driven by the visualizer's Bench → Throttle panel (CT-4).
+- Not yet: throttle in flight mode with the thrust-scaled gains, binary telemetry.
 
 Engineering notes:
 - Rig pivot at the CG means **gravity gives no tipping torque** — the plant is a double integrator (neutral), not
@@ -155,4 +156,5 @@ tower catch with the chopstick tower → full reusable mini mission.
 - Rig collar position vs the sled screws at 232 mm (CG ~240 mm).
 - Check the 2× M3×6 TVC mount screws grip in the outer gimbal's Ø3 holes.
 - Desk rig GS-001 (Systems) and wiring diagram EL-001 (Propulsion).
-- Firmware once the ESC is in: throttle output + 85 % cap, motor cut on abort and lost link.
+- Firmware: throttle in flight mode (gains scaled by the real thrust). Check the ESC's throttle range matches
+  1000–2000 µs on the bench; the wiring diagram EL-001 should show the ESC signal on D3.

@@ -128,7 +128,7 @@
   </aside>
   <aside class="side-r">
     <div class="panel gimbal-panel">
-      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)"><span class="lg">Free-test</span><span class="sm">Free</span></button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)"><span class="lg">Calibrate</span><span class="sm">Cal</span></button><button id="lzBtn" class="h2btn" title="Laser accuracy test (CT-1): check the gimbal goes where it is told (firmware v1.8.0+)">Laser</button></div></h2>
+      <h2 class="h2-act"><span class="h2-title">Gimbal</span><div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)"><span class="lg">Free-test</span><span class="sm">Free</span></button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)"><span class="lg">Calibrate</span><span class="sm">Cal</span></button><button id="lzBtn" class="h2btn" title="Laser accuracy test (CT-1): check the gimbal goes where it is told (firmware v1.8.0+)"><span class="lg">Laser</span><span class="sm">Laser</span></button><button id="thBtn" class="h2btn" title="Throttle test (CT-4): run the EDF and record thrust against throttle (firmware v1.9.0+)"><span class="lg">Throttle</span><span class="sm">Thr</span></button></div></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
@@ -349,6 +349,89 @@
         </div>
       </div>
       <div class="cal-foot"><button id="lzBack">Back</button><button id="lzNext" class="primary">Next</button></div>
+    </div>
+  </section>
+  <!-- Throttle test (CT-4): same floating card. Drives the firmware's ARM / THR / DISARM commands (throttle.js). -->
+  <section id="thPanel" class="cal th" hidden aria-label="Throttle test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Throttle test<span id="thState">CT-4</span></h2>
+        <button id="thKill" class="th-kill" hidden title="Stop the motor (Space)">Stop motor</button>
+        <button id="thClose" class="cal-x" title="Close and stop the motor (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="thTabs">
+        <button data-tab="0">1 · Safety</button><button data-tab="1">2 · Run</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="thMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="thBody">
+        <!-- 1 Safety -->
+        <div class="cal-step th-step" data-tab="0">
+          <p class="cal-p">Runs the EDF from the visualizer and records thrust against throttle. The gimbal is held at centre. The throttle is capped at 85 % (the 10 A supply), rises at most 50 %/s and drops at once. The motor stops if this page goes quiet for 0.5 s, the rocket leans past 25°, you leave this panel or the tab, or press <b>Stop motor</b> / <b>Space</b>.</p>
+          <ul class="th-check" id="thCheck">
+            <li><label><input type="checkbox"> Rocket held: clamped on the rig, or standing on the scale with the stand</label></li>
+            <li><label><input type="checkbox"> Intake and outlet clear: no fingers, cables, paper or loose screws</label></li>
+            <li><label><input type="checkbox"> EDF retainer in, fan spins freely by hand</label></li>
+            <li><label><input type="checkbox"> Fuse fitted, kill switch within reach, eye protection on</label></li>
+          </ul>
+          <p class="cal-p">ESC signal on <b>D3</b>, ESC ground to the Nano GND. Power the 12 V supply after the Nano is connected: the ESC beeps that it is armed and the fan stays still.</p>
+          <details class="cal-measure" id="thEc">
+            <summary>ESC throttle range (calibrate once)</summary>
+            <p class="cal-p" id="thEcStep"></p>
+            <label class="cal-line th-ec-off"><span>12 V supply is OFF<small>check the switch, not just the fan</small></span><input type="checkbox" id="thEcOff"></label>
+            <div class="th-ec-time" id="thEcTime" hidden><i id="thEcBar"></i></div>
+            <div class="cal-acts"><button id="thEcGo" class="primary">Send full throttle</button><button id="thEcLow">Heard the beeps: set zero</button><button id="thEcCancel">Cancel</button></div>
+            <p class="cal-note" id="thEcNote"></p>
+          </details>
+        </div>
+        <!-- 2 Run -->
+        <div class="cal-step th-step" data-tab="1" hidden>
+          <div class="th-live">
+            <div class="th-big"><span>Throttle</span><b id="thAct">—</b><small>%</small></div>
+            <dl class="kv th-kv">
+              <dt>Target</dt><dd id="thTgt">—</dd><dd class="u">%</dd>
+              <dt>ESC pulse</dt><dd id="thUs">—</dd><dd class="u">µs</dd>
+              <dt>Thrust, spec</dt><dd id="thEst">—</dd><dd class="u">g est.</dd>
+            </dl>
+          </div>
+          <div class="th-bar"><i id="thBarAct"></i><b id="thBarTgt"></b></div>
+          <div class="cal-acts"><button id="thArm" class="primary">Arm</button><button id="thStop">Stop</button></div>
+          <p class="cal-note" id="thNote"></p>
+          <div class="th-manual" id="thManual">
+            <label class="cal-line"><span>Throttle<small>0–85 %</small></span><input id="thSlider" type="range" min="0" max="85" step="1" value="0"><b id="thWant">0 %</b></label>
+            <div class="cal-acts th-presets"><button data-thp="0">0</button><button data-thp="10">10</button><button data-thp="25">25</button><button data-thp="50">50</button><button data-thp="85">85</button></div>
+          </div>
+          <div class="cal-dir">
+            <div class="cal-dir-h"><span class="cal-name">Step test<small>10 → 85 %, 9 points</small></span>
+              <span id="thStepSt" class="cal-res">Ready</span><button id="thStepGo">Start</button></div>
+            <div class="lz-dots th-dots" id="thDots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="cal-p" id="thSub">Tare the scale with the motor off. At each step type the reading (thrust pushes the scale down or lifts it off: either sign is fine).</p>
+            <div class="lz-entry th-entry" id="thEntry">
+              <label for="thG">Scale<small>g</small></label>
+              <input id="thG" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+              <label for="thA">Current<small>A, optional</small></label>
+              <input id="thA" type="text" inputmode="decimal" autocomplete="off" placeholder="—">
+            </div>
+            <div class="cal-acts"><button id="thRec" class="primary">Record &amp; next</button></div>
+          </div>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step th-step" data-tab="2" hidden>
+          <div class="lz-overall" id="thOverall">No step test yet.</div>
+          <table class="lz-tab th-tab">
+            <thead><tr><th>Throttle</th><th>ESC <span class="nocase">µs</span></th><th>Thrust g</th><th>Spec g</th><th>Current A</th></tr></thead>
+            <tbody id="thRows"></tbody>
+          </table>
+          <p class="cal-p" id="thMeta"></p>
+          <div class="cal-acts"><button id="thCsv" class="primary">Download CSV</button><button id="thCopy">Copy summary</button><button id="thNew">New test</button></div>
+          <p class="cal-p">Spec = 220 g at full throttle (QX 30 mm, 11.1 V), scaled by throttle². Runs are also kept in this browser.</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="thHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="thBack">Back</button><button id="thNext" class="primary">Next</button></div>
     </div>
   </section>
 </main>

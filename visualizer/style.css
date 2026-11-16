@@ -139,10 +139,13 @@ h2 .h2-btns .h2btn { white-space: nowrap; }
 }
 h2 .h2btn { margin: -5px 0; padding: 3px 8px; font-size: 10px; line-height: 12px; letter-spacing: .14em; }
 h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); }
-/* Gimbal header: three buttons. When the side panel is too narrow for the full labels, short ones (same buttons, same place) */
+/* Gimbal header: four buttons. When the side panel is too narrow for the full labels (~315 px with the title), short ones
+   (same buttons, same place) */
 .gimbal-panel { container-type: inline-size; }
 .h2btn .sm { display: none; }
-@container (max-width: 181px) { .h2btn .lg { display: none; } .h2btn .sm { display: inline; } }
+@container (max-width: 319px) { .h2btn .lg { display: none; } .h2btn .sm { display: inline; } }
+/* Tightest (landscape phone, small tablet): the dial says what this panel is, so the title gives way to the buttons */
+@container (max-width: 175px) { .gimbal-panel .h2-title { display: inline-block; width: 0; overflow: hidden; } .gimbal-panel .h2-btns { margin-left: auto; } }
 .cal { grid-area: view; position: relative; z-index: 5; min-width: 0; min-height: 0; padding: 12px;
   display: flex; justify-content: center; align-items: flex-start; overflow: hidden; pointer-events: none; }
 .cal[hidden] { display: none; }
@@ -263,6 +266,39 @@ h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); 
 .lz-hist li.empty { display: block; }
 .lz-hist .ok { color: var(--ok); } .lz-hist .bad { color: var(--warn); }
 .lz-hist button { padding: 3px 8px; font-size: 10px; }
+
+/* ---------- Throttle test (same card; throttle.js) ---------- */
+#thState.bad { color: var(--warn); }
+.th .cal-foot[hidden], .th-step[hidden], #thBody[hidden] { display: none; }
+.th-kill { padding: 5px 10px; font: 600 11px var(--label); letter-spacing: .12em; text-transform: uppercase;
+  background: var(--warn); border-color: var(--warn); color: #000; }
+.th-kill[hidden] { display: none; }
+.th-kill:hover { background: #ff7080; border-color: #ff7080; }
+.th-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.th-check label { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text); cursor: pointer; }
+.th-check li:first-child label { border-top: 0; }
+.th-check input { margin: 2px 0 0; accent-color: var(--ok); }
+.th-live { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: center; }
+.th-big { display: flex; flex-direction: column; }
+.th-big span { font: 500 10px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.th-big b { font: 500 40px/1 var(--cond); font-variant-numeric: tabular-nums; }
+.th-big small { font: 500 10px var(--label); color: var(--dim); letter-spacing: .06em; }
+.th-bar { position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; }
+.th-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 4px; background: var(--amber); transition: width .15s linear; }
+.th-bar b { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.th-bar b[hidden] { display: none; }
+.th-manual .cal-line { display: grid; grid-template-columns: auto minmax(0, 1fr) 48px; }
+.th-manual input[type=range] { width: 100%; accent-color: var(--amber); }
+.th-manual .cal-line b { text-align: right; }
+.th-presets button { flex: 1; padding: 5px 0; }
+.th-dots { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+.th-entry { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); }
+.th-tab td:first-child { color: var(--text); }
+.th-tab .nocase { text-transform: none; }
+.th-ec-off input { width: auto; accent-color: var(--warn); }
+.th-ec-time { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.th-ec-time[hidden] { display: none; }
+.th-ec-time i { display: block; height: 100%; width: 100%; background: var(--warn); }
 
 /* ---------- Footer ---------- */
 footer { grid-row: 3; display: flex; flex-wrap: wrap; gap: 2px 22px; align-items: center; padding: 6px 16px;
