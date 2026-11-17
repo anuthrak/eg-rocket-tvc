@@ -77,7 +77,7 @@ In the visualizer: **Bench → Connect Arduino → Gimbal → Calibrate**. Five 
 2. **Level:** rocket upright and still → Set level. Finds which way the sensor faces and trims it to read 0°.
 3. **Sensor:** tilt the top toward +X, then +Y. If the sensor is turned on its mount, firmware v1.3.0 corrects it for you.
 4. **Direction:** Test moves a servo the way the controller would for a lean toward +X/+Y; the top of the motor should tilt toward that side. Answer what you saw and it flips the direction or swaps the D9/D10 roles for you.
-5. **Save:** check the linkage ratio (servo degrees per gimbal degree, about 4; a laser helper measures it), then write everything to the Nano's EEPROM.
+5. **Save:** check the linkage ratio of each servo (servo degrees per gimbal degree, about 4–7; X and Y are set separately from firmware v1.11.0, and a laser helper measures each), then write everything to the Nano's EEPROM.
 
 **Laser test (CT-1):** Bench → Gimbal → **Laser** steps each axis through 18 points and asks where the laser dot landed. It gives PASS/FAIL (error and backlash ≤ 1°) and a CSV for the run sheet. Needs firmware v1.8.0 (`GIM`). Full procedure: [tests/ct1_laser_gimbal](tests/ct1_laser_gimbal/README.md).
 

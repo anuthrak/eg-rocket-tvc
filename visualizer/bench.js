@@ -248,7 +248,7 @@ export function initBench() {
   const target = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
   const shown  = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
   const zero   = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
-  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4 };
+  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4, spgy: 4 };
   let rig = { ...NO_CFG };   // from the Nano's CFG line: servo direction, level trims, servo degrees per gimbal degree
   const history = []; // {t, tiltX, tiltY}
   const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
@@ -275,7 +275,7 @@ export function initBench() {
       logLine(line, cal ? undefined : 'msg');
       if (line.startsWith('CFG,')) {
         const p = line.split(',').map(Number);
-        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7] };
+        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7], spgy: p.length >= 13 ? p[12] : p[7] };   // spg = X servo; Y separate from v1.11.0
       }
       calib.handle(line);
       laser.handle(line);
@@ -458,9 +458,9 @@ export function initBench() {
         if (gust) logLine(`Gust: pushed toward ${gust.dir}°`, 'msg');
       }
       const s = sim.read();
-      const servo = g => 90 + Math.round(g * rig.spg);
+      const servo = (g, spg) => 90 + Math.round(g * spg);
       handleLine(servoMode.checked
-        ? `0,${servo(s.gimbalX)},${servo(s.gimbalY)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
+        ? `0,${servo(s.gimbalX, rig.spg)},${servo(s.gimbalY, rig.spgy)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
         : `0,${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`);
     }, 50);
   }
@@ -583,7 +583,7 @@ export function initBench() {
     rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
     // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
     const servoData = servoMode.checked;
-    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spg : 0;
+    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spgy : 0;
     tvc.rotation.set(deg(gx), 0, deg(-gy));
     // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
     const thr = throttle.level();

@@ -49,7 +49,7 @@ function summary(run) {
   const lines = [
     `CT-1 laser gimbal test, ${stamp(run.t)}`,
     `Firmware v${run.fw} · wall ${run.dist} mm`,
-    c ? `Calibration: XC ${c.xc} YC ${c.yc} · XD ${c.xd > 0 ? '+1' : '-1'} YD ${c.yd > 0 ? '+1' : '-1'} · SPG ${c.spg} · SWAP ${c.swap} (${c.state})` : '',
+    c ? `Calibration: XC ${c.xc} YC ${c.yc} · XD ${c.xd > 0 ? '+1' : '-1'} YD ${c.yd > 0 ? '+1' : '-1'} · SPG X ${c.spg} Y ${c.spgy ?? c.spg} · SWAP ${c.swap} (${c.state})` : '',
   ];
   for (const a of ['X', 'Y']) {
     const s = axisStats(run.meas[a]);
@@ -93,7 +93,8 @@ export function initLaser({ send, link, calib }) {
   function handle(line) {
     const p = line.split(',');
     if (p[0] === 'CFG' && p.length >= 10) {
-      cfg = { xc: +p[1], yc: +p[2], xd: +p[3], yd: +p[4], spg: +p[7], swap: +p[8], state: p[9] };
+      cfg = { xc: +p[1], yc: +p[2], xd: +p[3], yd: +p[4], spg: +p[7], swap: +p[8], state: p[9],
+              spgy: p.length >= 13 ? +p[12] : +p[7] };   // Y linkage ratio, v1.11.0+
       if (open && !calOn) send('CAL');
     } else if (p[0] === 'CAL' && p[1] === 'ON') calOn = true;
     else if (p[0] === 'CAL' && p[1] === 'OFF') { calOn = false; if (open) send('CAL'); }   // e.g. Calibrate just closed
@@ -312,7 +313,7 @@ export function initLaser({ send, link, calib }) {
     $('lzDistSt').classList.toggle('cal-warn', ds.warn);
     ['lzCentre', 'lzShowX', 'lzShowY'].forEach(id => { $(id).disabled = !idle || !calOn; });
     if (cfg) {
-      setText('lzCfg', `SPG ${cfg.spg} · centres ${cfg.xc}°/${cfg.yc}°`);
+      setText('lzCfg', `SPG ${cfg.spg}/${cfg.spgy} · centres ${cfg.xc}°/${cfg.yc}°`);
       setText('lzCfgWarn', cfg.state === 'UNSAVED' ? 'The calibration has unsaved changes. The test measures what is on the Nano now. Save it in Calibrate first so the result matches flight.'
         : cfg.state === 'DEFAULT' ? 'Nothing is saved on the Nano yet, so this tests the default calibration. Run Calibrate and save first.' : '');
     }

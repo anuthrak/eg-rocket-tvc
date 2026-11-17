@@ -29,9 +29,10 @@
 //                     CAL,<xServo>,<yServo>,<rawTiltX>,<rawTiltY>   (tilts in the rocket frame)
 //   RUN               back to flight mode (also clears a tilt abort)
 //   GET               print the config line:
-//                     CFG,xc,yc,xd,yd,tx,ty,spg,swap,<SAVED|UNSAVED|DEFAULT>,up,rot
+//                     CFG,xc,yc,xd,yd,tx,ty,spgX,swap,<SAVED|UNSAVED|DEFAULT>,up,rot,spgY   (spgY: v1.11.0+)
 //   SET <key> <val>   keys: XC YC (servo centre, deg)  XD YD (direction ±1)  TX TY (level trim, deg)
-//                           SPG (servo deg per gimbal deg)  SWAP (0/1: swap the D9/D10 roles)
+//                           SPGX SPGY (linkage ratio per servo: servo deg per gimbal deg; SPG sets both)
+//                           SWAP (0/1: swap the D9/D10 roles)
 //                           UP (sensor axis pointing up: 1/2/3 = X/Y/Z, negative = minus)
 //                           ROT (0-3: turn the sensor's X/Y by 90° steps about the up axis)
 //   LEVEL             rocket upright and still: detect the up axis, capture TX/TY
@@ -74,7 +75,7 @@
 // Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.10.0";
+const char FW_VERSION[] = "1.11.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -83,7 +84,7 @@ const int ESC_PIN = 3;                      // ESC signal (white/yellow); ESC gr
 const int ESC_MIN_US = 1000, ESC_MAX_US = 2000;   // ESC throttle range: 0 % and 100 %
 const int   X_CENTER = 90, Y_CENTER = 90;   // servo angle with the nozzle dead straight (deg)
 const int   X_DIR = 1, Y_DIR = 1;           // -1 if that servo pushes the wrong way
-const float SERVO_PER_GIMBAL = 4.0;         // linkage ratio: servo degrees per gimbal degree (~4 for the K-9)
+const float SERVO_PER_GIMBAL = 4.0;         // linkage ratio: servo degrees per gimbal degree (~4 for the K-9), both servos
 const float TILT_X_TRIM = 0.0, TILT_Y_TRIM = 0.0;   // tilt the sensor reads when truly upright (deg)
 const int8_t  UP_AXIS = 3;                  // sensor axis up the rocket: 1/2/3 = X/Y/Z, negative = minus
 const uint8_t SENSOR_ROT = 0;               // sensor X/Y turned by ROT × 90° about the up axis
@@ -136,12 +137,14 @@ struct Config {
   uint16_t magic;
   int16_t  xCenter, yCenter;
   int8_t   xDir, yDir;
-  float    tiltXTrim, tiltYTrim, servoPerGimbal;
+  float    tiltXTrim, tiltYTrim, servoPerGimbal;   // servoPerGimbal = X servo's linkage ratio
   uint8_t  swapPins;
   int8_t   up;      // ±1..3
   uint8_t  rot;     // 0..3
+  float    servoPerGimbalY;                       // Y servo's linkage ratio (v1.11.0+)
 };
-const uint16_t CFG_MAGIC = 0x7C13;        // changed in v1.3.0 (new fields): older saves fall back to defaults
+const uint16_t CFG_MAGIC = 0x7C14;        // v1.11.0: servoPerGimbalY appended
+const uint16_t CFG_MAGIC_V13 = 0x7C13;    // v1.3.0–v1.10.0 layout (no servoPerGimbalY): migrated on load, Y = X
 Config cfg;
 bool cfgSaved = false;   // cfg came from / matches EEPROM
 bool cfgDirty = false;   // changed since last load/save
@@ -151,7 +154,7 @@ void loadDefaults() {
   cfg.xCenter = X_CENTER; cfg.yCenter = Y_CENTER;
   cfg.xDir = X_DIR; cfg.yDir = Y_DIR;
   cfg.tiltXTrim = TILT_X_TRIM; cfg.tiltYTrim = TILT_Y_TRIM;
-  cfg.servoPerGimbal = SERVO_PER_GIMBAL;
+  cfg.servoPerGimbal = cfg.servoPerGimbalY = SERVO_PER_GIMBAL;
   cfg.swapPins = 0;
   cfg.up = UP_AXIS; cfg.rot = SENSOR_ROT;
 }
@@ -161,13 +164,16 @@ bool cfgValid(const Config &c) {
          c.xCenter >= 45 && c.xCenter <= 135 && c.yCenter >= 45 && c.yCenter <= 135 &&
          (c.xDir == 1 || c.xDir == -1) && (c.yDir == 1 || c.yDir == -1) &&
          fabs(c.tiltXTrim) <= 45 && fabs(c.tiltYTrim) <= 45 &&
-         c.servoPerGimbal >= 0.2 && c.servoPerGimbal <= 8 && c.swapPins <= 1 &&
+         c.servoPerGimbal >= 0.2 && c.servoPerGimbal <= 8 &&
+         c.servoPerGimbalY >= 0.2 && c.servoPerGimbalY <= 8 && c.swapPins <= 1 &&
          c.up != 0 && abs(c.up) <= 3 && c.rot <= 3;
 }
 
 void loadConfig() {
   Config c;
   EEPROM.get(0, c);
+  // An older save has the same fields minus servoPerGimbalY: keep it and use the X ratio for Y until the next SAVE
+  if (c.magic == CFG_MAGIC_V13) { c.magic = CFG_MAGIC; c.servoPerGimbalY = c.servoPerGimbal; }
   if (cfgValid(c)) { cfg = c; cfgSaved = true; }
   else { loadDefaults(); cfgSaved = false; }
   cfgDirty = false;
@@ -191,7 +197,8 @@ void printConfig() {
   Serial.print(cfg.swapPins); Serial.print(',');
   Serial.print(cfgDirty ? "UNSAVED" : cfgSaved ? "SAVED" : "DEFAULT"); Serial.print(',');
   Serial.print(cfg.up); Serial.print(',');
-  Serial.println(cfg.rot);
+  Serial.print(cfg.rot); Serial.print(',');
+  Serial.println(cfg.servoPerGimbalY, 2);
 }
 
 // Servo pulse for an angle in degrees (fractional degrees are kept: ~10 µs per degree)
@@ -302,8 +309,8 @@ void gimbalStep(float angle, float rate, float &g, float &integ, float dt) {
   }
 }
 
-float servoDeg(float g, int dir, int center) {
-  float a = center + dir * g * RAD_TO_DEG * cfg.servoPerGimbal;
+float servoDeg(float g, int dir, int center, float spg) {
+  float a = center + dir * g * RAD_TO_DEG * spg;
   return constrain(a, center - SERVO_RANGE, center + SERVO_RANGE);   // safe servo limits
 }
 
@@ -415,7 +422,9 @@ void runCommand(char *line) {
     else if (!strcmp(arg1, "YD"))   cfg.yDir = v < 0 ? -1 : 1;
     else if (!strcmp(arg1, "TX"))   cfg.tiltXTrim = constrain(v, -45, 45);
     else if (!strcmp(arg1, "TY"))   cfg.tiltYTrim = constrain(v, -45, 45);
-    else if (!strcmp(arg1, "SPG"))  cfg.servoPerGimbal = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPG"))  cfg.servoPerGimbal = cfg.servoPerGimbalY = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPGX")) cfg.servoPerGimbal = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPGY")) cfg.servoPerGimbalY = constrain(v, 0.2, 8);
     else if (!strcmp(arg1, "SWAP")) { cfg.swapPins = v != 0; attachServos(); }
     else if (!strcmp(arg1, "UP")) {
       int u = (int)round(v);
@@ -542,7 +551,8 @@ void calLoop() {
   int ya = cfg.yCenter + (pulseAxis == 'Y' ? cfg.yDir * pulseDeg : 0);
   if (sweepMode) {
     // Both axes move together, each limited to +-GMAX like the controller, whatever the linkage ratio
-    const float amp = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbal, (float)SERVO_RANGE);
+    const float ampX = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbal, (float)SERVO_RANGE);
+    const float ampY = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbalY, (float)SERVO_RANGE);
     float ux = 0, uy = 0;
     unsigned long t = millis() - sweepStart;
     if (sweepMode == 'C') {
@@ -558,8 +568,8 @@ void calLoop() {
       if (i < 8) { ux = CORNERS[i % 4][0]; uy = CORNERS[i % 4][1]; }
       else endSweep();
     }
-    xa = cfg.xCenter + (int)round(cfg.xDir * amp * ux);
-    ya = cfg.yCenter + (int)round(cfg.yDir * amp * uy);
+    xa = cfg.xCenter + (int)round(cfg.xDir * ampX * ux);
+    ya = cfg.yCenter + (int)round(cfg.yDir * ampY * uy);
   }
   float xs = xa, ys = ya;
   if (gimOn) {
@@ -571,8 +581,8 @@ void calLoop() {
     gimY += constrain(gimTY - gimY, -step, step);
     if (fabs(gimTX - gimX) < 1e-3) gimX = gimTX;
     if (fabs(gimTY - gimY) < 1e-3) gimY = gimTY;
-    xs = servoDeg(gimX * DEG_TO_RAD, cfg.xDir, cfg.xCenter);
-    ys = servoDeg(gimY * DEG_TO_RAD, cfg.yDir, cfg.yCenter);
+    xs = servoDeg(gimX * DEG_TO_RAD, cfg.xDir, cfg.xCenter, cfg.servoPerGimbal);
+    ys = servoDeg(gimY * DEG_TO_RAD, cfg.yDir, cfg.yCenter, cfg.servoPerGimbalY);
     xa = (int)round(xs); ya = (int)round(ys);
     if (!gimReported && gimX == gimTX && gimY == gimTY) {
       gimReported = true;
@@ -664,8 +674,8 @@ void loop() {
   gimbalStep(tiltX, rateX, gx, ix, dt);
   gimbalStep(tiltY, rateY, gy, iy, dt);
 
-  float xDeg = servoDeg(gx, cfg.xDir, cfg.xCenter);
-  float yDeg = servoDeg(gy, cfg.yDir, cfg.yCenter);
+  float xDeg = servoDeg(gx, cfg.xDir, cfg.xCenter, cfg.servoPerGimbal);
+  float yDeg = servoDeg(gy, cfg.yDir, cfg.yCenter, cfg.servoPerGimbalY);
 
   // Move the servos
   xServo.writeMicroseconds(servoUs(xDeg));

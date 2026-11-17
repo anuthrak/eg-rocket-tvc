@@ -251,15 +251,18 @@
             <dt>Level trim</dt><dd id="svTx">—</dd><dd id="svTy">—</dd>
           </dl>
           <div class="cal-line"><span>Pins</span><b id="svPins">—</b></div>
-          <label class="cal-line"><span>Linkage ratio<small>servo ° per gimbal °</small></span>
-            <input id="calSpg" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <label class="cal-line"><span>Linkage ratio X<small>servo ° per gimbal °</small></span>
+            <input id="calSpgX" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <label class="cal-line"><span>Linkage ratio Y<small>servo ° per gimbal °</small></span>
+            <input id="calSpgY" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <p class="cal-note" id="calSpgNote"></p>
           <details class="cal-measure">
             <summary>Measure it with a laser</summary>
             <p class="cal-p">Tape a laser pointer along the motor tube, aim it at a wall, press Test, and measure how far the dot moves.</p>
             <label class="cal-line"><span>Wall distance<small>cm</small></span><input id="cmDist" type="number" min="10" step="1" value="100"></label>
-            <label class="cal-line"><span>Dot moved<small>cm, X servo 20°</small></span><input id="cmMove" type="number" min="0" step="0.1" placeholder="—"></label>
+            <label class="cal-line"><span>Dot moved<small id="cmMoveAx">cm, X servo 20°</small></span><input id="cmMove" type="number" min="0" step="0.1" placeholder="—"></label>
             <div class="cal-line"><span>Ratio</span><b id="cmRatio">—</b></div>
-            <div class="cal-acts"><button id="cmTest">Test X 20°</button><button id="cmUse" disabled>Use this ratio</button></div>
+            <div class="cal-acts"><button id="cmTestX">Test X 20°</button><button id="cmTestY">Test Y 20°</button><button id="cmUse" disabled>Use for X</button></div>
           </details>
           <p class="cal-p" id="svChecks"></p>
           <div class="cal-acts">

@@ -83,7 +83,10 @@ Known drawing note: TVC-001 lists Ø1 music-wire pushrods; the team uses the 1.2
   **Linkage stopper in the gimbal hole** (inner-gimbal tower Ø2.5, motor-tube lug ~Ø1.5 → drill to stopper
   shank ~2 mm), free to rotate; straight rod end through the stopper; Z-bend in the servo horn. Zig-zag bends
   only where a rod must jog around brackets.
-- **Linkage ratio:** gimbal lever arms ≈ 42.4 mm (axis X, tube lug) and 41.4 mm (axis Y, tower).
+- **Linkage ratio:** gimbal lever arms ≈ 42.4 mm (axis X, tube lug) and 41.4 mm (axis Y, tower). Set per servo
+  from firmware v1.11.0: CT-1 (Nov 16, SPG 5.5 both) measured X at 0.78× commanded → **X ≈ 7.1**, Y ≈ 5.5. X centre
+  is 112 (horn ~25° off square; can't be moved), so X is ~10 % weaker on the minus side, and at 7.1 the ±45° servo
+  limit caps X at ≈ ±6.3° of gimbal.
   Ratio ≈ r_horn / 42 → ~0.25 gimbal°/servo° (≈ 4 servo° per gimbal°) for a 10 mm horn hole. A 2.5 servo/gimbal
   setting gave only about half the travel. Firmware default is 4.0; measure it with the laser helper in
   Calibrate → Save (8° ≈ 14 cm at 1 m) and store it.
