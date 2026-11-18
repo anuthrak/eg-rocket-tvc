@@ -25,8 +25,10 @@
 // them into the Serial Monitor at 115200 with a newline. Saved values live in EEPROM and survive
 // power-off and re-uploads; the DEFAULTS block is only used until something is saved.
 //
-//   CAL               enter calibration: controller paused, servos held at centre, streams
-//                     CAL,<xServo>,<yServo>,<rawTiltX>,<rawTiltY>   (tilts in the rocket frame)
+//   CAL               enter calibration: controller paused, servos held at centre, streams at 50 Hz
+//                     CAL,<xServo>,<yServo>,<rawTiltX>,<rawTiltY>,<rateX>,<rateY>   (tilts in the rocket frame;
+//                     rates in deg/s, gyro bias removed, same signs as the tilts; the two rates are v1.12.0+,
+//                     for the thrust-vector test CT-5)
 //   RUN               back to flight mode (also clears a tilt abort)
 //   GET               print the config line:
 //                     CFG,xc,yc,xd,yd,tx,ty,spgX,swap,<SAVED|UNSAVED|DEFAULT>,up,rot,spgY   (spgY: v1.11.0+)
@@ -75,7 +77,7 @@
 // Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.11.0";
+const char FW_VERSION[] = "1.12.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -131,6 +133,7 @@ const bool TELEMETRY_SERVO = true;
 
 const unsigned long LOOP_US = 10000;      // 100 Hz control loop
 const unsigned long TELEMETRY_MS = 50;    // 20 Hz serial output
+const unsigned long CAL_TELEMETRY_MS = 20;   // 50 Hz in calibration mode (the CT-5 kicks last ~0.4 s)
 
 // ---------- Config (EEPROM-backed) ----------
 struct Config {
@@ -592,11 +595,12 @@ void calLoop() {
   xServo.writeMicroseconds(servoUs(xs));
   yServo.writeMicroseconds(servoUs(ys));
 
-  if (millis() - lastTelemetry >= TELEMETRY_MS) {
+  if (millis() - lastTelemetry >= CAL_TELEMETRY_MS) {
     lastTelemetry = millis();
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     float b[3]; bodyAccel(a, b);
+    float w[3]; toBody(g.gyro.x - biasX, g.gyro.y - biasY, g.gyro.z - biasZ, w);   // body rates, as in the flight loop
     // Throttle test: cut the motor if the rocket leans past the abort angle (3 readings in a row, so one
     // vibration spike doesn't trip it)
     if (motorArmed) {
@@ -607,7 +611,9 @@ void calLoop() {
     Serial.print(xa); Serial.print(',');
     Serial.print(ya); Serial.print(',');
     Serial.print(tiltFromX(b) * RAD_TO_DEG, 2); Serial.print(',');
-    Serial.println(tiltFromY(b) * RAD_TO_DEG, 2);
+    Serial.print(tiltFromY(b) * RAD_TO_DEG, 2); Serial.print(',');
+    Serial.print(w[1] * RAD_TO_DEG, 1); Serial.print(',');      // rateX: lean toward X (as in the flight loop)
+    Serial.println(-w[0] * RAD_TO_DEG, 1);                      // rateY
   }
 }
 

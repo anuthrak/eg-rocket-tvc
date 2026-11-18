@@ -2,6 +2,7 @@
 // to the loading screen (loader.js).
 import { initBench } from './bench.js';
 import { initMission } from './mission.js';
+import { initTests } from './tests.js';
 
 export const VERSION = '2.9.0';   // bump with CHANGELOG.md; see README → Releasing
 
@@ -13,17 +14,21 @@ const nextFrame = () => new Promise(r => { requestAnimationFrame(() => setTimeou
 async function step(progress, label) { loader?.set(progress, label); await nextFrame(); }
 
 await step(0.3, 'Building bench rig');
-initBench();
+const bench = initBench();
+initTests(bench);
 
-// ---------- Tabs: the bench view moves into a mini side panel on the Mission tab ----------
+// ---------- Tabs: the bench view moves into a mini side panel on Mission; the serial log moves to the Tests tab ----------
 const view = $('view');
 const benchMain = $('benchMain');
+const serialLog = $('serialLog'), logHome = serialLog.parentElement;
 function setTab(name) {
   document.body.dataset.tab = name;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $('crumb').textContent = name;
   if (name === 'mission') $('mbSlot').appendChild(view);
   else benchMain.prepend(view);
+  if (name === 'tests') $('tLogSlot').appendChild(serialLog);
+  else logHome.appendChild(serialLog);
   lockWidths();
   try { localStorage.setItem('tvc-tab', name); } catch {}
 }
@@ -43,6 +48,7 @@ function lockWidths() {
 document.fonts.ready.then(lockWidths);
 window.addEventListener('resize', lockWidths);
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+
 $('mbExpand').onclick = () => setTab('bench');
 $('mbCollapse').onclick = () => {
   const c = $('miniBench').classList.toggle('collapsed');
@@ -77,16 +83,18 @@ document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
     if (!quick) mission.flyIn(1.8);
     bootHUD([['header'], ['.m-strip .ms-tile'], ['.m-controls'], ['#mPY'], ['#minimap'], ['.m-events'], ['#evList li', quick ? 4 : 12],
              ['#miniBench'], ['.m-gauges'], ['.m-center'], ['.tl-ev', quick ? 6 : 25], ['.m-gimbal']], quick ? 0 : 450, g);
+  } else if (document.body.dataset.tab === 'tests') {
+    bootHUD([['header'], ['.t-rail > *'], ['.t-strip'], ['#testsHome, .cal:not([hidden])'], ['.t-viz .t-tile']], quick ? 0 : 120, g);
   } else {
     bootHUD([['header'], ['.side-l > *'], ['.side-r > *']], quick ? 0 : 120, g);
   }
 });
 
 $('appVersion').textContent = 'v' + VERSION;
-// Mission is the home page; Bench only if that's where the viewer last was
+// Mission is the home page; Bench or Tests only if that's where the viewer last was
 let savedTab = null;
 try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
-setTab(savedTab === 'bench' ? 'bench' : 'mission');
+setTab(savedTab === 'bench' || savedTab === 'tests' ? savedTab : 'mission');
 // Footer loader previews (temporary): Fuel / Arc
 document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');

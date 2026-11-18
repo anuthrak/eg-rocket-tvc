@@ -168,6 +168,7 @@ tower catch with the chopstick tower → full reusable mini mission.
 - Kill switch / fuse holder has female XT60 on both ends and doesn't fit the adapter's female XT60: cut one end of
   each and join the wires (or get a male XT60), check polarity with a meter, then CT-5. Until then, runs ≤ 25 %
   only, with the 12 V plug as the stop.
+- Visualizer Tests tab (Nov 17): all bench tests on one page with live charts. New **CT-5 thrust vector** (no scale): rocket on the pivot, ±2° gimbal kicks at each throttle → control authority (°/s² per gimbal °), direction check, trim, vibration and relative thrust. Needs firmware v1.12.0 (gyro rates in CAL lines). Expected authority ≈ 10–20 °/s²/° at 150 g (≈ 0.25 m lever arm, I ≈ 0.02 kg·m²).
 - CT-4 next: ESC range calibration (Throttle → Safety), then the full step test 10 → 85 % on the scale with
   hearing protection.
 - EDF + ESC arrived: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location

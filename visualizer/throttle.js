@@ -1,4 +1,4 @@
-// Bench → Gimbal → Throttle: the CT-4 EDF throttle test (firmware v1.9.0+, ARM / THR / DISARM).
+// Tests → Throttle: the CT-4 EDF throttle test (firmware v1.9.0+, ARM / THR / DISARM).
 // Runs the motor from the page with the gimbal held at centre (the Nano's calibration mode). Safety lives in the
 // firmware: 85 % cap, ramp-up limit, motor cut when no line arrives for 0.5 s (this page sends a heartbeat), on a
 // tilt past 25° and on any mode change. The page adds: a checklist before Arm, Stop motor / Space, and a stop
@@ -240,7 +240,7 @@ export function initThrottle({ send, link, calib, laser }) {
     if (e.code === 'Space' && (armed || armPending) && !(e.target.matches?.('input[type=text], textarea'))) { e.preventDefault(); stopMotor(); }
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) return; ecLow(true); if (armed || armPending) stopMotor('Motor stopped: the page was hidden.'); });
-  document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { if (open && b.dataset.tab !== 'bench') hide(); }));
+  document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { if (open && b.dataset.tab !== 'tests') hide(); }));
 
   function go(t) { tab = Math.max(0, Math.min(2, t)); render(); if (tab === 1 && phase === 'ready') focusEntry(); }
   panel.querySelectorAll('#thTabs button').forEach(b => { b.onclick = () => go(+b.dataset.tab); });
@@ -399,5 +399,5 @@ export function initThrottle({ send, link, calib, laser }) {
   // null when closed (the bench shows its usual dim plume).
   const level = () => (!open ? null : armed && fwAct != null && performance.now() - lastThr < 1000 ? fwAct / CAP : 0);
 
-  return { handle, onLink, isOpen: () => open, close: hide, level, refresh: () => open && render() };
+  return { handle, onLink, isOpen: () => open, close: hide, level, data: () => ({ run, work }), refresh: () => open && render() };
 }

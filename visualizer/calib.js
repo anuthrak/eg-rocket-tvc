@@ -1,4 +1,4 @@
-// Bench → Gimbal → Calibrate: a guided setup that drives the firmware's serial commands (firmware v1.2.0+).
+// Tests → Calibrate: a guided setup that drives the firmware's serial commands (firmware v1.2.0+).
 // The Nano answers with CFG,… (its config) and, while in calibration, streams CAL,xServo,yServo,rawTiltX,rawTiltY.
 // Everything is applied live on the Nano; SAVE writes it to EEPROM.
 // Firmware v1.3.0+ also reports the sensor mounting (CFG …,up,rot): Level detects the up axis and the

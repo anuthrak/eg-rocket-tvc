@@ -1,4 +1,4 @@
-// Bench → Gimbal → Laser: the CT-1 laser gimbal-accuracy test (firmware v1.8.0+, GIM command).
+// Tests → Laser: the CT-1 laser gimbal-accuracy test (firmware v1.8.0+, GIM command).
 // A laser on the motor tube marks each commanded angle on a wall. For each axis the gimbal steps
 // -8 → +8 (up) then +8 → -8 (down) in 2° steps; you type the dot's signed distance from the zero mark
 // and it becomes atan(mm / wall distance). Pass: max |measured − commanded| ≤ 1° and max up/down
@@ -416,5 +416,6 @@ export function initLaser({ send, link, calib }) {
     if ($('lzHist').innerHTML !== hh) $('lzHist').innerHTML = hh;
   }
 
-  return { handle, onLink, isOpen: () => open, close: hide, refresh: () => open && render() };
+  const data = () => ({ seq: SEQ, half: HALF, run, work, axis, running: running() });   // for the Tests charts
+  return { handle, onLink, isOpen: () => open, close: hide, data, refresh: () => open && render() };
 }

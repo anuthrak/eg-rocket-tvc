@@ -5,6 +5,8 @@ import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { initCalib } from './calib.js';
 import { initLaser } from './laser.js';
 import { initThrottle } from './throttle.js';
+import { initVector } from './vector.js';
+import { initSysCheck } from './syscheck.js';
 import { createDemoSim } from './demo-sim.js';
 
 const $ = id => document.getElementById(id);
@@ -266,6 +268,7 @@ export function initBench() {
   function handleLine(line) {
     if (!line) return;
     lineCount++;
+    document.dispatchEvent(new CustomEvent('tvc:line', { detail: line }));   // the Tests tab's strip and charts
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
     if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
@@ -280,6 +283,7 @@ export function initBench() {
       calib.handle(line);
       laser.handle(line);
       throttle.handle(line);
+      vector.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
       if (cal) {
         const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
@@ -353,9 +357,9 @@ export function initBench() {
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
     rig = { ...NO_CFG };
     setFree(false); $('freeBtn').disabled = !port;
-    calib.onLink(); laser.onLink(); throttle.onLink();
+    calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); throttle.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
   // quiet = not shown in the serial log (the throttle test's heartbeat).
@@ -373,9 +377,9 @@ export function initBench() {
   const calib = initCalib({ send, link: linkInfo });
   const laser = initLaser({ send, link: linkInfo, calib });
   const throttle = initThrottle({ send, link: linkInfo, calib, laser });
-  // Calibrate, the laser test and the throttle test all use the Nano's CAL mode: opening one closes the others
-  $('calBtn').addEventListener('click', () => { if (laser.isOpen()) laser.close(); if (throttle.isOpen()) throttle.close(); }, true);
-  $('lzBtn').addEventListener('click', () => { if (throttle.isOpen()) throttle.close(); }, true);
+  const vector = initVector({ send, link: linkInfo });
+  const syscheck = initSysCheck({ send, link: linkInfo });   // listens to 'tvc:line' itself
+  // The tests all use the Nano's CAL mode; tests.js makes sure only one is open at a time
   const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
 
   async function connect() {
@@ -586,7 +590,7 @@ export function initBench() {
     const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spgy : 0;
     tvc.rotation.set(deg(gx), 0, deg(-gy));
     // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
-    const thr = throttle.level();
+    const thr = throttle.level() ?? vector.level() ?? syscheck.level();
     updateThrust(linkStart !== null && lastLineT !== null && thr !== 0, gx, gy, demoTimer ? 1 : thr ?? 0.35);
     controls.update();
     fenceTarget();
@@ -607,7 +611,7 @@ export function initBench() {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
     $('viewNote').textContent = !hasData ? '' : demoTimer
       ? 'Drag the rocket and let go. Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
-      : throttle.isOpen() ? 'Throttle test: the plume shows the real throttle.'
+      : throttle.isOpen() || vector.isOpen() || syscheck.isOpen() ? 'Motor test: the plume shows the real throttle.'
       : 'Motor off: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
@@ -671,4 +675,6 @@ export function initBench() {
     $('gdTrail').setAttribute('points', gTrail.join(' '));
   }
   requestAnimationFrame(animate);
+
+  return { calib, laser, throttle, vector, syscheck, send, link: linkInfo };
 }
