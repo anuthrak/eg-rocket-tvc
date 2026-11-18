@@ -3,6 +3,9 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+
+## [2.10.0] – 2026-11-18
+Firmware v1.12.0. Brings in the laser (CT-1) and throttle (CT-4) tests, per-servo linkage ratios and the new Tests tab.
 ### Added
 - Calibrate → Save: **separate linkage ratios for the X and Y servos** (Linkage ratio X / Y). The laser helper has Test X 20° and Test Y 20° and applies the result to the servo it measured. The Laser test summary shows both (`SPG X … Y …`). With older firmware the Y field is disabled and one ratio sets both.
 - Firmware v1.11.0: `SET SPGX` / `SET SPGY` set each servo's linkage ratio (`SET SPG` still sets both). The flight loop, `GIM` and `SWEEP` use each servo's own ratio. `CFG` gains a 13th field, the Y ratio. Saves from v1.3.0–v1.10.0 load unchanged with Y = X until the next SAVE.

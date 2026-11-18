@@ -12,10 +12,11 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
-- [x] Firmware v1.7.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode
-- [x] Web visualizer: live Bench view, calibration, Mission sim
+- [x] Firmware v1.12.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode, EDF throttle (ESC on D3), gimbal hold (`GIM`), gyro rates in calibration mode
+- [x] Web visualizer: live Bench view, Tests tab (System check, Calibrate, Free-hand, Laser CT-1, Throttle CT-4, Thrust vector CT-5), Mission sim
 - [ ] Joint test, body and sled printed and assembled
-- [ ] EDF + ESC (on order), thrust test, throttle control in firmware
+- [x] EDF + ESC arrived, first spin-up, System check passing (Nov 17)
+- [ ] Throttle in flight mode; CT-5 thrust-vector test on the rig
 - [ ] Desk rig (SLDP-GS-001) and wiring diagram (SLDP-EL-001)
 - [ ] Closed-loop tuning on the rig
 
@@ -32,9 +33,13 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── loader.js                    loading screen (plain script, runs first)
 ├── main.js                      entry point: start-up order, tabs, app version
 ├── bench.js                     Bench tab: 3D rig, Web Serial / demo feed, readouts, chart
-├── calib.js                     Bench → Gimbal → Calibrate panel
-├── laser.js                     Bench → Gimbal → Laser: CT-1 laser accuracy test, CSV + past runs
-├── throttle.js                  Bench → Gimbal → Throttle: CT-4 EDF thrust vs throttle test, CSV + past runs
+├── tests.js                     Tests tab: test list, live strip, charts, Free-hand
+├── tcharts.js                   small canvas strip / XY charts for the Tests tab
+├── syscheck.js                  Tests → System check: every part, guided, nothing rewired
+├── calib.js                     Tests → Calibrate
+├── laser.js                     Tests → Laser: CT-1 laser accuracy test, CSV + past runs
+├── throttle.js                  Tests → Throttle: CT-4 EDF throttle test, CSV + past runs
+├── vector.js                    Tests → Thrust vector: CT-5 motor + gimbal on the pivot, no scale
 ├── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
 └── public/                      static assets: favicon, app icons, images
 cad/                             CadQuery models + drawing generators (Python)
@@ -63,15 +68,15 @@ Open `firmware/nano_tvc/nano_tvc.ino` in the Arduino IDE (board: Arduino Nano; l
 
 - 100 Hz loop, complementary filter, PID per axis (starting gains Kp 2.5, Kd 0.55, Ki 0.3, scaled by thrust), gimbal limited to ±8°, servo pulses in microseconds.
 - Tilt beyond 25° centres the gimbal and prints `ABORT,TILT`; it re-arms after a second back within 5°.
-- **Free-test** (Bench → Gimbal, or `FREE ON|OFF`) is for tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. It starts off every time the Nano restarts.
+- **Free-test** (Tests → Free-hand, or `FREE ON|OFF`) is for tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. It starts off every time the Nano restarts.
 - The MPU6050 can be mounted any way round (on the sled it stands on the vertical breadboard); calibration maps it to the rocket's axes.
 - ESC signal on **D3**. The motor only runs in the throttle test (calibration mode, after `ARM`), capped at 85 %; flight mode holds the ESC at zero and the controller still runs as if at full throttle.
 
-**Serial format:** `roll,pitch,yaw,tiltX,tiltY` (roll in degrees; pitch = X servo, yaw = Y servo, as servo angles, 90 = neutral; tiltX/tiltY = the rocket's lean toward +X/+Y in degrees, firmware v1.6.0+)
+**Serial format:** `roll,pitch,yaw,tiltX,tiltY` (roll in degrees; pitch = X servo, yaw = Y servo, as servo angles, 90 = neutral; tiltX/tiltY = the rocket's lean toward +X/+Y in degrees, firmware v1.6.0+). In calibration mode it streams `CAL,xServo,yServo,tiltX,tiltY,rateX,rateY` at 50 Hz (servo degrees, tilts in degrees, gyro rates in °/s; the rates are firmware v1.12.0+).
 
 ### Calibration
 
-In the visualizer: **Bench → Connect Arduino → Gimbal → Calibrate**. Five steps, applied live on the Nano:
+In the visualizer: **Connect Arduino → Tests → Calibrate**. Five steps, applied live on the Nano:
 
 1. **Centre:** nudge each servo until the motor mount is dead straight (refit the horn one spline over if it's way off).
 2. **Level:** rocket upright and still → Set level. Finds which way the sensor faces and trims it to read 0°.
@@ -79,9 +84,13 @@ In the visualizer: **Bench → Connect Arduino → Gimbal → Calibrate**. Five 
 4. **Direction:** Test moves a servo the way the controller would for a lean toward +X/+Y; the top of the motor should tilt toward that side. Answer what you saw and it flips the direction or swaps the D9/D10 roles for you.
 5. **Save:** check the linkage ratio of each servo (servo degrees per gimbal degree, about 4–7; X and Y are set separately from firmware v1.11.0, and a laser helper measures each), then write everything to the Nano's EEPROM.
 
-**Laser test (CT-1):** Bench → Gimbal → **Laser** steps each axis through 18 points and asks where the laser dot landed. It gives PASS/FAIL (error and backlash ≤ 1°) and a CSV for the run sheet. Needs firmware v1.8.0 (`GIM`). Full procedure: [tests/ct1_laser_gimbal](tests/ct1_laser_gimbal/README.md).
+**System check:** Tests → **System check** runs every part in about 5 minutes with nothing rewired (IMU on its breadboard, EDF clamped to the desk): link, IMU, servos, control loop, motor at 10/20/30 %, motor + servos, and the Space and 25° tilt cut-outs. Pass / Check / Fail per step and a CSV. Run it before each session.
 
-**Throttle test (CT-4):** Bench → Gimbal → **Throttle** runs the EDF with the gimbal held at centre. Tick the safety checklist, Arm, then use the slider/presets or the 9-point step test (10 → 85 %), typing the scale reading (and supply current, optional) at each step. Results table, CSV and past runs as in the laser test. Needs firmware v1.9.0 (`ARM` / `THR` / `DISARM`). If the ESC keeps double-beeping and won't arm, run **ESC throttle range** on the Safety tab once (firmware v1.10.0, `ESCCAL`), starting with the 12 V off. The motor stops on Stop motor or Space, closing the panel, hiding the tab, a lost link (0.5 s with no heartbeat), or a tilt past 25°.
+**Laser test (CT-1):** Tests → **Laser** steps each axis through 18 points and asks where the laser dot landed. It gives PASS/FAIL (error and backlash ≤ 1°) and a CSV for the run sheet. Needs firmware v1.8.0 (`GIM`). Full procedure: [tests/ct1_laser_gimbal](tests/ct1_laser_gimbal/README.md).
+
+**Throttle test (CT-4):** Tests → **Throttle** runs the EDF with the gimbal held at centre. Tick the safety checklist, Arm, then use the slider/presets or the 9-point step test (10 → 85 %), typing the scale reading (and supply current, optional) at each step. Results table, CSV and past runs as in the laser test. Needs firmware v1.9.0 (`ARM` / `THR` / `DISARM`). If the ESC keeps double-beeping and won't arm, run **ESC throttle range** on the Safety tab once (firmware v1.10.0, `ESCCAL`), starting with the 12 V off. The motor stops on Stop motor or Space, closing the panel, hiding the tab, a lost link (0.5 s with no heartbeat), or a tilt past 25°.
+
+**Thrust vector (CT-5):** Tests → **Thrust vector** runs the motor and the gimbal together with the rocket on the rig pivot, and measures with the IMU instead of a scale: control authority (°/s² per gimbal °), kick direction, trim and relative thrust at each throttle. Needs the IMU in the rocket and the rocket on the rig, and firmware v1.12.0. Clamped mode reports vibration only.
 
 Without the visualizer, type the same commands into the Serial Monitor (115200, newline): `CAL`, `SET XC 92`, `LEVEL`, `PULSE X`, `SAVE`, `RUN`… The full list is at the top of the sketch.
 
