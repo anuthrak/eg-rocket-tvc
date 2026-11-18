@@ -32,7 +32,7 @@ Changes since the PDI / Milestone 1 (Oct 26–28): A2212 + propeller → 30 mm E
   linkage-stopper kit $9.98. 3D printing is free (NYU), so filament doesn't count.
 - Already on hand (no purchase): M3 screws (6, 8, 12 mm) + nylon lock nuts, half-size breadboard + jumpers,
   CA / epoxy / hot glue, Nano USB cable.
-- Delivery: the cart (EDF, ESC, supply, adapter, fuse holder) hasn't arrived yet.
+- Delivery: the cart (EDF, ESC, supply, adapter, fuse holder) has arrived; first motor spin-up Nov 16 (see §11).
 - Power caution: EDF full throttle ≈ 11+ A > 10 A supply → cap throttle at 85 % in firmware.
 
 ## 4. Drawings (ASME Y14 style, ANSI B, house standard in [drawing-standard.md](drawing-standard.md))
@@ -83,7 +83,10 @@ Known drawing note: TVC-001 lists Ø1 music-wire pushrods; the team uses the 1.2
   **Linkage stopper in the gimbal hole** (inner-gimbal tower Ø2.5, motor-tube lug ~Ø1.5 → drill to stopper
   shank ~2 mm), free to rotate; straight rod end through the stopper; Z-bend in the servo horn. Zig-zag bends
   only where a rod must jog around brackets.
-- **Linkage ratio:** gimbal lever arms ≈ 42.4 mm (axis X, tube lug) and 41.4 mm (axis Y, tower).
+- **Linkage ratio:** gimbal lever arms ≈ 42.4 mm (axis X, tube lug) and 41.4 mm (axis Y, tower). Set per servo
+  from firmware v1.11.0: CT-1 (Nov 16, SPG 5.5 both) measured X at 0.78× commanded → **X ≈ 7.1**, Y ≈ 5.5. X centre
+  is 112 (horn ~25° off square; can't be moved), so X is ~10 % weaker on the minus side, and at 7.1 the ±45° servo
+  limit caps X at ≈ ±6.3° of gimbal.
   Ratio ≈ r_horn / 42 → ~0.25 gimbal°/servo° (≈ 4 servo° per gimbal°) for a 10 mm horn hole. A 2.5 servo/gimbal
   setting gave only about half the travel. Firmware default is 4.0; measure it with the laser helper in
   Calibrate → Save (8° ≈ 14 cm at 1 m) and store it.
@@ -97,8 +100,9 @@ Current firmware **v1.6.0** (`firmware/nano_tvc`):
 - Tilt abort > 25°: gimbal centres immediately, re-arms after 1 s back within 5° (or `RUN`).
 - Free-test (`FREE ON|OFF`) for tilting by hand: no abort, half gains, same ±8° limit; off at every restart, never saved.
 - IMU mounting remap (any orientation), set by calibration.
-- Not yet: ESC/throttle output with the 85 % cap, motor cut on abort / lost link, binary telemetry. These wait
-  for the EDF and ESC to arrive.
+- Throttle test (v1.9.0): ESC on D3, motor runs only in calibration mode after `ARM`, 85 % cap, 50 %/s ramp-up, cut on
+  lost link (0.5 s), tilt > 25° or mode change. Driven by the visualizer's Bench → Throttle panel (CT-4).
+- Not yet: throttle in flight mode with the thrust-scaled gains, binary telemetry.
 
 Engineering notes:
 - Rig pivot at the CG means **gravity gives no tipping torque** — the plant is a double integrator (neutral), not
@@ -136,6 +140,20 @@ under offset load; abort < 100 ms; 100 Hz control loop; 5-min run with servos < 
 Tests: CT-1…5 (servo/linkage cal, IMU at rest, loop timing, EDF thrust vs throttle, kill switch); IT-1…5 (fit,
 balance/CG, swing for I + friction, motor-on noise, open-loop gimbal step → b); ST-1…7 (hold, tap recovery,
 offset weight, throttle sweep, aborts, endurance, catch tower).
+CT-1 laser gimbal accuracy: `tests/ct1_laser_gimbal/` (18-point step test per axis; pass = error ≤ 1.0°,
+backlash ≤ 1.0°).
+CT-4 first spin-up (Nov 16, firmware v1.10.0, Bench → Throttle, EDF clamped, ≤ 25 %): ESC arms normally (3 beeps,
+tune, silence); D3 → ESC → motor works; fan starts at **15 %** (1150 µs), so the ESC range calibration is still to
+do. Spun backwards at first: swapped 2 of the 3 motor wires, now blows out the tail (label the joints).
+Bench wiring (battery pack retired): 12 V → ESC (XT60); ESC BEC 5.5 V (thin red) → + rail → both servos;
+Nano on USB (power + visualizer link); MPU VCC on the Nano 5V pin only; one common ground rail (ESC, servos,
+Nano, MPU); D3 ESC, D9 X servo, D10 Y servo. The servos only have power with the 12 V on, even with the motor off.
+Never put the Nano 5V pin or VIN on the + rail: 5V clashes with USB (the ESC beeped continuously), and VIN needs
+7–12 V (at 5.5 V the Nano browns out and resets). Running without USB = 12 V to VIN from the thick supply wire,
+added with the kill-switch rewire. ESC and motor bullets don't match (joined by hand for now).
+Power-up: Nano on USB → connect the visualizer → 12 V on (ESC tune, then silence) → test. Power-down: stop the
+motor → 12 V off → disconnect → unplug USB. Next: watch for servo jitter with the motor at 15–20 %; if so, add
+470–1000 µF across the rails.
 Record every run: CSV log (t, dt, mode, throttle, raw gyro/accel, filtered angles, setpoints, errors, P/I/D terms,
 gimbal commands in ° and µs, abort flag), a run sheet (test ID, firmware version, gains, filters, throttle,
 rig config, pass/fail, notes) and synced video (tap/LED marker).
@@ -147,10 +165,16 @@ higher outdoor hops (FAA recreational rules, TRUST, registration > 250 g) → pr
 tower catch with the chopstick tower → full reusable mini mission.
 
 ## 13. Open items
-- EDF + ESC not received: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
+- Kill switch / fuse holder has female XT60 on both ends and doesn't fit the adapter's female XT60: cut one end of
+  each and join the wires (or get a male XT60), check polarity with a meter, then CT-5. Until then, runs ≤ 25 %
+  only, with the 12 V plug as the stop.
+- Visualizer Tests tab (Nov 17): all bench tests on one page with live charts. New **CT-5 thrust vector** (no scale): rocket on the pivot, ±2° gimbal kicks at each throttle → control authority (°/s² per gimbal °), direction check, trim, vibration and relative thrust. Needs firmware v1.12.0 (gyro rates in CAL lines). Expected authority ≈ 10–20 °/s²/° at 150 g (≈ 0.25 m lever arm, I ≈ 0.02 kg·m²).
+- CT-4 next: ESC range calibration (Throttle → Safety), then the full step test 10 → 85 % on the scale with
+  hearing protection.
+- EDF + ESC arrived: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
   (assumed ~172 mm in part A) and design the EDF retainer.
 - Weigh every part and update COMPONENTS in the body model (real CG, mass).
 - Rig collar position vs the sled screws at 232 mm (CG ~240 mm).
 - Check the 2× M3×6 TVC mount screws grip in the outer gimbal's Ø3 holes.
 - Desk rig GS-001 (Systems) and wiring diagram EL-001 (Propulsion).
-- Firmware once the ESC is in: throttle output + 85 % cap, motor cut on abort and lost link.
+- Firmware: throttle in flight mode (gains scaled by the real thrust). The wiring diagram EL-001 should show the ESC signal on D3.

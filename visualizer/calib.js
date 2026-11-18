@@ -1,4 +1,4 @@
-// Bench → Gimbal → Calibrate: a guided setup that drives the firmware's serial commands (firmware v1.2.0+).
+// Tests → Calibrate: a guided setup that drives the firmware's serial commands (firmware v1.2.0+).
 // The Nano answers with CFG,… (its config) and, while in calibration, streams CAL,xServo,yServo,rawTiltX,rawTiltY.
 // Everything is applied live on the Nano; SAVE writes it to EEPROM.
 // Firmware v1.3.0+ also reports the sensor mounting (CFG …,up,rot): Level detects the up axis and the
@@ -28,11 +28,12 @@ export function initCalib({ send, link }) {
     if (p[0] === 'CFG' && p.length >= 10) {
       const n = p.slice(1, 9).map(Number);
       cfg = { xc: n[0], yc: n[1], xd: n[2], yd: n[3], tx: n[4], ty: n[5], spg: n[6], swap: n[7], state: p[9],
-              up: p.length >= 12 ? +p[10] : null, rot: p.length >= 12 ? +p[11] : null };   // v1.3.0+
+              up: p.length >= 12 ? +p[10] : null, rot: p.length >= 12 ? +p[11] : null,   // v1.3.0+
+              spgy: p.length >= 13 ? +p[12] : null };   // Y linkage ratio, v1.11.0+ (older: spg is both)
       levelBusy = false;
       if (open && !calOn) send('CAL');
     } else if (p[0] === 'CAL' && p[1] === 'ON') calOn = true;
-    else if (p[0] === 'CAL' && p[1] === 'OFF') calOn = false;
+    else if (p[0] === 'CAL' && p[1] === 'OFF') { calOn = false; if (open) send('CAL'); }   // e.g. the laser test just closed
     else if (p[0] === 'SWEEP') sweeping = false;
     else if (p[0] === 'ERR' && sweeping) { sweeping = false; sweepNote = 'This needs firmware v1.7.0 or newer. Upload firmware/nano_tvc.'; }
     else if (p[0] === 'CAL' && p.length >= 5) {
@@ -164,15 +165,18 @@ export function initCalib({ send, link }) {
   $('calSweepStop').onclick = () => send('SWEEP OFF');
 
   // ---------- Step 5: save ----------
-  function setSpg(v) {
+  // Linkage ratio per servo (firmware v1.11.0+: SET SPGX / SET SPGY). Older firmware has one ratio for both.
+  function setSpg(ax, v) {
     v = Math.max(0.2, Math.min(8, Number(v) || 4));
-    $('calSpg').value = v;
     if (!cfg) return;
-    cfg.spg = v; cfg.state = 'UNSAVED';
-    send(`SET SPG ${v}`);
+    if (cfg.spgy == null) { cfg.spg = v; send(`SET SPG ${v}`); }
+    else if (ax === 'x') { cfg.spg = v; send(`SET SPGX ${v}`); }
+    else { cfg.spgy = v; send(`SET SPGY ${v}`); }
+    cfg.state = 'UNSAVED';
     render();
   }
-  $('calSpg').onchange = e => setSpg(e.target.value);
+  $('calSpgX').onchange = e => setSpg('x', e.target.value);
+  $('calSpgY').onchange = e => setSpg('y', e.target.value);
   // Linkage ratio from a laser: a 20° servo pulse moves the dot d at wall distance L → gimbal angle atan(d / L)
   const MEASURE_DEG = 20;
   function measured() {
@@ -181,8 +185,11 @@ export function initCalib({ send, link }) {
     return Math.round(MEASURE_DEG / (Math.atan(d / L) * 180 / Math.PI) * 10) / 10;
   }
   $('cmDist').oninput = $('cmMove').oninput = () => render();
-  $('cmTest').onclick = () => { if (cfg) send(`PULSE X ${MEASURE_DEG}`); };
-  $('cmUse').onclick = () => { const r = measured(); if (r) setSpg(r); };
+  let cmAxis = 'x';             // which servo the laser measurement is for
+  const cmTest = ax => () => { cmAxis = ax; render(); if (cfg) send(`PULSE ${ax.toUpperCase()} ${MEASURE_DEG}`); };
+  $('cmTestX').onclick = cmTest('x');
+  $('cmTestY').onclick = cmTest('y');
+  $('cmUse').onclick = () => { const r = measured(); if (r) setSpg(cmAxis, r); };
   $('calSave').onclick = () => send('SAVE');
   $('calRevert').onclick = () => send('LOAD');
   $('calDefaults').onclick = () => send('DEFAULTS');
@@ -284,9 +291,17 @@ export function initCalib({ send, link }) {
     setText('svXd', cfg.xd > 0 ? 'Normal' : 'Reversed'); setText('svYd', cfg.yd > 0 ? 'Normal' : 'Reversed');
     setText('svTx', sdeg(cfg.tx)); setText('svTy', sdeg(cfg.ty));
     setText('svPins', cfg.swap ? 'D10 = X · D9 = Y' : 'D9 = X · D10 = Y');
-    if (document.activeElement !== $('calSpg')) $('calSpg').value = cfg.spg;
+    const perAxis = cfg.spgy != null;
+    if (document.activeElement !== $('calSpgX')) $('calSpgX').value = cfg.spg;
+    if (document.activeElement !== $('calSpgY')) $('calSpgY').value = perAxis ? cfg.spgy : cfg.spg;
+    $('calSpgY').disabled = !perAxis;
+    setText('calSpgNote', perAxis ? '' : 'This Nano has one ratio for both servos. Upload firmware v1.11.0 or newer to set X and Y separately.');
     const r = measured();
+    const cmAx = perAxis ? cmAxis : 'x';
+    setText('cmMoveAx', `cm, ${cmAx.toUpperCase()} servo 20°`);
     setText('cmRatio', r ? `${r} servo° per gimbal°` : DASH);
+    setText('cmUse', perAxis ? `Use for ${cmAx.toUpperCase()}` : 'Use this ratio');
+    $('cmTestY').disabled = !perAxis;
     $('cmUse').disabled = !r;
     const checks = [
       ['Sensor axes', sensor.x === 'ok' && sensor.y === 'ok'],
@@ -298,5 +313,5 @@ export function initCalib({ send, link }) {
     $('calRevert').disabled = cfg.state !== 'UNSAVED';
   }
 
-  return { handle, onLink, refresh: () => open && render() };
+  return { handle, onLink, refresh: () => open && render(), isOpen: () => open, close: requestClose };
 }

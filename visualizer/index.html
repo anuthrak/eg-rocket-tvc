@@ -69,10 +69,11 @@
 </div>
 <script src="loader.js"></script>
 <header>
-  <h1><span class="brand-long">EG Rocket </span>TVC<span class="brand-crumb"><span class="sep">/</span><span id="crumb" data-labels="Mission|Bench">Mission</span></span></h1>
+  <h1><span class="brand-long">EG Rocket </span>TVC<span class="brand-crumb"><span class="sep">/</span><span id="crumb" data-labels="Mission|Bench|Tests">Mission</span></span></h1>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="mission" role="tab">Mission</button>
     <button class="tab" data-tab="bench" role="tab">Bench</button>
+    <button class="tab" data-tab="tests" role="tab">Tests</button>
   </nav>
   <button id="connectBtn" class="primary serial-only" title="Needs Chrome or Edge on desktop. Close the Arduino Serial Monitor first, since only one program can hold the port." data-labels="Connect Arduino|Disconnect">Connect Arduino</button>
   <select id="baud" class="serial-only" title="Baud rate">
@@ -127,8 +128,8 @@
     </div>
   </aside>
   <aside class="side-r">
-    <div class="panel">
-      <h2 class="h2-act">Gimbal<div class="h2-btns serial-only"><button id="freeBtn" class="h2btn" disabled title="For tilting the rocket by hand: no tilt abort, half gains, same ±8° limit. Turns off whenever the Nano restarts (firmware v1.5.0+)">Free-test</button><button id="calBtn" class="h2btn" title="Centre, level and check the gimbal servos (firmware v1.2.0+)">Calibrate</button></div></h2>
+    <div class="panel gimbal-panel">
+      <h2>Gimbal<span>Servo · deflection</span></h2>
       <!-- Where the nozzle points: dot inside the ±45° servo limit ring, with a short trail -->
       <svg class="gdial" id="gDial" viewBox="-50 -50 100 100" role="img" aria-label="Gimbal position">
         <circle class="gd-ring" r="44"/><circle class="gd-ring2" r="22"/>
@@ -169,7 +170,83 @@
     </div>
   </aside>
 
-  <!-- Gimbal calibration: floats over the 3D view so nothing else moves. Drives the firmware's CAL/SET/SAVE commands (calib.js). -->
+</main>
+
+<!-- ======================= TESTS TAB ======================= -->
+<!-- Test list | live telemetry strip over (procedure | charts, rig view, serial log). tests.js runs the page; each test
+     is its own module (calib.js, laser.js, throttle.js, vector.js; Free-hand lives in tests.js). One test at a time. -->
+<main id="testsMain">
+  <aside class="t-rail" aria-label="Tests">
+    <div class="t-rail-h">Tests<span>In this order</span></div>
+    <button id="scBtn" class="t-pick" data-test="sc"><span class="t-num">0</span><span class="t-name">System check<small>Start</small></span><span class="t-desc">Every part in 5 minutes, nothing rewired: IMU, servos, loop, motor, safety cuts.</span></button>
+    <button id="calBtn" class="t-pick" data-test="cal"><span class="t-num">1</span><span class="t-name">Calibrate<small>Setup</small></span><span class="t-desc">Centre, level and direction-check the gimbal servos.</span></button>
+    <button id="fhBtn" class="t-pick" data-test="fh"><span class="t-num">2</span><span class="t-name">Free-hand<small>Loop</small></span><span class="t-desc">Tilt the rocket by hand and watch the controller answer. No motor.</span></button>
+    <button id="lzBtn" class="t-pick" data-test="lz"><span class="t-num">3</span><span class="t-name">Laser<small>CT-1</small></span><span class="t-desc">Gimbal accuracy: a laser on the motor tube marks each angle on a wall.</span></button>
+    <button id="thBtn" class="t-pick" data-test="th"><span class="t-num">4</span><span class="t-name">Throttle<small>CT-4</small></span><span class="t-desc">Run the EDF: throttle, ESC pulse and vibration. ESC range calibration.</span></button>
+    <button id="vcBtn" class="t-pick" data-test="vc"><span class="t-num">5</span><span class="t-name">Thrust vector<small>CT-5</small></span><span class="t-desc">Motor and gimbal together on the pivot: authority, trim and relative thrust. No scale.</span></button>
+    <p class="t-note">The motor only runs in Throttle and Thrust vector. It stops when you close the test, leave this tab, hide the page, or press Space.</p>
+  </aside>
+
+  <div class="t-work">
+    <!-- Live telemetry, same for every test -->
+    <div class="t-strip" id="tStrip">
+      <div class="t-cell"><span>Mode</span><b id="tsMode">—</b></div>
+      <div class="t-cell x"><span>Tilt X</span><b id="tsTx">—</b><small>°</small></div>
+      <div class="t-cell y"><span>Tilt Y</span><b id="tsTy">—</b><small>°</small></div>
+      <div class="t-cell x"><span>Gimbal X</span><b id="tsGx">—</b><small>°</small></div>
+      <div class="t-cell y"><span>Gimbal Y</span><b id="tsGy">—</b><small>°</small></div>
+      <div class="t-cell x t-wide"><span>Rate X</span><b id="tsRx">—</b><small>°/s</small></div>
+      <div class="t-cell y t-wide"><span>Rate Y</span><b id="tsRy">—</b><small>°/s</small></div>
+      <div class="t-cell"><span>Throttle</span><b id="tsThr">—</b><small>%</small></div>
+    </div>
+
+    <div class="t-body">
+      <div class="t-proc">
+        <section id="testsHome" class="t-home" aria-label="Choose a test">
+          <h2>Bench tests<span>Pick one on the left</span></h2>
+          <p class="cal-p">Connect the Arduino first (top right). The strip above, the charts and the serial log stay live whichever test is open. Each test keeps its last run in this browser and downloads as CSV.</p>
+          <ol class="t-order" start="0">
+            <li><b>System check</b> before each session: every part, nothing rewired.</li>
+            <li><b>Calibrate</b> once after any change to the servos, linkage or sensor mount.</li>
+            <li><b>Free-hand</b> checks the loop pushes the right way before anything spins.</li>
+            <li><b>Laser</b> (CT-1) proves the gimbal goes where it is told, within 1°.</li>
+            <li><b>Throttle</b> (CT-4) runs the EDF on its own and shows the vibration it adds.</li>
+            <li><b>Thrust vector</b> (CT-5) runs both: how hard the gimbal can turn the rocket, at each throttle.</li>
+          </ol>
+        </section>
+  <!-- System check: every part, guided, nothing rewired (syscheck.js) -->
+  <section id="scPanel" class="cal sc" hidden aria-label="System check">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>System check<span id="scState">All parts</span></h2>
+        <button id="scKill" class="th-kill" hidden title="Stop the motor (Space)">Stop motor</button>
+        <button id="scClose" class="cal-x" title="Close and stop the motor (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <p id="scMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="scBody">
+        <div class="cal-step">
+          <div class="sc-now">
+            <div class="sc-now-h"><b id="scNowName">Ready</b><span id="scNowNum"></span></div>
+            <p class="cal-p sc-prompt" id="scPrompt"></p>
+            <p class="sc-live" id="scLive"></p>
+            <div class="sc-meter" id="scMeter" hidden><i id="scMeterBar"></i></div>
+            <div class="cal-acts" id="scActs"></div>
+          </div>
+          <ol class="sc-list" id="scList"></ol>
+          <p class="cal-note" id="scNote"></p>
+          <div class="cal-acts"><button id="scGo" class="primary">Start check</button><button id="scCsv">Download CSV</button><button id="scCopy">Copy summary</button></div>
+          <p class="cal-p" id="scMeta"></p>
+          <p class="cal-p">The motor steps run the EDF clamped to the desk, at 30 % at most. Space or Stop motor ends it at once. Gyro checks need firmware v1.12.0; on older firmware they're skipped.</p>
+          <details class="cal-measure">
+            <summary>Past checks (this browser)</summary>
+            <ul class="lz-hist" id="scHist"></ul>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- Gimbal calibration. Drives the firmware's CAL/SET/SAVE commands (calib.js). -->
   <section id="calPanel" class="cal" hidden aria-label="Gimbal calibration">
     <div class="cal-card">
       <div class="cal-head">
@@ -251,15 +328,18 @@
             <dt>Level trim</dt><dd id="svTx">—</dd><dd id="svTy">—</dd>
           </dl>
           <div class="cal-line"><span>Pins</span><b id="svPins">—</b></div>
-          <label class="cal-line"><span>Linkage ratio<small>servo ° per gimbal °</small></span>
-            <input id="calSpg" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <label class="cal-line"><span>Linkage ratio X<small>servo ° per gimbal °</small></span>
+            <input id="calSpgX" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <label class="cal-line"><span>Linkage ratio Y<small>servo ° per gimbal °</small></span>
+            <input id="calSpgY" type="number" min="0.2" max="8" step="0.1" value="4"></label>
+          <p class="cal-note" id="calSpgNote"></p>
           <details class="cal-measure">
             <summary>Measure it with a laser</summary>
             <p class="cal-p">Tape a laser pointer along the motor tube, aim it at a wall, press Test, and measure how far the dot moves.</p>
             <label class="cal-line"><span>Wall distance<small>cm</small></span><input id="cmDist" type="number" min="10" step="1" value="100"></label>
-            <label class="cal-line"><span>Dot moved<small>cm, X servo 20°</small></span><input id="cmMove" type="number" min="0" step="0.1" placeholder="—"></label>
+            <label class="cal-line"><span>Dot moved<small id="cmMoveAx">cm, X servo 20°</small></span><input id="cmMove" type="number" min="0" step="0.1" placeholder="—"></label>
             <div class="cal-line"><span>Ratio</span><b id="cmRatio">—</b></div>
-            <div class="cal-acts"><button id="cmTest">Test X 20°</button><button id="cmUse" disabled>Use this ratio</button></div>
+            <div class="cal-acts"><button id="cmTestX">Test X 20°</button><button id="cmTestY">Test Y 20°</button><button id="cmUse" disabled>Use for X</button></div>
           </details>
           <p class="cal-p" id="svChecks"></p>
           <div class="cal-acts">
@@ -276,6 +356,284 @@
       </div>
     </div>
   </section>
+  <!-- Laser accuracy test (CT-1): Drives the firmware's GIM command (laser.js). -->
+  <section id="lzPanel" class="cal lz" hidden aria-label="Laser gimbal test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Laser test<span id="lzState">CT-1</span></h2>
+        <button id="lzClose" class="cal-x" title="Close (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="lzTabs">
+        <button data-tab="0">1 · Setup</button><button data-tab="1">2 · Measure</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="lzMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="lzBody">
+        <!-- 1 Setup -->
+        <div class="cal-step lz-step" data-tab="0">
+          <p class="cal-p">Checks that the gimbal goes where the flight code tells it to. A laser on the motor tube marks each angle on a wall. Only the gimbal moves (±8°). No motor.</p>
+          <ol class="lz-list">
+            <li>Tape a laser pointer along the motor tube.</li>
+            <li>Square the rocket to a flat wall. Measure from the <b>gimbal pivot</b> (where the pivot screw axes cross) to the wall, <b>not from the laser tip</b>.</li>
+            <li>Press <b>Centre</b> and mark the dot. That is the <b>zero mark</b>.</li>
+            <li>Press <b>+X 8°</b>, then <b>+Y 8°</b>. Mark which side the dot goes: that side is <b>+</b> for that axis.</li>
+          </ol>
+          <label class="cal-line"><span>Gimbal pivot to wall<small>mm, not from the laser tip</small></span><input id="lzDist" type="text" inputmode="decimal" autocomplete="off" value="1000"></label>
+          <p class="cal-p lz-dist-st" id="lzDistSt"></p>
+          <div class="cal-line"><span>Calibration on the Nano</span><b id="lzCfg">—</b></div>
+          <p class="cal-p cal-warn" id="lzCfgWarn"></p>
+          <div class="cal-acts"><button id="lzCentre">Centre</button><button id="lzShowX">+X 8°</button><button id="lzShowY">+Y 8°</button></div>
+        </div>
+        <!-- 2 Measure -->
+        <div class="cal-step lz-step" data-tab="1" hidden>
+          <div class="lz-axes">
+            <button data-lzaxis="X" class="x">X axis<small>Not run</small></button>
+            <button data-lzaxis="Y" class="y">Y axis<small>Not run</small></button>
+            <button id="lzStart" class="primary">Start X</button>
+          </div>
+          <div class="lz-dots" id="lzDots" aria-hidden="true"><span>Up</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>Down</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="cal-prompt" id="lzPrompt">Ready</div>
+          <p class="cal-p" id="lzSub"></p>
+          <div class="lz-entry" id="lzEntry">
+            <label for="lzMm">Dot from zero mark<small>mm, signed</small></label>
+            <input id="lzMm" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+            <div class="lz-conv"><b id="lzDeg">—</b><small id="lzErr"></small></div>
+          </div>
+          <p class="cal-note" id="lzSign"></p>
+          <div class="cal-acts"><button id="lzRec" class="primary">Record &amp; next</button><button id="lzRedo">Redo last point</button></div>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step lz-step" data-tab="2" hidden>
+          <div class="lz-overall" id="lzOverall">No axis measured yet.</div>
+          <table class="lz-sum">
+            <thead><tr><th></th><th>Max error<small>≤ 1.0°</small></th><th>Backlash<small>≤ 1.0°</small></th><th></th></tr></thead>
+            <tbody>
+              <tr class="x"><th>X</th><td id="lzEX">—</td><td id="lzBX">—</td><td><span id="lzVX" class="cal-res">Not run</span></td></tr>
+              <tr class="y"><th>Y</th><td id="lzEY">—</td><td id="lzBY">—</td><td><span id="lzVY" class="cal-res">Not run</span></td></tr>
+            </tbody>
+          </table>
+          <details class="cal-measure">
+            <summary>All 18 points per axis</summary>
+            <table class="lz-tab">
+              <thead><tr><th>Cmd</th><th class="x">X up</th><th class="x">X down</th><th class="y">Y up</th><th class="y">Y down</th></tr></thead>
+              <tbody id="lzRows"></tbody>
+            </table>
+          </details>
+          <p class="cal-p" id="lzMeta"></p>
+          <div class="cal-acts"><button id="lzCsv" class="primary">Download CSV</button><button id="lzCopy">Copy summary</button><button id="lzNew">New test</button></div>
+          <p class="cal-p">Runs are also kept in this browser. Download the CSV for the run sheet.</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="lzHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="lzBack">Back</button><button id="lzNext" class="primary">Next</button></div>
+    </div>
+  </section>
+  <!-- Throttle test (CT-4). Drives the firmware's ARM / THR / DISARM commands (throttle.js). -->
+  <section id="thPanel" class="cal th" hidden aria-label="Throttle test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Throttle test<span id="thState">CT-4</span></h2>
+        <button id="thKill" class="th-kill" hidden title="Stop the motor (Space)">Stop motor</button>
+        <button id="thClose" class="cal-x" title="Close and stop the motor (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="thTabs">
+        <button data-tab="0">1 · Safety</button><button data-tab="1">2 · Run</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="thMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="thBody">
+        <!-- 1 Safety -->
+        <div class="cal-step th-step" data-tab="0">
+          <p class="cal-p">Runs the EDF from the visualizer and records thrust against throttle. The gimbal is held at centre. The throttle is capped at 85 % (the 10 A supply), rises at most 50 %/s and drops at once. The motor stops if this page goes quiet for 0.5 s, the rocket leans past 25°, you leave this panel or the tab, or press <b>Stop motor</b> / <b>Space</b>.</p>
+          <ul class="th-check" id="thCheck">
+            <li><label><input type="checkbox"> Rocket held: clamped on the rig, or standing on the scale with the stand</label></li>
+            <li><label><input type="checkbox"> Intake and outlet clear: no fingers, cables, paper or loose screws</label></li>
+            <li><label><input type="checkbox"> EDF retainer in, fan spins freely by hand</label></li>
+            <li><label><input type="checkbox"> Fuse fitted, 12 V plug or supply switch within reach, eye protection on</label></li>
+          </ul>
+          <p class="cal-p">ESC signal on <b>D3</b>, ESC ground to the Nano GND. Power the 12 V supply after the Nano is connected: the ESC beeps that it is armed and the fan stays still.</p>
+          <details class="cal-measure" id="thEc">
+            <summary>ESC throttle range (calibrate once)</summary>
+            <p class="cal-p" id="thEcStep"></p>
+            <label class="cal-line th-ec-off"><span>12 V supply is OFF<small>check the switch, not just the fan</small></span><input type="checkbox" id="thEcOff"></label>
+            <div class="th-ec-time" id="thEcTime" hidden><i id="thEcBar"></i></div>
+            <div class="cal-acts"><button id="thEcGo" class="primary">Send full throttle</button><button id="thEcLow">Heard the beeps: set zero</button><button id="thEcCancel">Cancel</button></div>
+            <p class="cal-note" id="thEcNote"></p>
+          </details>
+        </div>
+        <!-- 2 Run -->
+        <div class="cal-step th-step" data-tab="1" hidden>
+          <div class="th-live">
+            <div class="th-big"><span>Throttle</span><b id="thAct">—</b><small>%</small></div>
+            <dl class="kv th-kv">
+              <dt>Target</dt><dd id="thTgt">—</dd><dd class="u">%</dd>
+              <dt>ESC pulse</dt><dd id="thUs">—</dd><dd class="u">µs</dd>
+              <dt>Thrust, spec</dt><dd id="thEst">—</dd><dd class="u">g est.</dd>
+            </dl>
+          </div>
+          <div class="th-bar"><i id="thBarAct"></i><b id="thBarTgt"></b></div>
+          <div class="cal-acts"><button id="thArm" class="primary">Arm</button><button id="thStop">Stop</button></div>
+          <p class="cal-note" id="thNote"></p>
+          <div class="th-manual" id="thManual">
+            <label class="cal-line"><span>Throttle<small>0–85 %</small></span><input id="thSlider" type="range" min="0" max="85" step="1" value="0"><b id="thWant">0 %</b></label>
+            <div class="cal-acts th-presets"><button data-thp="0">0</button><button data-thp="10">10</button><button data-thp="25">25</button><button data-thp="50">50</button><button data-thp="85">85</button></div>
+          </div>
+          <div class="cal-dir">
+            <div class="cal-dir-h"><span class="cal-name">Step test<small>10 → 85 %, 9 points</small></span>
+              <span id="thStepSt" class="cal-res">Ready</span><button id="thStepGo">Start</button></div>
+            <div class="lz-dots th-dots" id="thDots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="cal-p" id="thSub">Tare the scale with the motor off. At each step type the reading (thrust pushes the scale down or lifts it off: either sign is fine).</p>
+            <div class="lz-entry th-entry" id="thEntry">
+              <label for="thG">Scale<small>g</small></label>
+              <input id="thG" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+              <label for="thA">Current<small>A, optional</small></label>
+              <input id="thA" type="text" inputmode="decimal" autocomplete="off" placeholder="—">
+            </div>
+            <div class="cal-acts"><button id="thRec" class="primary">Record &amp; next</button></div>
+          </div>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step th-step" data-tab="2" hidden>
+          <div class="lz-overall" id="thOverall">No step test yet.</div>
+          <table class="lz-tab th-tab">
+            <thead><tr><th>Throttle</th><th>ESC <span class="nocase">µs</span></th><th>Thrust g</th><th>Spec g</th><th>Current A</th></tr></thead>
+            <tbody id="thRows"></tbody>
+          </table>
+          <p class="cal-p" id="thMeta"></p>
+          <div class="cal-acts"><button id="thCsv" class="primary">Download CSV</button><button id="thCopy">Copy summary</button><button id="thNew">New test</button></div>
+          <p class="cal-p">Spec = 220 g at full throttle (QX 30 mm, 11.1 V), scaled by throttle². Runs are also kept in this browser.</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="thHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="thBack">Back</button><button id="thNext" class="primary">Next</button></div>
+    </div>
+  </section>
+  <!-- Free-hand (flight loop): Free-test on/off plus live checks of what the controller does. Driven by tests.js. -->
+  <section id="fhPanel" class="cal fh" hidden aria-label="Free-hand test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Free-hand test<span id="fhState">Flight loop</span></h2>
+        <button id="fhClose" class="cal-x" title="Close (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <p id="fhMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="fhBody">
+        <div class="cal-step">
+          <p class="cal-p">The controller runs as in flight. Tilt the rocket by hand: the gimbal should tilt the top of the motor <b>toward</b> the lean, so the thrust would push the tail back under the rocket. The motor stays off (the ESC is held at zero in flight mode).</p>
+          <div class="fh-toggle">
+            <button id="freeBtn" class="fh-free" disabled title="No tilt abort, half gains, same ±8° limit. Turns off when you close this test or the Nano restarts (firmware v1.5.0+)"><span class="fh-off">Free-test off</span><span class="fh-on">Free-test on</span></button>
+            <p class="cal-p">Free-test removes the 25° tilt abort and halves the gains so you can move the rocket around freely.</p>
+          </div>
+          <div class="fh-checks">
+            <div class="fh-check x"><span class="cal-name">X axis</span><b id="fhDirX">—</b><small id="fhDirXs">Lean past 2° to check</small></div>
+            <div class="fh-check y"><span class="cal-name">Y axis</span><b id="fhDirY">—</b><small id="fhDirYs">Lean past 2° to check</small></div>
+          </div>
+          <dl class="kv cal-kv">
+            <dt></dt><dd class="cal-colh">X</dd><dd class="cal-colh">Y</dd>
+            <dt>Peak tilt</dt><dd id="fhPtX">—</dd><dd id="fhPtY">—</dd>
+            <dt>Peak gimbal</dt><dd id="fhPgX">—</dd><dd id="fhPgY">—</dd>
+            <dt>Gimbal per tilt</dt><dd id="fhKX">—</dd><dd id="fhKY">—</dd>
+            <dt>Time at ±8° limit</dt><dd id="fhSatX">—</dd><dd id="fhSatY">—</dd>
+          </dl>
+          <p class="cal-note" id="fhNote"></p>
+          <div class="cal-acts"><button id="fhReset">Reset</button></div>
+          <p class="cal-p"><b>Following</b>: the gimbal tracks your lean the way the controller should (fitted over leans inside ±6°). <b>Gimbal per tilt</b>: that fit's slope, the controller's proportional response. It can't see which way the motor physically moves: watch it, or use Calibrate → Direction.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Thrust vector (CT-5): motor + gimbal together on the rig pivot. Drives ARM / THR / GIM / DISARM (vector.js). -->
+  <section id="vcPanel" class="cal vc" hidden aria-label="Thrust vector test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Thrust vector<span id="vcState">CT-5</span></h2>
+        <button id="vcKill" class="th-kill" hidden title="Stop the motor (Space)">Stop motor</button>
+        <button id="vcClose" class="cal-x" title="Close and stop the motor (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="vcTabs">
+        <button data-tab="0">1 · Setup</button><button data-tab="1">2 · Run</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="vcMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="vcBody">
+        <!-- 1 Setup -->
+        <div class="cal-step vc-step" data-tab="0">
+          <p class="cal-p">Runs the motor and the gimbal together with the rocket on the rig pivot, and measures with the IMU instead of a scale. At each throttle it first holds the rocket upright with a gentle gimbal loop (measuring vibration, and the <b>trim</b>: the gimbal angle it settles at, which cancels any thrust misalignment), then gives four short kicks (+X, −X, +Y, −Y). Each kick is followed by an equal kick the other way, so the rocket ends up stopped. How fast each kick spins the rocket up is the <b>control authority</b>: it grows with thrust, so it also gives a <b>thrust curve without a scale</b>.</p>
+          <div class="cal-line"><span>Rocket is<small>clamped: vibration and servo checks only</small></span>
+            <span class="vc-seg" id="vcMount"><button data-mount="pivot" class="on">On the pivot</button><button data-mount="clamp">Clamped</button></span></div>
+          <div class="cal-line"><span>Throttle levels<small>%, run low to high</small></span>
+            <span class="vc-seg vc-multi" id="vcLevels"><button data-lv="20">20</button><button data-lv="30">30</button><button data-lv="40">40</button><button data-lv="50">50</button><button data-lv="60">60</button><button data-lv="70">70</button></span></div>
+          <div class="cal-line"><span>Kick size<small>gimbal °</small></span>
+            <span class="vc-seg" id="vcKick"><button data-kick="1">1°</button><button data-kick="2">2°</button><button data-kick="3">3°</button></span></div>
+          <div class="cal-line"><span>Kick length<small>each half</small></span>
+            <span class="vc-seg" id="vcPulse"><button data-pulse="300">0.3 s</button><button data-pulse="400">0.4 s</button><button data-pulse="500">0.5 s</button></span></div>
+          <p class="cal-p" id="vcPlan"></p>
+          <ul class="th-check" id="vcCheck">
+            <li><label><input type="checkbox"> Calibrate done and saved (levels, directions, linkage ratios)</label></li>
+            <li><label><input type="checkbox"> Rocket on the pivot, balanced, free to tilt both ways; nothing touching it</label></li>
+            <li><label><input type="checkbox"> Intake and outlet clear, EDF retainer in, fan spins freely by hand</label></li>
+            <li><label><input type="checkbox"> Fuse fitted, 12 V plug or supply switch within reach, eye protection on</label></li>
+            <li><label><input type="checkbox"> A hand ready near the nose (not over the intake) to catch a big swing</label></li>
+          </ul>
+          <p class="cal-p">Stops by itself if the rocket leans past 12° or turns faster than 90°/s (the Nano also cuts at 25°). Needs firmware v1.12.0 (gyro rates in calibration mode).</p>
+        </div>
+        <!-- 2 Run -->
+        <div class="cal-step vc-step" data-tab="1" hidden>
+          <div class="th-live">
+            <div class="th-big"><span>Throttle</span><b id="vcAct">—</b><small>%</small></div>
+            <dl class="kv th-kv">
+              <dt>Step</dt><dd id="vcStep">—</dd><dd class="u"></dd>
+              <dt>Gimbal</dt><dd id="vcGim">—</dd><dd class="u">°</dd>
+              <dt>Lean</dt><dd id="vcLean">—</dd><dd class="u">°</dd>
+            </dl>
+          </div>
+          <div class="lz-dots vc-dots" id="vcDots" aria-hidden="true"></div>
+          <div class="cal-prompt" id="vcPrompt">Ready</div>
+          <p class="cal-p" id="vcSub"></p>
+          <div class="cal-acts"><button id="vcGo" class="primary">Arm &amp; start</button><button id="vcStop">Stop motor</button></div>
+          <p class="cal-note" id="vcNote"></p>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step vc-step" data-tab="2" hidden>
+          <div class="lz-overall" id="vcOverall">No run yet.</div>
+          <div class="vc-dir">
+            <div class="fh-check x"><span class="cal-name">X kick direction</span><b id="vcDirX">—</b></div>
+            <div class="fh-check y"><span class="cal-name">Y kick direction</span><b id="vcDirY">—</b></div>
+          </div>
+          <table class="lz-tab vc-tab">
+            <thead><tr><th>Throttle</th><th>Authority X<small>°/s²/°</small></th><th>Authority Y<small>°/s²/°</small></th><th>Trim X<small>°</small></th><th>Trim Y<small>°</small></th><th>Vibration<small>°/s rms</small></th><th>Rel. thrust</th></tr></thead>
+            <tbody id="vcRows"></tbody>
+          </table>
+          <p class="cal-p" id="vcMeta"></p>
+          <div class="cal-acts"><button id="vcCsv" class="primary">Download CSV</button><button id="vcCopy">Copy summary</button><button id="vcNew">New test</button></div>
+          <p class="cal-p"><b>Authority</b>: how fast one degree of gimbal spins the rocket up (higher = stronger control; it is what the controller's gains act on). <b>Trim</b>: the gimbal angle that cancels the drift seen at centre (thrust line off the pivot, or imbalance). <b>Rel. thrust</b>: authority at that throttle ÷ authority at the top level; compare it with (throttle ÷ top)², the spec shape.</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="vcHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="vcBack">Back</button><button id="vcNext" class="primary">Next</button></div>
+    </div>
+  </section>
+      </div>
+
+      <!-- Four charts for the open test (tests.js builds them) over the full-width serial log -->
+      <div class="t-viz">
+        <div class="t-charts" id="tCharts"></div>
+        <div class="t-pair">
+          <div class="t-tile t-log"><div class="t-tile-h"><b>Serial log</b><span>Last 200 lines</span></div><div id="tLogSlot" class="t-log-slot"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- ======================= MISSION TAB ======================= -->

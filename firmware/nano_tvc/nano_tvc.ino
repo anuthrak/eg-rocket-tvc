@@ -7,8 +7,9 @@
 // TVC gimbal controller for the SLDP 45 desk-rig rocket.
 //   IMU -> complementary filter -> PID per axis -> gimbal command (clamped to ±GMAX, slew-limited
 //   to GRATE) -> servo pulse via the linkage ratio. Gains from docs/PROJECT_SUMMARY.md §7.
-// Hardware: Arduino Nano + MPU6050 on the avionic sled (SLDP-AV-001) + 2 MG90S servos.
-// The EDF + ESC haven't arrived, so there is no motor output yet and throttle is fixed at 1.0.
+// Hardware: Arduino Nano + MPU6050 on the avionic sled (SLDP-AV-001) + 2 MG90S servos + the EDF's ESC on D3.
+// The motor only runs in the throttle test (Bench → Throttle, calibration mode). In flight mode the ESC is held at
+// zero and the controller still assumes full thrust for its gain scaling.
 //
 // Axes (rocket body frame, same as the drawings: z = rocket axis up, +X = toward the 2X M3 TVC mount
 // screws at body 0°, +Y = 90° from that). Servos are named by the direction they tilt the nozzle:
@@ -24,40 +25,68 @@
 // them into the Serial Monitor at 115200 with a newline. Saved values live in EEPROM and survive
 // power-off and re-uploads; the DEFAULTS block is only used until something is saved.
 //
-//   CAL               enter calibration: controller paused, servos held at centre, streams
-//                     CAL,<xServo>,<yServo>,<rawTiltX>,<rawTiltY>   (tilts in the rocket frame)
+//   CAL               enter calibration: controller paused, servos held at centre, streams at 50 Hz
+//                     CAL,<xServo>,<yServo>,<rawTiltX>,<rawTiltY>,<rateX>,<rateY>   (tilts in the rocket frame;
+//                     rates in deg/s, gyro bias removed, same signs as the tilts; the two rates are v1.12.0+,
+//                     for the thrust-vector test CT-5)
 //   RUN               back to flight mode (also clears a tilt abort)
 //   GET               print the config line:
-//                     CFG,xc,yc,xd,yd,tx,ty,spg,swap,<SAVED|UNSAVED|DEFAULT>,up,rot
+//                     CFG,xc,yc,xd,yd,tx,ty,spgX,swap,<SAVED|UNSAVED|DEFAULT>,up,rot,spgY   (spgY: v1.11.0+)
 //   SET <key> <val>   keys: XC YC (servo centre, deg)  XD YD (direction ±1)  TX TY (level trim, deg)
-//                           SPG (servo deg per gimbal deg)  SWAP (0/1: swap the D9/D10 roles)
+//                           SPGX SPGY (linkage ratio per servo: servo deg per gimbal deg; SPG sets both)
+//                           SWAP (0/1: swap the D9/D10 roles)
 //                           UP (sensor axis pointing up: 1/2/3 = X/Y/Z, negative = minus)
 //                           ROT (0-3: turn the sensor's X/Y by 90° steps about the up axis)
 //   LEVEL             rocket upright and still: detect the up axis, capture TX/TY
 //   PULSE X|Y [deg]   (CAL only) move one servo the way the controller would for a lean toward +X/+Y
 //   SWEEP CIRCLE|CORNERS|OFF   (CAL only) move both servos through the full +-GMAX, about 3 s, then back to centre;
 //                     replies SWEEP,DONE when it ends or is stopped
+//   GIM <x> <y> | GIM OFF  (CAL only) hold the gimbal at x, y gimbal degrees (clamped to +-GMAX), through the
+//                     same conversion as flight (centre, direction, linkage ratio) at the GRATE slew limit.
+//                     Replies GIM,<x>,<y> once it gets there. For the laser test (CT-1). OFF = GIM 0 0.
 //   SAVE              write the config to EEPROM
 //   LOAD              discard unsaved changes (reload EEPROM, or the defaults if nothing is saved)
 //   DEFAULTS          load the DEFAULTS block (not saved until SAVE)
 //   FREE ON|OFF       free-test mode on or off; replies FREE,ON or FREE,OFF
 //
+// Throttle test (CT-4, calibration mode only; the visualizer's Bench → Throttle panel drives these):
+//   ARM               allow the motor to run (throttle must be 0). Replies with a THR status line.
+//   THR <pct>         target throttle 0..85 (capped at THROTTLE_CAP). Rises at THR_RAMP_UP, drops at once.
+//                     Every line received counts as a heartbeat: the motor is cut if nothing arrives for THR_LINK_MS.
+//   DISARM            motor to zero at once, disarmed.
+//   Status, 5 Hz while armed and on every change:  THR,<ARMED|SAFE>,<target %>,<actual %>,<ESC µs>
+//   Cuts (motor to zero, disarmed, then a SAFE status line):  THR,CUT,LINK | THR,CUT,TILT | THR,CUT,MODE
+//     LINK = no serial line for THR_LINK_MS, TILT = beyond ABORT_TILT for 3 readings in a row,
+//     MODE = CAL or RUN received (leaving or re-entering calibration).
+//   The ESC sees ESC_MIN_US from the first moment of setup(), so it arms safely and never starts the fan on boot.
+//   HB                heartbeat only, no reply (keeps the link watchdog fed while nothing else is being sent)
+//
+// ESC throttle-range calibration (calibration mode only, disarmed, 12 V OFF when starting):
+//   ESCCAL HIGH       ESC signal to ESC_MAX_US (full throttle) so the ESC stores it as 100 % when it powers up.
+//                     Replies ESCCAL,HIGH. Falls back to ESC_MIN_US by itself after ESCCAL_MAX_MS (ESCCAL,TIMEOUT),
+//                     when no serial line arrives for THR_LINK_MS (ESCCAL,LINK), or on CAL / RUN / ARM (ESCCAL,MODE).
+//   ESCCAL LOW        ESC signal back to ESC_MIN_US so the ESC stores it as 0 %. Replies ESCCAL,LOW.
+//   DANGER: if the ESC is already powered and armed, ESCCAL HIGH is full throttle. Only start it with the 12 V off.
+//
 // Safety: the gimbal is always clamped to +-GMAX. Tilt beyond ABORT_TILT centres the gimbal and prints ABORT,TILT.
 // It re-arms after the rocket is back within REARM_TILT for REARM_MS (prints ABORT,CLEAR), or on RUN.
 // Free-test (FREE ON) is for tilting the rocket by hand: no tilt abort, gains x FREE_TEST_GAIN, same +-GMAX limit.
 // It always starts off at power-up and is never saved.
-// TODO when the ESC arrives: refuse FREE ON while the motor can run, throttle output capped at THROTTLE_CAP, motor cut on abort and when
-// the serial link goes quiet, and the motor stays off after an abort until RUN.
+// Motor safety: the motor can only run in calibration mode after ARM, never above THROTTLE_CAP, and is cut on a lost link,
+// a tilt beyond ABORT_TILT or any mode change. After a cut it stays off until ARM. (FREE only affects flight mode.)
+// Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.7.0";
+const char FW_VERSION[] = "1.12.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
 const int Y_SERVO_PIN = 10;
+const int ESC_PIN = 3;                      // ESC signal (white/yellow); ESC ground to Nano GND
+const int ESC_MIN_US = 1000, ESC_MAX_US = 2000;   // ESC throttle range: 0 % and 100 %
 const int   X_CENTER = 90, Y_CENTER = 90;   // servo angle with the nozzle dead straight (deg)
 const int   X_DIR = 1, Y_DIR = 1;           // -1 if that servo pushes the wrong way
-const float SERVO_PER_GIMBAL = 4.0;         // linkage ratio: servo degrees per gimbal degree (~4 for the K-9)
+const float SERVO_PER_GIMBAL = 4.0;         // linkage ratio: servo degrees per gimbal degree (~4 for the K-9), both servos
 const float TILT_X_TRIM = 0.0, TILT_Y_TRIM = 0.0;   // tilt the sensor reads when truly upright (deg)
 const int8_t  UP_AXIS = 3;                  // sensor axis up the rocket: 1/2/3 = X/Y/Z, negative = minus
 const uint8_t SENSOR_ROT = 0;               // sensor X/Y turned by ROT × 90° about the up axis
@@ -69,6 +98,7 @@ const int SERVO_MIN_US = 544, SERVO_MAX_US = 2400;   // Servo library's 0° and 
 Adafruit_MPU6050 mpu;
 Servo xServo;
 Servo yServo;
+Servo esc;                                // the ESC takes a servo pulse: ESC_MIN_US = stop
 
 // ---------- Controller (docs/PROJECT_SUMMARY.md §7) ----------
 // Gimbal degrees per degree of tilt (and per °/s, and per °·s), tuned at THRUST_REF_G and scaled by
@@ -86,6 +116,10 @@ const float REARM_TILT = 5.0 * DEG_TO_RAD;
 const unsigned long REARM_MS = 1000;
 const float FREE_TEST_GAIN = 0.5;         // free-test only: multiplies Kp, Kd and Ki
 const float THROTTLE_CAP = 0.85;          // for the ESC (EDF draws ~11 A at full throttle, supply is 10 A)
+const float THR_RAMP_UP = 0.5;            // throttle rise limit (fraction per second): 0 → 85 % in 1.7 s
+const unsigned long THR_LINK_MS = 500;    // motor cut when no serial line arrives for this long
+const unsigned long THR_REPORT_MS = 200;  // THR status line rate while armed
+const unsigned long ESCCAL_MAX_MS = 15000; // ESC calibration: longest the full-throttle signal is held
 
 // No motor yet: run as if the engine is at full throttle so the gimbal always steers.
 float throttle = 1.0;
@@ -99,18 +133,21 @@ const bool TELEMETRY_SERVO = true;
 
 const unsigned long LOOP_US = 10000;      // 100 Hz control loop
 const unsigned long TELEMETRY_MS = 50;    // 20 Hz serial output
+const unsigned long CAL_TELEMETRY_MS = 20;   // 50 Hz in calibration mode (the CT-5 kicks last ~0.4 s)
 
 // ---------- Config (EEPROM-backed) ----------
 struct Config {
   uint16_t magic;
   int16_t  xCenter, yCenter;
   int8_t   xDir, yDir;
-  float    tiltXTrim, tiltYTrim, servoPerGimbal;
+  float    tiltXTrim, tiltYTrim, servoPerGimbal;   // servoPerGimbal = X servo's linkage ratio
   uint8_t  swapPins;
   int8_t   up;      // ±1..3
   uint8_t  rot;     // 0..3
+  float    servoPerGimbalY;                       // Y servo's linkage ratio (v1.11.0+)
 };
-const uint16_t CFG_MAGIC = 0x7C13;        // changed in v1.3.0 (new fields): older saves fall back to defaults
+const uint16_t CFG_MAGIC = 0x7C14;        // v1.11.0: servoPerGimbalY appended
+const uint16_t CFG_MAGIC_V13 = 0x7C13;    // v1.3.0–v1.10.0 layout (no servoPerGimbalY): migrated on load, Y = X
 Config cfg;
 bool cfgSaved = false;   // cfg came from / matches EEPROM
 bool cfgDirty = false;   // changed since last load/save
@@ -120,7 +157,7 @@ void loadDefaults() {
   cfg.xCenter = X_CENTER; cfg.yCenter = Y_CENTER;
   cfg.xDir = X_DIR; cfg.yDir = Y_DIR;
   cfg.tiltXTrim = TILT_X_TRIM; cfg.tiltYTrim = TILT_Y_TRIM;
-  cfg.servoPerGimbal = SERVO_PER_GIMBAL;
+  cfg.servoPerGimbal = cfg.servoPerGimbalY = SERVO_PER_GIMBAL;
   cfg.swapPins = 0;
   cfg.up = UP_AXIS; cfg.rot = SENSOR_ROT;
 }
@@ -130,13 +167,16 @@ bool cfgValid(const Config &c) {
          c.xCenter >= 45 && c.xCenter <= 135 && c.yCenter >= 45 && c.yCenter <= 135 &&
          (c.xDir == 1 || c.xDir == -1) && (c.yDir == 1 || c.yDir == -1) &&
          fabs(c.tiltXTrim) <= 45 && fabs(c.tiltYTrim) <= 45 &&
-         c.servoPerGimbal >= 0.2 && c.servoPerGimbal <= 8 && c.swapPins <= 1 &&
+         c.servoPerGimbal >= 0.2 && c.servoPerGimbal <= 8 &&
+         c.servoPerGimbalY >= 0.2 && c.servoPerGimbalY <= 8 && c.swapPins <= 1 &&
          c.up != 0 && abs(c.up) <= 3 && c.rot <= 3;
 }
 
 void loadConfig() {
   Config c;
   EEPROM.get(0, c);
+  // An older save has the same fields minus servoPerGimbalY: keep it and use the X ratio for Y until the next SAVE
+  if (c.magic == CFG_MAGIC_V13) { c.magic = CFG_MAGIC; c.servoPerGimbalY = c.servoPerGimbal; }
   if (cfgValid(c)) { cfg = c; cfgSaved = true; }
   else { loadDefaults(); cfgSaved = false; }
   cfgDirty = false;
@@ -160,7 +200,8 @@ void printConfig() {
   Serial.print(cfg.swapPins); Serial.print(',');
   Serial.print(cfgDirty ? "UNSAVED" : cfgSaved ? "SAVED" : "DEFAULT"); Serial.print(',');
   Serial.print(cfg.up); Serial.print(',');
-  Serial.println(cfg.rot);
+  Serial.print(cfg.rot); Serial.print(',');
+  Serial.println(cfg.servoPerGimbalY, 2);
 }
 
 // Servo pulse for an angle in degrees (fractional degrees are kept: ~10 µs per degree)
@@ -194,6 +235,18 @@ char sweepMode = 0;                       // 'C' circle / 'K' corners while a SW
 unsigned long sweepStart = 0;
 const unsigned long SWEEP_TURN_MS = 1500, SWEEP_RAMP_MS = 300;   // circle: 2 turns, radius eased in and out
 const unsigned long SWEEP_CORNER_MS = 350;                       // corners: 8 moves, held this long each
+bool gimOn = false;                       // GIM: holding a commanded gimbal angle (laser test)
+bool gimReported = true;                  // GIM,<x>,<y> already sent for the current target
+float gimTX = 0, gimTY = 0;               // target gimbal angles (deg)
+float gimX = 0, gimY = 0;                 // gimbal angles now on the servos (deg), slewed toward the target
+unsigned long gimLastMs = 0;
+bool motorArmed = false;                  // throttle test: ARM received and no cut since
+float thrTarget = 0, thrNow = 0;          // throttle (0..1): commanded, and what the ESC gets after the ramp
+unsigned long lastRxMs = 0;               // last complete serial line (motor heartbeat)
+unsigned long thrLastMs = 0, thrReportMs = 0;
+uint8_t tiltHits = 0;                     // consecutive over-tilt readings while armed
+bool escCalHigh = false;                  // ESCCAL HIGH: sending ESC_MAX_US for the ESC's range calibration
+unsigned long escCalStart = 0;
 
 // ---------- Sensor frame -> rocket frame ----------
 // up = ±(axis index + 1); the other two sensor axes, in right-handed order, become rocket X0/Y0,
@@ -259,8 +312,8 @@ void gimbalStep(float angle, float rate, float &g, float &integ, float dt) {
   }
 }
 
-float servoDeg(float g, int dir, int center) {
-  float a = center + dir * g * RAD_TO_DEG * cfg.servoPerGimbal;
+float servoDeg(float g, int dir, int center, float spg) {
+  float a = center + dir * g * RAD_TO_DEG * spg;
   return constrain(a, center - SERVO_RANGE, center + SERVO_RANGE);   // safe servo limits
 }
 
@@ -276,9 +329,65 @@ void checkAbort() {
   else if (millis() - uprightSince >= REARM_MS) { aborted = false; uprightSince = 0; Serial.println("ABORT,CLEAR"); }
 }
 
+// ---------- Motor (throttle test) ----------
+int escUs(float t) { return ESC_MIN_US + (int)(constrain(t, 0.0f, THROTTLE_CAP) * (ESC_MAX_US - ESC_MIN_US) + 0.5); }
+
+void printThr() {
+  Serial.print("THR,"); Serial.print(motorArmed ? "ARMED" : "SAFE"); Serial.print(',');
+  Serial.print(thrTarget * 100, 1); Serial.print(',');
+  Serial.print(thrNow * 100, 1); Serial.print(',');
+  Serial.println(escUs(thrNow));
+}
+
+void motorCut(const char *why) {
+  bool was = motorArmed || thrNow > 0;
+  motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+  esc.writeMicroseconds(ESC_MIN_US);
+  if (!was) return;
+  Serial.print("THR,CUT,"); Serial.println(why);
+  printThr();
+}
+
+void escCalEnd(const char *why) {
+  if (!escCalHigh) return;
+  escCalHigh = false;
+  esc.writeMicroseconds(ESC_MIN_US);
+  Serial.print("ESCCAL,"); Serial.println(why);
+}
+
+// Every loop, in both modes: watchdog, ramp, ESC pulse, status line
+void motorUpdate() {
+  unsigned long now = millis();
+  if (escCalHigh) {
+    if (now - lastRxMs > THR_LINK_MS) escCalEnd("LINK");
+    else if (now - escCalStart > ESCCAL_MAX_MS) escCalEnd("TIMEOUT");
+    else { esc.writeMicroseconds(ESC_MAX_US); return; }
+  }
+  if (motorArmed && now - lastRxMs > THR_LINK_MS) motorCut("LINK");
+  float dt = (now - thrLastMs) * 1e-3;
+  thrLastMs = now;
+  if (!motorArmed) thrTarget = 0;
+  if (thrTarget <= thrNow) thrNow = thrTarget;
+  else thrNow = min(thrTarget, thrNow + THR_RAMP_UP * dt);
+  esc.writeMicroseconds(escUs(thrNow));
+  if (motorArmed && now - thrReportMs >= THR_REPORT_MS) { thrReportMs = now; printThr(); }
+}
+
 // ---------- Serial commands ----------
 char cmdBuf[40];
 byte cmdLen = 0;
+
+void endGim() { gimOn = false; gimX = gimY = gimTX = gimTY = 0; gimReported = true; }
+
+// Strict number: the whole token must parse
+bool parseNum(const char *s, float &out) {
+  if (!s) return false;
+  char *end;
+  double v = strtod(s, &end);
+  if (end == s || *end != 0 || isnan(v) || isinf(v)) return false;
+  out = v;
+  return true;
+}
 
 void endSweep() {
   if (!sweepMode) return;
@@ -293,13 +402,16 @@ void runCommand(char *line) {
   char *arg1 = strtok(NULL, " ");
   char *arg2 = strtok(NULL, " ");
 
+  if (!strcmp(cmd, "HB")) return;   // heartbeat: receiving it was enough
   if (!strcmp(cmd, "CAL")) {
-    calMode = true; pulseAxis = 0; endSweep();
+    motorCut("MODE"); escCalEnd("MODE");
+    calMode = true; pulseAxis = 0; endSweep(); endGim();
     xServo.writeMicroseconds(servoUs(cfg.xCenter)); yServo.writeMicroseconds(servoUs(cfg.yCenter));
     Serial.println("CAL,ON");
     printConfig();
   } else if (!strcmp(cmd, "RUN")) {
-    calMode = false; pulseAxis = 0; endSweep();
+    motorCut("MODE"); escCalEnd("MODE");
+    calMode = false; pulseAxis = 0; endSweep(); endGim();
     seedAttitude();
     lastLoop = micros();
     Serial.println("CAL,OFF");
@@ -313,7 +425,9 @@ void runCommand(char *line) {
     else if (!strcmp(arg1, "YD"))   cfg.yDir = v < 0 ? -1 : 1;
     else if (!strcmp(arg1, "TX"))   cfg.tiltXTrim = constrain(v, -45, 45);
     else if (!strcmp(arg1, "TY"))   cfg.tiltYTrim = constrain(v, -45, 45);
-    else if (!strcmp(arg1, "SPG"))  cfg.servoPerGimbal = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPG"))  cfg.servoPerGimbal = cfg.servoPerGimbalY = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPGX")) cfg.servoPerGimbal = constrain(v, 0.2, 8);
+    else if (!strcmp(arg1, "SPGY")) cfg.servoPerGimbalY = constrain(v, 0.2, 8);
     else if (!strcmp(arg1, "SWAP")) { cfg.swapPins = v != 0; attachServos(); }
     else if (!strcmp(arg1, "UP")) {
       int u = (int)round(v);
@@ -355,7 +469,7 @@ void runCommand(char *line) {
   } else if (!strcmp(cmd, "PULSE") && arg1) {
     if (!calMode) { Serial.println("ERR,PULSE needs CAL"); return; }
     if (arg1[0] != 'X' && arg1[0] != 'Y') { Serial.println("ERR,PULSE X or Y"); return; }
-    endSweep();
+    endSweep(); endGim();
     pulseAxis = arg1[0];
     pulseDeg = arg2 ? constrain(atoi(arg2), 3, 30) : 15;
     pulseEnd = millis() + 1200;
@@ -363,9 +477,45 @@ void runCommand(char *line) {
     if (!calMode) { Serial.println("ERR,SWEEP needs CAL"); return; }
     if (!strcmp(arg1, "OFF")) { endSweep(); return; }
     if (strcmp(arg1, "CIRCLE") && strcmp(arg1, "CORNERS")) { Serial.println("ERR,SWEEP CIRCLE, CORNERS or OFF"); return; }
-    pulseAxis = 0;
+    pulseAxis = 0; endGim();
     sweepMode = arg1[1] == 'I' ? 'C' : 'K';
     sweepStart = millis();
+  } else if (!strcmp(cmd, "GIM") && arg1) {
+    if (!calMode) { Serial.println("ERR,GIM needs CAL"); return; }
+    float x = 0, y = 0;   // GIM OFF = slew back to centre (same as GIM 0 0)
+    if (strcmp(arg1, "OFF") && (!parseNum(arg1, x) || !parseNum(arg2, y))) { Serial.println("ERR,GIM <x> <y> in gimbal degrees"); return; }
+    const float lim = GMAX * RAD_TO_DEG;
+    pulseAxis = 0; endSweep();
+    if (!gimOn) { gimOn = true; gimX = gimY = 0; gimLastMs = millis(); }   // CAL holds the servos at centre
+    gimTX = constrain(x, -lim, lim); gimTY = constrain(y, -lim, lim);
+    gimReported = false;
+  } else if (!strcmp(cmd, "ARM")) {
+    if (!calMode) { Serial.println("ERR,ARM needs CAL"); return; }
+    if (escCalHigh) { escCalEnd("MODE"); Serial.println("ERR,ARM during ESCCAL"); return; }
+    if (!motorArmed) { motorArmed = true; thrTarget = thrNow = 0; tiltHits = 0; }
+    thrReportMs = millis();
+    printThr();
+  } else if (!strcmp(cmd, "THR") && arg1) {
+    float v;
+    if (!motorArmed) { Serial.println("ERR,THR needs ARM"); return; }
+    if (!parseNum(arg1, v) || v < 0) { Serial.println("ERR,THR <percent>"); return; }
+    float t = constrain(v / 100.0f, 0.0f, THROTTLE_CAP);
+    if (t != thrTarget) { thrTarget = t; printThr(); }
+  } else if (!strcmp(cmd, "ESCCAL") && arg1) {
+    if (!strcmp(arg1, "LOW") || !strcmp(arg1, "OFF")) {
+      escCalHigh = false; esc.writeMicroseconds(ESC_MIN_US);
+      Serial.println("ESCCAL,LOW");
+    } else if (!strcmp(arg1, "HIGH")) {
+      if (!calMode) { Serial.println("ERR,ESCCAL needs CAL"); return; }
+      if (motorArmed || thrNow > 0) { Serial.println("ERR,ESCCAL needs DISARM"); return; }
+      escCalHigh = true; escCalStart = millis();
+      esc.writeMicroseconds(ESC_MAX_US);
+      Serial.println("ESCCAL,HIGH");
+    } else Serial.println("ERR,ESCCAL HIGH or LOW");
+  } else if (!strcmp(cmd, "DISARM")) {
+    motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+    esc.writeMicroseconds(ESC_MIN_US);
+    printThr();
   } else if (!strcmp(cmd, "SAVE")) {
     saveConfig();
     printConfig();
@@ -388,7 +538,7 @@ void pollSerial() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
-      if (cmdLen) { cmdBuf[cmdLen] = 0; runCommand(cmdBuf); cmdLen = 0; }
+      if (cmdLen) { cmdBuf[cmdLen] = 0; lastRxMs = millis(); runCommand(cmdBuf); cmdLen = 0; }
     } else if (cmdLen < sizeof(cmdBuf) - 1) {
       cmdBuf[cmdLen++] = c;
     }
@@ -404,7 +554,8 @@ void calLoop() {
   int ya = cfg.yCenter + (pulseAxis == 'Y' ? cfg.yDir * pulseDeg : 0);
   if (sweepMode) {
     // Both axes move together, each limited to +-GMAX like the controller, whatever the linkage ratio
-    const float amp = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbal, (float)SERVO_RANGE);
+    const float ampX = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbal, (float)SERVO_RANGE);
+    const float ampY = min(GMAX * RAD_TO_DEG * cfg.servoPerGimbalY, (float)SERVO_RANGE);
     float ux = 0, uy = 0;
     unsigned long t = millis() - sweepStart;
     if (sweepMode == 'C') {
@@ -420,26 +571,56 @@ void calLoop() {
       if (i < 8) { ux = CORNERS[i % 4][0]; uy = CORNERS[i % 4][1]; }
       else endSweep();
     }
-    xa = cfg.xCenter + (int)round(cfg.xDir * amp * ux);
-    ya = cfg.yCenter + (int)round(cfg.yDir * amp * uy);
+    xa = cfg.xCenter + (int)round(cfg.xDir * ampX * ux);
+    ya = cfg.yCenter + (int)round(cfg.yDir * ampY * uy);
   }
-  xServo.writeMicroseconds(servoUs(xa));
-  yServo.writeMicroseconds(servoUs(ya));
+  float xs = xa, ys = ya;
+  if (gimOn) {
+    // Slew toward the target at GRATE, then convert exactly as the flight loop does (fractional degrees kept)
+    unsigned long now = millis();
+    float step = GRATE * RAD_TO_DEG * (now - gimLastMs) * 1e-3;
+    gimLastMs = now;
+    gimX += constrain(gimTX - gimX, -step, step);
+    gimY += constrain(gimTY - gimY, -step, step);
+    if (fabs(gimTX - gimX) < 1e-3) gimX = gimTX;
+    if (fabs(gimTY - gimY) < 1e-3) gimY = gimTY;
+    xs = servoDeg(gimX * DEG_TO_RAD, cfg.xDir, cfg.xCenter, cfg.servoPerGimbal);
+    ys = servoDeg(gimY * DEG_TO_RAD, cfg.yDir, cfg.yCenter, cfg.servoPerGimbalY);
+    xa = (int)round(xs); ya = (int)round(ys);
+    if (!gimReported && gimX == gimTX && gimY == gimTY) {
+      gimReported = true;
+      Serial.print("GIM,"); Serial.print(gimX, 2); Serial.print(','); Serial.println(gimY, 2);
+    }
+  }
+  xServo.writeMicroseconds(servoUs(xs));
+  yServo.writeMicroseconds(servoUs(ys));
 
-  if (millis() - lastTelemetry >= TELEMETRY_MS) {
+  if (millis() - lastTelemetry >= CAL_TELEMETRY_MS) {
     lastTelemetry = millis();
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     float b[3]; bodyAccel(a, b);
+    float w[3]; toBody(g.gyro.x - biasX, g.gyro.y - biasY, g.gyro.z - biasZ, w);   // body rates, as in the flight loop
+    // Throttle test: cut the motor if the rocket leans past the abort angle (3 readings in a row, so one
+    // vibration spike doesn't trip it)
+    if (motorArmed) {
+      if (max(fabs(accelTiltX(b)), fabs(accelTiltY(b))) > ABORT_TILT) { if (++tiltHits >= 3) motorCut("TILT"); }
+      else tiltHits = 0;
+    }
     Serial.print("CAL,");
     Serial.print(xa); Serial.print(',');
     Serial.print(ya); Serial.print(',');
     Serial.print(tiltFromX(b) * RAD_TO_DEG, 2); Serial.print(',');
-    Serial.println(tiltFromY(b) * RAD_TO_DEG, 2);
+    Serial.print(tiltFromY(b) * RAD_TO_DEG, 2); Serial.print(',');
+    Serial.print(w[1] * RAD_TO_DEG, 1); Serial.print(',');      // rateX: lean toward X (as in the flight loop)
+    Serial.println(-w[0] * RAD_TO_DEG, 1);                      // rateY
   }
 }
 
 void setup() {
+  // ESC first: it must see zero throttle from power-up, before anything slow (serial wait, gyro calibration)
+  esc.attach(ESC_PIN, ESC_MIN_US, ESC_MAX_US);
+  esc.writeMicroseconds(ESC_MIN_US);
   Serial.begin(115200);
   while (!Serial) {
     delay(10);
@@ -473,6 +654,7 @@ void setup() {
 
 void loop() {
   pollSerial();
+  motorUpdate();
   if (calMode) { calLoop(); return; }
 
   unsigned long now = micros();
@@ -498,8 +680,8 @@ void loop() {
   gimbalStep(tiltX, rateX, gx, ix, dt);
   gimbalStep(tiltY, rateY, gy, iy, dt);
 
-  float xDeg = servoDeg(gx, cfg.xDir, cfg.xCenter);
-  float yDeg = servoDeg(gy, cfg.yDir, cfg.yCenter);
+  float xDeg = servoDeg(gx, cfg.xDir, cfg.xCenter, cfg.servoPerGimbal);
+  float yDeg = servoDeg(gy, cfg.yDir, cfg.yCenter, cfg.servoPerGimbalY);
 
   // Move the servos
   xServo.writeMicroseconds(servoUs(xDeg));

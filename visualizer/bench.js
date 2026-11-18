@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { initCalib } from './calib.js';
+import { initLaser } from './laser.js';
+import { initThrottle } from './throttle.js';
+import { initVector } from './vector.js';
+import { initSysCheck } from './syscheck.js';
 import { createDemoSim } from './demo-sim.js';
 
 const $ = id => document.getElementById(id);
@@ -246,7 +250,7 @@ export function initBench() {
   const target = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
   const shown  = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
   const zero   = { roll: 0, pitch: 0, yaw: 0, tiltX: 0, tiltY: 0 };
-  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4 };
+  const NO_CFG = { xd: 1, yd: 1, tx: 0, ty: 0, spg: 4, spgy: 4 };
   let rig = { ...NO_CFG };   // from the Nano's CFG line: servo direction, level trims, servo degrees per gimbal degree
   const history = []; // {t, tiltX, tiltY}
   const peak   = { pitch: 0, yaw: 0 }; // largest-magnitude value since connect / zero
@@ -264,18 +268,22 @@ export function initBench() {
   function handleLine(line) {
     if (!line) return;
     lineCount++;
+    document.dispatchEvent(new CustomEvent('tvc:line', { detail: line }));   // the Tests tab's strip and charts
     const fw = line.match(/firmware v(\d+\.\d+\.\d+)/i);
     if (fw) fwVersion = fw[1];
     if (line === 'FREE,ON' || line === 'FREE,OFF') { logLine(line, 'msg'); setFree(line === 'FREE,ON'); return; }   // firmware v1.5.0+
     // Calibration traffic (firmware v1.2.0+): CFG,… / CAL,ON|OFF / ERR,… and, in calibration, CAL,xServo,yServo,tiltX,tiltY
-    if (/^(CAL|CFG|ERR|ABORT|SWEEP),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort; SWEEP,DONE: v1.7.0+
+    if (/^(CAL|CFG|ERR|ABORT|SWEEP|GIM|THR|ESCCAL),/.test(line)) {   // ABORT,TILT / ABORT,CLEAR: firmware v1.3.0+ tilt abort; SWEEP,DONE: v1.7.0+; GIM,x,y: v1.8.0+ (laser test); THR,…: v1.9.0+ (throttle test); ESCCAL,…: v1.10.0+
       const cal = line.match(/^CAL,(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+)/);
       logLine(line, cal ? undefined : 'msg');
       if (line.startsWith('CFG,')) {
         const p = line.split(',').map(Number);
-        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7] };
+        rig = { xd: p[3], yd: p[4], tx: p[5], ty: p[6], spg: p[7], spgy: p.length >= 13 ? p[12] : p[7] };   // spg = X servo; Y separate from v1.11.0
       }
       calib.handle(line);
+      laser.handle(line);
+      throttle.handle(line);
+      vector.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
       if (cal) {
         const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
@@ -349,22 +357,29 @@ export function initBench() {
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
     rig = { ...NO_CFG };
     setFree(false); $('freeBtn').disabled = !port;
-    calib.onLink();
+    calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
+  // quiet = not shown in the serial log (the throttle test's heartbeat).
   const enc = new TextEncoder();
   let writeChain = Promise.resolve();
-  function send(cmd) {
+  function send(cmd, quiet) {
     if (!port?.writable) return;
-    logLine('› ' + cmd, 'tx');
+    if (!quiet) logLine('› ' + cmd, 'tx');
     writeChain = writeChain.then(async () => {
       const w = port.writable.getWriter();
       try { await w.write(enc.encode(cmd + '\n')); } finally { w.releaseLock(); }
     }).catch(e => logLine('Send failed: ' + e.message, 'msg'));
   }
-  const calib = initCalib({ send, link: () => ({ port: !!port, demo: !!demoTimer, fw: fwVersion }) });
+  const linkInfo = () => ({ port: !!port, demo: !!demoTimer, fw: fwVersion });
+  const calib = initCalib({ send, link: linkInfo });
+  const laser = initLaser({ send, link: linkInfo, calib });
+  const throttle = initThrottle({ send, link: linkInfo, calib, laser });
+  const vector = initVector({ send, link: linkInfo });
+  const syscheck = initSysCheck({ send, link: linkInfo });   // listens to 'tvc:line' itself
+  // The tests all use the Nano's CAL mode; tests.js makes sure only one is open at a time
   const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
 
   async function connect() {
@@ -447,9 +462,9 @@ export function initBench() {
         if (gust) logLine(`Gust: pushed toward ${gust.dir}°`, 'msg');
       }
       const s = sim.read();
-      const servo = g => 90 + Math.round(g * rig.spg);
+      const servo = (g, spg) => 90 + Math.round(g * spg);
       handleLine(servoMode.checked
-        ? `0,${servo(s.gimbalX)},${servo(s.gimbalY)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
+        ? `0,${servo(s.gimbalX, rig.spg)},${servo(s.gimbalY, rig.spgy)},${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`
         : `0,${s.tiltX.toFixed(1)},${s.tiltY.toFixed(1)}`);
     }, 50);
   }
@@ -477,7 +492,7 @@ export function initBench() {
     ray.setFromCamera(_ndc, camera);
   }
   function rocketHit(e) { aimRay(e); return ray.intersectObjects(rocketMeshes, false)[0] || null; }
-  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on'); }
+  function canDrag() { return !!demoSim && !$('calBtn').classList.contains('on') && !$('lzBtn').classList.contains('on') && !$('thBtn').classList.contains('on'); }
 
   view.addEventListener('pointerdown', e => {   // capture phase: decides before OrbitControls sees the press
     if (drag || !canDrag() || !e.isPrimary || e.button !== 0) return;
@@ -572,10 +587,11 @@ export function initBench() {
     rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
     // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
     const servoData = servoMode.checked;
-    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spg : 0;
+    const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spgy : 0;
     tvc.rotation.set(deg(gx), 0, deg(-gy));
-    // No motor is wired yet, so on the real rig the plume and arrow stay dim: they show the command, not real thrust
-    updateThrust(linkStart !== null && lastLineT !== null, gx, gy, demoTimer ? 1 : 0.35);
+    // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
+    const thr = throttle.level() ?? vector.level() ?? syscheck.level();
+    updateThrust(linkStart !== null && lastLineT !== null && thr !== 0, gx, gy, demoTimer ? 1 : thr ?? 0.35);
     controls.update();
     fenceTarget();
     // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
@@ -595,7 +611,8 @@ export function initBench() {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
     $('viewNote').textContent = !hasData ? '' : demoTimer
       ? 'Drag the rocket and let go. Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
-      : 'No motor yet: plume and arrow show the commanded thrust.';
+      : throttle.isOpen() || vector.isOpen() || syscheck.isOpen() ? 'Motor test: the plume shows the real throttle.'
+      : 'Motor off: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
     $('yawVal').textContent = f1(target.yaw);
@@ -658,4 +675,6 @@ export function initBench() {
     $('gdTrail').setAttribute('points', gTrail.join(' '));
   }
   requestAnimationFrame(animate);
+
+  return { calib, laser, throttle, vector, syscheck, send, link: linkInfo };
 }
