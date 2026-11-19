@@ -36,18 +36,22 @@ export function initBench() {
   const GRID_HALF = 4;
   function setZoomLimits() {
     controls.minDistance = 1.2;
-    controls.maxDistance = Math.max(11, fitDistance() * 1.5);   // tall, narrow windows need more room to fit the rocket
+    controls.maxDistance = Math.max(11, fitDistance() * viewScale() * 1.5);   // tall, narrow windows need more room to fit the rocket
   }
   const _tClamp = new THREE.Vector3();
   function fenceTarget() {
     _tClamp.set(THREE.MathUtils.clamp(controls.target.x, -GRID_HALF, GRID_HALF),
-                THREE.MathUtils.clamp(controls.target.y, 0, PIVOT_Y * 2),
+                THREE.MathUtils.clamp(controls.target.y, rigScene ? FLOOR_RIG : 0, PIVOT_Y * 2),
                 THREE.MathUtils.clamp(controls.target.z, -GRID_HALF, GRID_HALF)).sub(controls.target);
     if (_tClamp.lengthSq()) { controls.target.add(_tClamp); camera.position.add(_tClamp); }
   }
+  // The desk-rig scene also shows the table, so it frames lower and further out
+  const viewScale = () => (rigScene ? 1.75 : 1);
   function resetView() {
-    controls.target.set(0, PIVOT_Y + 0.25, 0);   // middle of the rocket: more of it is above the CG
-    camera.position.copy(controls.target).addScaledVector(VIEW_DIR, fitDistance());
+    if (rigScene) controls.target.set(0, PIVOT_Y - 0.7, -0.9);
+    else controls.target.set(0, PIVOT_Y + 0.25, 0);   // middle of the rocket: more of it is above the CG
+    setZoomLimits();
+    camera.position.copy(controls.target).addScaledVector(VIEW_DIR, fitDistance() * viewScale());
     controls.update();
   }
 
@@ -61,60 +65,139 @@ export function initBench() {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.35 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
 
-  // Rocket built from the CAD numbers (SLDP-ST-005, in mm from the tail), scaled so 1 mm = MM scene units.
-  // Rough on purpose: no vents, window or screws.
+  // Rocket built from the CAD numbers (SLDP-ST-008, batch-002, in mm from the tail), scaled so 1 mm = MM scene units.
+  // Rough on purpose: no vents, notch, window or screws. Ogive nose with ship flaps, hot-staging band, grid fins,
+  // strakes, bay door, TVC gimbal at 37 mm with the motor tube 57 mm below it.
   const MM = 2.25 / 632;
   const RO = 39.3, RI = 38.1;                  // body outer / bore radius
-  const CG = 240;                              // desk-rig pivot
-  const GIMBAL = 57;                           // TVC gimbal point
-  const TUBE_R = 18, TUBE_OUT = 18;            // motor tube; sticks out past the tail so it can be seen (flush in the CAD)
-  const Z_C1 = 200, Z_B = 203, Z_C2 = 357, Z_D = 375, Z_NOSE = 515, Z_CONE = 530, Z_TOP = 632;
-  const FIN_ROOT = 75, FIN_TIP = 32, FIN_SPAN = 30;
+  const CG = 247;                              // desk-rig pivot (SLDP-GS-001: pivot 247 mm above the tail, on the CG)
+  const GIMBAL = 37;                           // TVC gimbal point (SLDP-TVC-002)
+  const TUBE_R = 18, TUBE_BELOW = 57, TUBE_ABOVE = 10;   // motor tube: bottom 57 below the gimbal (20 past the tail)
+  const Z_C1 = 200, Z_B = 203, Z_C2 = 357, Z_D = 375, Z_NOSE = 515, Z_CONE = 530, NOSE_L = 1.3 * 2 * RO, Z_TOP = Z_CONE + NOSE_L;
   const PIVOT_Y = 1.45; // pivot height above the floor (the rocket clears it at any tilt)
 
   // Vertical reference line through the pivot
   const refGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, PIVOT_Y - (CG + TUBE_OUT) * MM - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + (Z_TOP - CG) * MM + 0.15, 0)]);
+    new THREE.Vector3(0, PIVOT_Y - (CG + TUBE_BELOW - GIMBAL) * MM - 0.15, 0), new THREE.Vector3(0, PIVOT_Y + (Z_TOP - CG) * MM + 0.15, 0)]);
   const refLine = new THREE.Line(refGeo, new THREE.LineDashedMaterial({ color: 0x5a6070, dashSize: 0.08, gapSize: 0.06 }));
   refLine.computeLineDistances(); scene.add(refLine);
 
   // Rocket group origin = rig pivot at the CG. All parts hang off "airframe", whose origin is the tail.
+  // Rotation = the rig's gimbal chain: outer pivot (scene X = rocket +Y axis), then inner pivot (scene Z = rocket +X),
+  // then roll about the rocket's own axis. See animate().
   const rocket = new THREE.Group();
   rocket.position.y = PIVOT_Y;
-  rocket.rotation.order = 'ZXY'; // roll about own long axis first, then tilt toward X, then toward Y
+  rocket.rotation.order = 'XZY';
   scene.add(rocket);
   const airframe = new THREE.Group();
   airframe.position.y = -CG * MM;
   rocket.add(airframe);
 
-  // Rig collar + pivot pins at the CG (they move with the rocket)
+  // Generic rig collar + pivot pins at the CG (the plain scene; the desk-rig scene has the real rig instead)
   const metal = new THREE.MeshStandardMaterial({ color: 0x999fab, metalness: 0.7, roughness: 0.3 });
+  const plainRig = new THREE.Group();
+  rocket.add(plainRig);
   const collar = new THREE.Mesh(new THREE.TorusGeometry((RO + 6) * MM, 4 * MM, 12, 40), metal);
-  collar.rotation.x = Math.PI / 2; rocket.add(collar);
+  collar.rotation.x = Math.PI / 2; plainRig.add(collar);
   const pinGeo = new THREE.CylinderGeometry(5 * MM, 5 * MM, 24 * MM, 12);
   [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([x, z]) => {
     const pin = new THREE.Mesh(pinGeo, metal);
     pin.position.set(x * (RO + 18) * MM, 0, z * (RO + 18) * MM);
     pin.rotation.set(z ? Math.PI / 2 : 0, 0, x ? Math.PI / 2 : 0);
-    rocket.add(pin);
+    plainRig.add(pin);
   });
 
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdcdce6, roughness: 0.5 });
   const bandMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.5 });
   const noseMat = new THREE.MeshStandardMaterial({ color: 0xc82828, roughness: 0.45 });
   const finMat  = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5, side: THREE.DoubleSide });
+  const gridMat = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5 });
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0xb4b6c0, roughness: 0.55 });
   const bay = new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.9 });
 
-  // Body parts A, B, D with the C1 and C2 coupler bands between them, then the nose band and cone
+  // CAD angle a (0° = rocket +X, 90° = +Y) → scene direction (sin a, 0, cos a): rocket +X is scene +Z, +Y is scene +X.
+  // A child of radial(a) built along its local +X points that way.
+  const rad = d => d * Math.PI / 180;
+  function radial(a, obj) { const g = new THREE.Group(); g.rotation.y = rad(a - 90); g.add(obj); airframe.add(g); return obj; }
+  // Box in a radial frame: r0..r1 out from the axis, z0..z1 up from the tail, w wide (tangential)
+  function radialBox(a, r0, r1, z0, z1, w, mat) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry((r1 - r0) * MM, (z1 - z0) * MM, w * MM), mat);
+    m.position.set((r0 + r1) / 2 * MM, (z0 + z1) / 2 * MM, 0); m.castShadow = true;
+    return radial(a, m);
+  }
+  // Flat plate from a (r, z) outline, thickness t, in a radial plane
+  function radialPlate(a, pts, t, mat) {
+    const s = new THREE.Shape(pts.map(([r, z]) => new THREE.Vector2(r * MM, z * MM)));
+    const g = new THREE.ExtrudeGeometry(s, { depth: t * MM, bevelEnabled: false });
+    g.translate(0, 0, -t / 2 * MM);
+    const m = new THREE.Mesh(g, mat); m.castShadow = true;
+    return radial(a, m);
+  }
+
+  // Body parts A, B, D with the C1 and C2 coupler bands between them, then the nose band
   function section(z0, z1, mat) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(RO * MM, RO * MM, (z1 - z0) * MM, 40), mat);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(RO * MM, RO * MM, (z1 - z0) * MM, 48), mat);
     m.position.y = (z0 + z1) / 2 * MM; m.castShadow = true; airframe.add(m);
   }
   section(0, Z_C1, bodyMat); section(Z_C1, Z_B, bandMat); section(Z_B, Z_C2, bodyMat);
   section(Z_C2, Z_D, bandMat); section(Z_D, Z_NOSE, bodyMat); section(Z_NOSE, Z_CONE, noseMat);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(RO * MM, (Z_TOP - Z_CONE) * MM, 40), noseMat);
-  nose.position.y = (Z_CONE + Z_TOP) / 2 * MM; nose.castShadow = true; airframe.add(nose);
+
+  // Tangent-ogive nose (length 1.3 × OD) with a blunt 4 mm tip
+  {
+    const rho = (RO * RO + NOSE_L * NOSE_L) / (2 * RO), pts = [];
+    for (let i = 0; i <= 32; i++) {
+      const x = NOSE_L * i / 32, r = Math.sqrt(Math.max(rho * rho - x * x, 0)) + RO - rho;
+      if (r < 4) { pts.push(new THREE.Vector2(0, (Z_CONE + x) * MM)); break; }
+      pts.push(new THREE.Vector2(r * MM, (Z_CONE + x) * MM));
+    }
+    if (pts.at(-1).x > 0) pts.push(new THREE.Vector2(0, Z_TOP * MM));
+    const nose = new THREE.Mesh(new THREE.LatheGeometry(pts, 48), noseMat);
+    nose.castShadow = true; airframe.add(nose);
+    // Forward ship flaps at 0° and 180°, on the ogive (start 10, end 58 above its base; span 14 → 5)
+    const nr = x => Math.sqrt(Math.max(rho * rho - x * x, 0)) + RO - rho;
+    for (const a of [0, 180]) {
+      const root = Array.from({ length: 12 }, (_, i) => 10 + 48 * i / 11).map(x => [nr(x) - 0.8, Z_CONE + x]);
+      radialPlate(a, [...root, [nr(58) + 5, Z_CONE + 58], [nr(10) + 14, Z_CONE + 10 + 14]], 1.6, finMat);
+    }
+  }
+  // Aft ship flaps at 0° and 180°: from the D bottom, root 70, tip 42, span 22
+  for (const a of [0, 180]) radialPlate(a, [[RO - 0.6, Z_D], [RO + 22, Z_D], [RO + 22, Z_D + 42], [RO - 0.6, Z_D + 70]], 2, finMat);
+
+  // Hot-staging band (C2): 20 dark pockets around the 18 mm interstage ring
+  for (let k = 0; k < 20; k++) radialBox(360 * (k + 0.5) / 20, RO - 0.4, RO + 0.15, (Z_C2 + Z_D) / 2 - 6, (Z_C2 + Z_D) / 2 + 6, 4, bay);
+
+  // Grid fins at 45/135/225/315°: z 340–348, 22 wide, 18 out past a 2 mm pad; 45° diamond lattice, cells open along z
+  {
+    const z0 = 340, z1 = 348, r0 = RO + 2, r1 = RO + 20, w = 22, wall = 1;
+    for (const a of [45, 135, 225, 315]) {
+      radialBox(a, RO - 0.2, r0, z0, z1, w * 0.75, gridMat);                       // root pad
+      radialBox(a, r0, r1, z0, z1, wall, gridMat).position.z = (w - wall) / 2 * MM; // frame sides
+      radialBox(a, r0, r1, z0, z1, wall, gridMat).position.z = -(w - wall) / 2 * MM;
+      radialBox(a, r1 - wall, r1, z0, z1, w, gridMat);                              // frame tip
+      // lattice: diagonal bars clipped to the frame, as boxes along ±45° (each spans corner to corner of its cell row)
+      const cx = (r0 + r1) / 2, hx = (r1 - r0) / 2 - wall, hz = w / 2 - wall;
+      for (const sgn of [1, -1]) for (let k = -40; k <= 40; k += 5) {
+        // line: r = cx + t, tang = sgn·t + k·√2 ; clip to |r−cx| ≤ hx, |tang| ≤ hz
+        let t0 = -hx, t1 = hx;
+        const lo = (-hz - k * Math.SQRT2) * sgn, hi = (hz - k * Math.SQRT2) * sgn;
+        t0 = Math.max(t0, Math.min(lo, hi)); t1 = Math.min(t1, Math.max(lo, hi));
+        if (t1 - t0 < 1) continue;
+        const len = (t1 - t0) * Math.SQRT2, tm = (t0 + t1) / 2;
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(len * MM, (z1 - z0) * MM, wall * 0.8 * MM), gridMat);
+        bar.position.set((cx + tm) * MM, (z0 + z1) / 2 * MM, (sgn * tm + k * Math.SQRT2) * MM);
+        bar.rotation.y = -sgn * Math.PI / 4;
+        radial(a, bar);
+      }
+    }
+  }
+  // Strakes on part A at 55/145/235/325°: z 40–170, 3.5 wide, 1.5 proud, 45° ends
+  for (const a of [55, 145, 235, 325]) radialPlate(a, [[RO - 0.4, 40], [RO + 1.5, 41.9], [RO + 1.5, 168.1], [RO - 0.4, 170]], 3.5, bandMat);
+  // Avionics bay door at 90° on part B (flange 52 wide, z 243–330)
+  {
+    const w = 52 / RO, door = new THREE.Mesh(new THREE.CylinderGeometry((RO + 0.7) * MM, (RO + 0.7) * MM, 87 * MM, 12, 1, true, rad(90) - w / 2, w), doorMat);
+    door.position.y = (243 + 330) / 2 * MM; door.material.side = THREE.DoubleSide; airframe.add(door);
+  }
 
   // Open tail: the dark bore the motor tube swings in
   const tailBore = new THREE.Mesh(new THREE.CircleGeometry(RI * MM, 40), bay);
@@ -125,25 +208,95 @@ export function initBench() {
   tvc.position.y = GIMBAL * MM;
   tvc.rotation.order = 'ZXY';
   airframe.add(tvc);
-  const tubeLen = GIMBAL + TUBE_OUT;
+  const tubeLen = TUBE_BELOW + TUBE_ABOVE;
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(TUBE_R * MM, TUBE_R * MM, tubeLen * MM, 24), tubeMat);
-  tube.position.y = -tubeLen / 2 * MM; tube.castShadow = true; tvc.add(tube);
-
-  // Fins: root along the body at the tail, swept leading edge, clocked at 45/135/225/315° as in the CAD
-  const finShape = new THREE.Shape();
-  finShape.moveTo(0, 0); finShape.lineTo(FIN_SPAN * MM, 0); finShape.lineTo(FIN_SPAN * MM, FIN_TIP * MM); finShape.lineTo(0, FIN_ROOT * MM); finShape.closePath();
-  const finGeo = new THREE.ShapeGeometry(finShape);
-  for (let i = 0; i < 4; i++) {
-    const holder = new THREE.Group();
-    holder.rotation.y = Math.PI / 4 + (Math.PI / 2) * i;
-    const fin = new THREE.Mesh(finGeo, finMat);
-    fin.position.set(RO * MM, 0, 0);
-    fin.castShadow = true;
-    holder.add(fin); airframe.add(holder);
-  }
+  tube.position.y = (TUBE_ABOVE - TUBE_BELOW) / 2 * MM; tube.castShadow = true; tvc.add(tube);
 
   // Small axis gizmo at the pivot
   const axes = new THREE.AxesHelper(0.5); axes.position.y = PIVOT_Y; scene.add(axes);
+
+  // ---------- Desk-rig scene (SLDP-GS-001 Rev B): the rocket on the 2-axis rig, the rig clamped to a table ----------
+  // Rig frame as in the CAD: origin = pivot, x = rocket 0° (scene +Z), y = rocket 90° (scene +X), z up.
+  // The arm runs along −x onto the desk; the desk top is 40 mm below the pivot, its edge 220 mm from the axis.
+  const DESK_H = 40, REACH = 220, TABLE_D = 700, TABLE_W = 1200, TABLE_T = 25, TABLE_H = 740;
+  const FLOOR_RIG = PIVOT_Y - (DESK_H + TABLE_H) * MM;      // floor height in the rig scene
+  const pla = new THREE.MeshStandardMaterial({ color: 0xc9ccd3, roughness: 0.6 });
+  const plaDark = new THREE.MeshStandardMaterial({ color: 0x8e939d, roughness: 0.6 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x6d7380, metalness: 0.6, roughness: 0.4 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x5e4a3a, roughness: 0.8 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x2b2d33, metalness: 0.4, roughness: 0.6 });
+  // rig (x, y, z) mm → scene; box from rig-frame bounds
+  const rigBox = (parent, x0, x1, y0, y1, z0, z1, mat) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry((y1 - y0) * MM, (z1 - z0) * MM, (x1 - x0) * MM), mat);
+    m.position.set((y0 + y1) / 2 * MM, (z0 + z1) / 2 * MM, (x0 + x1) / 2 * MM);
+    m.castShadow = m.receiveShadow = true; parent.add(m); return m;
+  };
+  const ring = (parent, r0, r1, h, mat) => {
+    const m = new THREE.Mesh(new THREE.LatheGeometry([[r0, -h / 2], [r1, -h / 2], [r1, h / 2], [r0, h / 2], [r0, -h / 2]].map(([r, z]) => new THREE.Vector2(r * MM, z * MM)), 64), mat);
+    m.castShadow = true; parent.add(m); return m;
+  };
+  const pinX = (parent, x0, x1) => {            // pivot screw along rig x (scene Z)
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6 * MM, 1.6 * MM, Math.abs(x1 - x0) * MM, 10), steel);
+    m.rotation.x = Math.PI / 2; m.position.z = (x0 + x1) / 2 * MM; parent.add(m); return m;
+  };
+  const pinY = (parent, y0, y1) => {            // along rig y (scene X)
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6 * MM, 1.6 * MM, Math.abs(y1 - y0) * MM, 10), steel);
+    m.rotation.z = Math.PI / 2; m.position.x = (y0 + y1) / 2 * MM; parent.add(m); return m;
+  };
+  // On the rocket (moves with it): collar band z 205–225 from the tail, pivot tabs at 0/180° (rig ±x)
+  const rigOnRocket = new THREE.Group(); rocket.add(rigOnRocket);
+  {
+    const z0 = 205 - CG, z1 = 225 - CG;
+    const c = ring(rigOnRocket, RO + 0.1, RO + 3, z1 - z0, pla); c.position.y = (z0 + z1) / 2 * MM;
+    for (const s of [1, -1]) {
+      rigBox(rigOnRocket, s > 0 ? RO + 3 : -47.3, s > 0 ? 47.3 : -(RO + 3), -9, 9, z0, z1, pla);   // collar pads
+      rigBox(rigOnRocket, s > 0 ? 47.3 : -50.8, s > 0 ? 50.8 : -47.3, -8, 8, z0, 13, pla);         // pivot tabs, up to the pin
+    }
+  }
+  // Middle ring: turns about the outer pivot (rig y) with the rocket; carries the inner pivots (rig x)
+  const middle = new THREE.Group(); middle.position.y = PIVOT_Y; middle.rotation.order = 'XYZ';
+  ring(middle, 62, 68, 10, pla);
+  for (const s of [1, -1]) {
+    rigBox(middle, s > 0 ? 51.8 : -63, s > 0 ? 63 : -51.8, -8, 8, -5, 12, pla);   // inner bosses
+    rigBox(middle, -8, 8, s > 0 ? 67 : -74, s > 0 ? 74 : -67, -5, 12, pla);       // outer bosses
+  }
+  pinX(middle, -75, 75);
+  // Fixed: outer ring + arm stub + flange, arm, base, 2 C-clamps, table, floor
+  const rigFixed = new THREE.Group(); rigFixed.position.y = PIVOT_Y;
+  ring(rigFixed, 75, 83, 10, pla);
+  for (const s of [1, -1]) rigBox(rigFixed, -18, 18, s > 0 ? 75 : -83, s > 0 ? 83 : -75, -5, 12, pla);
+  pinY(rigFixed, -90, 90);
+  rigBox(rigFixed, -115, -81, -12, 12, -5, 25, pla);                 // arm stub
+  rigBox(rigFixed, -125, -115, -20, 20, -5, 30, plaDark);            // bolted flange (both halves)
+  rigBox(rigFixed, -305, -125, -12, 12, -5, 25, plaDark);            // arm
+  rigBox(rigFixed, -305, -230, -35, 35, -DESK_H, -DESK_H + 8, plaDark);   // base, with its clamp ledges
+  rigBox(rigFixed, -305, -230, -21, 21, -DESK_H + 8, -5, plaDark);
+  for (const s of [1, -1]) {                                         // C-clamps on the ledges, reaching round the desk edge
+    const y = s * 28;
+    rigBox(rigFixed, -255, -REACH + 12, y - 4, y + 4, -DESK_H + 8, -DESK_H + 14, steel);                 // top jaw
+    rigBox(rigFixed, -REACH + 4, -REACH + 12, y - 4, y + 4, -DESK_H - TABLE_T - 14, -DESK_H + 14, steel); // spine
+    rigBox(rigFixed, -255, -REACH + 12, y - 4, y + 4, -DESK_H - TABLE_T - 14, -DESK_H - TABLE_T - 8, steel); // bottom jaw
+    rigBox(rigFixed, -244, -238, y - 3, y + 3, -DESK_H - TABLE_T - 8, -DESK_H - TABLE_T, steel);       // screw pad
+  }
+  const tableTop = rigBox(rigFixed, -REACH - TABLE_D, -REACH, -TABLE_W / 2, TABLE_W / 2, -DESK_H - TABLE_T, -DESK_H, wood);
+  tableTop.castShadow = false;
+  for (const x of [-REACH - 40, -REACH - TABLE_D + 40]) for (const y of [-TABLE_W / 2 + 40, TABLE_W / 2 - 40])
+    rigBox(rigFixed, x - 20, x + 20, y - 20, y + 20, -DESK_H - TABLE_H, -DESK_H - TABLE_T, legMat);
+  scene.add(middle, rigFixed);
+  const rigMeshes = [];
+  [rigOnRocket, middle, rigFixed].forEach(g => g.traverse(o => { if (o.isMesh) rigMeshes.push(o); }));
+
+  let rigScene = false;
+  try { rigScene = localStorage.getItem('tvc-bench-scene') === 'rig'; } catch {}
+  function applyScene() {
+    plainRig.visible = !rigScene;
+    rigOnRocket.visible = middle.visible = rigFixed.visible = rigScene;
+    const fy = rigScene ? FLOOR_RIG : 0;
+    grid.position.y = fy; floor.position.y = fy;
+    $('sceneBtn')?.classList.toggle('on', rigScene);
+    $('sceneBtn')?.setAttribute('aria-pressed', String(rigScene));
+    resetView();
+  }
 
   // Outline view: black fills + white silhouettes (OutlineEffect's inverted hull) + white fin edges
   const outlineFx = new OutlineEffect(renderer, { defaultThickness: 0.005, defaultColor: [1, 1, 1], defaultAlpha: 1 });
@@ -152,19 +305,20 @@ export function initBench() {
   const fillMat = new THREE.MeshBasicMaterial({ color: 0x050506 });
   const finFillMat = new THREE.MeshBasicMaterial({ color: 0x050506, side: THREE.DoubleSide });
   const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff });
-  finFillMat.userData.outlineParameters = edgeMat.userData.outlineParameters = noOutline; // flat fins: edges only
-  const finEdgeGeo = new THREE.EdgesGeometry(finGeo);
+  finFillMat.userData.outlineParameters = edgeMat.userData.outlineParameters = noOutline; // thin plates: edges only
   const rocketMeshes = [];
-  rocket.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
-  rocketMeshes.forEach(m => {
+  airframe.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
+  plainRig.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
+  [...rocketMeshes, ...rigMeshes].forEach(m => {
     m.userData.solidMat = m.material;
-    m.userData.lineMat = m.material === finMat ? finFillMat : fillMat;
-    if (m.material === finMat) { const e = new THREE.LineSegments(finEdgeGeo, edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
+    const plate = m.material === finMat;
+    m.userData.lineMat = plate ? finFillMat : fillMat;
+    if (plate) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
   });
   let outlineOn = false;
   function setOutline(on) {
     outlineOn = on;
-    rocketMeshes.forEach(m => {
+    [...rocketMeshes, ...rigMeshes].forEach(m => {
       m.material = on ? m.userData.lineMat : m.userData.solidMat;
       if (m.userData.edges) m.userData.edges.visible = on;
     });
@@ -194,7 +348,7 @@ export function initBench() {
   const plumeInner = new THREE.Mesh(plumeGeo, plumeMaterial(0xd8ecff, 1));   // the EDF blows air, so cool colours, not fire
   plumeInner.scale.set(0.5, 0.6, 0.5);
   plume.add(plumeOuter, plumeInner);
-  plume.position.y = -tubeLen * MM; plume.visible = false;
+  plume.position.y = -TUBE_BELOW * MM; plume.visible = false;
   tvc.add(plume);
 
   const ARROW_AT_LIMIT = 0.45;   // scene units at the full ±8°
@@ -238,7 +392,7 @@ export function initBench() {
     if (firstFit) { resetView(); firstFit = false; return; }
     // Keep the user's viewing angle but re-zoom so the rocket stays in frame
     const dir = camera.position.clone().sub(controls.target).normalize();
-    camera.position.copy(controls.target).addScaledVector(dir, fitDistance());
+    camera.position.copy(controls.target).addScaledVector(dir, fitDistance() * viewScale());
     controls.update();
   }
   new ResizeObserver(resize).observe(view);
@@ -263,6 +417,12 @@ export function initBench() {
 
   const servoMode = $('servoMode'), smooth = $('smooth');
   $('outline').onchange = e => setOutline(e.target.checked);
+  $('sceneBtn').onclick = () => {
+    rigScene = !rigScene;
+    try { localStorage.setItem('tvc-bench-scene', rigScene ? 'rig' : 'plain'); } catch {}
+    applyScene();
+  };
+  applyScene();
   $('baud').onchange = () => { ['baudVal', 'lkBaud', 'ftBaud'].forEach(id => { $(id).textContent = $('baud').value; }); };
 
   function handleLine(line) {
@@ -584,7 +744,13 @@ export function initBench() {
     const k = smooth.checked ? 0.18 : 1;
     for (const a of Object.keys(shown)) shown[a] += (target[a] - shown[a]) * k;
 
-    rocket.rotation.set(deg(shown.tiltX), deg(shown.roll), deg(-shown.tiltY));
+    // Rocket axis from the tilts: (cos tiltX · sin tiltY, cos tiltX · cos tiltY, sin tiltX) in scene axes. Set it through the
+    // rig's gimbal chain: outer pivot (scene X) by a, then inner pivot (scene Z) by b; the middle ring turns by a.
+    const tX = deg(shown.tiltX), tY = deg(shown.tiltY);
+    const dx = Math.cos(tX) * Math.sin(tY), dy = Math.cos(tX) * Math.cos(tY), dz = Math.sin(tX);
+    const ga = Math.atan2(dz, dy), gb = Math.atan2(-dx, Math.hypot(dy, dz));
+    rocket.rotation.set(ga, deg(shown.roll), gb);
+    middle.rotation.x = ga;
     // Nozzle angle = servo deflection ÷ linkage ratio (attitude data says nothing about the servos, so the tube stays centred)
     const servoData = servoMode.checked;
     const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spgy : 0;
