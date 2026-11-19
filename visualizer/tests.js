@@ -190,6 +190,8 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       refs: [{ y: 1 }], empty: 'Run the test' }),
     vcBreak: new Chart(tile('vc'), { kind: 'xy', title: 'Starts moving vs gimbal', sub: 'Dashed: same torque at every angle', xLabel: 'Gimbal', xUnit: '°', unit: '%', xMin: 0, xMax: 9, yMin: 0,
       series: [{ id: 'm', label: 'Each repeat', color: X, line: false, marker: true }, { id: 's', label: 'Same torque', color: N, dash: true }], empty: 'Run the test' }),
+    vcTorque: new Chart(tile('vc'), { kind: 'xy', title: 'Torque to move it vs gimbal', sub: 'Each repeat · dashed: median · should be level', xLabel: 'Gimbal', xUnit: '°', unit: 'g·mm', xMin: 0, xMax: 9, yMin: 0,
+      series: [{ id: 'm', label: 'Each repeat', color: Y, line: false, marker: true }, { id: 'med', label: 'Median', color: N, dash: true }], empty: 'Run the test' }),
   };
 
   for (const [k, c] of Object.entries(C)) c.tile.dataset.chart = k;   // for per-test ordering in CSS
@@ -255,6 +257,14 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       const model = vc.thrustModel();
       const curve = ref ? Array.from({ length: 33 }, (_, i) => 1 + i * 0.25).map(d => [d, vc.pctFor(model, model.g(ref[1]) * Math.sin(ref[0] * Math.PI / 180) / Math.sin(d * Math.PI / 180))]).filter(p => p[1] != null && p[1] <= 85) : [];
       C.vcBreak.set({ m: pts, s: curve });
+      // Torque about the pivot at each "starts moving" point: thrust × sin(gimbal) × lever
+      const tq = pts.map(([d, pct]) => [d, model.g(pct) * Math.sin(d * Math.PI / 180) * vc.LEVER_MM]);
+      const sorted = tq.map(p => p[1]).sort((x, y) => x - y), n = sorted.length;
+      const med = n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : null;
+      C.vcTorque.set({ m: tq, med: med != null ? [[0.5, med], [8.5, med]] : [] });
+      const sub = `Each repeat · dashed: median · thrust from ${model.src === 'scale' ? 'scale' : 'spec curve'}`;
+      const el = C.vcTorque.tile.querySelector('.t-tile-h span');
+      if (el.textContent !== sub) el.textContent = sub;
     }
   }
 
