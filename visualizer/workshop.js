@@ -4,8 +4,8 @@
 // tilt traces and the gimbal dial, the kill switch and the beacon light up when a motor test is armed or running.
 // Test props show for the last test opened: the laser beam and target sheet (Laser), coins on the rocket (Thrust
 // vector), the kitchen scale with the thrust (Throttle). Cables run from the rocket to the laptop and the supply.
-// The room: concrete floor, back and side walls, a pegboard of tools, steel shelving with spares, filament and a 3D
-// printer, a fire extinguisher, hazard tape round the exhaust zone, and a hanging shop light (warm).
+// The room: a clean, modern makerspace (white walls with a violet accent band, polished floor, white pegboard, LED
+// panels, a counter with enclosed 3D printers, a whiteboard, an extinguisher, a yellow safety line round the exhaust).
 import * as THREE from 'three';
 
 export function createWorkshop({ MM, PIVOT_Y, DESK_H, TABLE_H, airframe, tvc, TUBE_BELOW, RO }) {
@@ -161,116 +161,102 @@ export function createWorkshop({ MM, PIVOT_Y, DESK_H, TABLE_H, airframe, tvc, TU
   box(scl, 170, 3, 170, 0, 21.5, 0, alu);
   const sclScreen = screen(scl, 70, 22, 0, 10, 90.6, 160, 50);
 
-  // ---------- The room: concrete floor, two walls, pegboard, shelving, a hanging shop light, hazard tape ----------
-  // Rig frame: the table's back edge is at x = −920; the back wall stands behind it, the side wall at y = −ROOM_Y.
+  // ---------- The room: a modern makerspace ----------
+  // Light polished floor, white walls with a violet accent band, white pegboard, LED ceiling panels, a white counter
+  // with enclosed 3D printers along the side wall, a whiteboard, a wall-mounted extinguisher and a yellow floor line
+  // round the exhaust zone. Rig frame: the table's back edge is at x = −920, the back wall behind it, side wall at y = −ROOM_Y.
   const WALL_X = -1050, ROOM_Y = 1500, CEIL = 1750, FLOOR_X1 = 1400;
+  const VIOLET = 0x57068c;
   function canvasTex(w, h, draw, rx = 1, ry = 1) {
     const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.anisotropy = 4;
     return t;
   }
-  // Concrete: speckled grey with faint slab joints
+  // Polished concrete: pale, faint mottling, large slab joints
   const concrete = canvasTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#3a3b3e'; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 2600; i++) { const v = 44 + Math.random() * 26 | 0; g.fillStyle = `rgba(${v},${v},${v + 2},${0.35 + Math.random() * 0.4})`; g.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random() * 2, 1 + Math.random() * 2); }
-    g.strokeStyle = 'rgba(20,20,22,.7)'; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2);
-  }, (FLOOR_X1 - WALL_X) / 1000, (2 * ROOM_Y) / 1000);
-  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry((2 * ROOM_Y) * MM, (FLOOR_X1 - WALL_X) * MM), mat(0xffffff, { map: concrete, roughness: 0.9 }));
+    g.fillStyle = '#b9bbbe'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1400; i++) { const v = 170 + Math.random() * 30 | 0; g.fillStyle = `rgba(${v},${v},${v + 3},${0.25 + Math.random() * 0.3})`; g.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 4, 2 + Math.random() * 4); }
+    g.strokeStyle = 'rgba(120,122,126,.55)'; g.lineWidth = 1.5; g.strokeRect(0.75, 0.75, w - 1.5, h - 1.5);
+  }, (FLOOR_X1 - WALL_X) / 1200, (2 * ROOM_Y) / 1200);
+  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry((2 * ROOM_Y) * MM, (FLOOR_X1 - WALL_X) * MM), mat(0xffffff, { map: concrete, roughness: 0.35, metalness: 0.05 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.copy(at((WALL_X + FLOOR_X1) / 2, 0, FLOOR)); floorMesh.receiveShadow = true; root.add(floorMesh);
-  // Walls: painted block, a darker skirting band
-  const wallTex = canvasTex(256, 128, (g, w, h) => {
-    g.fillStyle = '#4a4d52'; g.fillRect(0, 0, w, h);
-    g.strokeStyle = 'rgba(30,31,34,.55)'; g.lineWidth = 2;
-    for (let r = 0; r < 4; r++) { g.beginPath(); g.moveTo(0, r * 32); g.lineTo(w, r * 32); g.stroke();
-      for (let k = 0; k < 4; k++) { const x = k * 64 + (r % 2 ? 32 : 0); g.beginPath(); g.moveTo(x, r * 32); g.lineTo(x, r * 32 + 32); g.stroke(); } }
-  }, (2 * ROOM_Y) / 1600, (CEIL - FLOOR) / 800);
-  const wallMat = mat(0xffffff, { map: wallTex, roughness: 0.95 });
+  // Walls: smooth white, a violet accent band at bench height, a pale grey skirting
+  const wallMat = mat(0xdcdfe4, { roughness: 0.9 }), accent = mat(VIOLET, { roughness: 0.7 }), skirt = mat(0xc9ccd1);
   const back = new THREE.Mesh(new THREE.PlaneGeometry(2 * ROOM_Y * MM, (CEIL - FLOOR) * MM), wallMat);
   back.position.copy(at(WALL_X, 0, (CEIL + FLOOR) / 2)); back.receiveShadow = true; root.add(back);
-  const sideTex = wallTex.clone(); sideTex.repeat.set((FLOOR_X1 - WALL_X) / 1600, (CEIL - FLOOR) / 800); sideTex.needsUpdate = true;
-  const side = new THREE.Mesh(new THREE.PlaneGeometry((FLOOR_X1 - WALL_X) * MM, (CEIL - FLOOR) * MM), mat(0xffffff, { map: sideTex, roughness: 0.95 }));
+  const side = new THREE.Mesh(new THREE.PlaneGeometry((FLOOR_X1 - WALL_X) * MM, (CEIL - FLOOR) * MM), wallMat);
   side.rotation.y = Math.PI / 2; side.position.copy(at((WALL_X + FLOOR_X1) / 2, -ROOM_Y, (CEIL + FLOOR) / 2)); side.receiveShadow = true; root.add(side);
-  const skirt = mat(0x26282c);
-  box(prop(WALL_X + 6, 0, FLOOR), 2 * ROOM_Y, 100, 12, 0, 50, 0, skirt);
-  box(prop((WALL_X + FLOOR_X1) / 2, -ROOM_Y + 6, FLOOR, 90), FLOOR_X1 - WALL_X, 100, 12, 0, 50, 0, skirt);
+  const backG = prop(WALL_X + 3, 0, FLOOR), sideG = prop((WALL_X + FLOOR_X1) / 2, -ROOM_Y + 3, FLOOR, 90);
+  box(backG, 2 * ROOM_Y, 80, 6, 0, 40, 0, skirt); box(sideG, FLOOR_X1 - WALL_X, 80, 6, 0, 40, 0, skirt);
+  box(backG, 2 * ROOM_Y, 140, 4, 0, (TOP + 520) - FLOOR + 70, 0, accent);            // accent band above the bench
+  box(sideG, FLOOR_X1 - WALL_X, 140, 4, 0, (TOP + 520) - FLOOR + 70, 0, accent);
 
-  // Pegboard above the table, with a shadow board of tools
-  const peg = prop(WALL_X + 8, -150, TOP + 260, 0);
+  // White pegboard above the table, tools hung neatly by size
+  const peg = prop(WALL_X + 8, -150, TOP + 760, 0);
   const pegTex = canvasTex(256, 128, (g, w, h) => {
-    g.fillStyle = '#b08a5a'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#5a4026'; for (let y = 8; y < h; y += 16) for (let x = 8; x < w; x += 16) { g.beginPath(); g.arc(x, y, 2.4, 0, Math.PI * 2); g.fill(); }
-  }, 4, 2.4);
-  box(peg, 1200, 620, 12, 0, 310, 0, mat(0xffffff, { map: pegTex, roughness: 0.85 }));
-  const toolMat = mat(0x8e949e, { metalness: 0.6, roughness: 0.35 }), gripRed = mat(0xb3261e), gripYel = mat(0xd9a400), gripBlu = mat(0x1f4fa8);
+    g.fillStyle = '#f4f5f7'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#c2c6cc'; for (let y = 8; y < h; y += 16) for (let x = 8; x < w; x += 16) { g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill(); }
+  }, 4, 2);
+  box(peg, 1200, 560, 12, 0, 280, 0, mat(0xffffff, { map: pegTex, roughness: 0.8 }));
+  const toolMat = mat(0x9aa0a8, { metalness: 0.6, roughness: 0.3 }), gripA = mat(VIOLET), gripB = mat(0x2b2d33);
   const hang = (x, y, w, h, m, rz = 0) => { const b = box(peg, w, h, 10, x, y, 14, m); b.rotation.z = rz; return b; };
-  // spanners (graded), screwdrivers, pliers, hex keys, a hammer, a tape gun, a coil of wire
-  [40, 46, 52, 58, 64].forEach((L, i) => hang(-520 + i * 34, 470, 10, L * 3, toolMat));
-  [[-330, gripRed], [-300, gripYel], [-270, gripBlu], [-240, gripRed]].forEach(([x, m]) => { hang(x, 500, 18, 90, m); hang(x, 400, 6, 110, toolMat); });
-  hang(-150, 450, 22, 170, gripRed, 0.18); hang(-122, 450, 22, 170, gripRed, -0.18);   // pliers
-  for (let i = 0; i < 7; i++) hang(-40 + i * 14, 470 - i * 6, 5, 120 - i * 10, mat(0x23252a));
-  hang(110, 440, 120, 34, mat(0x3b2a1c)); hang(110, 380, 26, 140, mat(0x6b4b2f));  // hammer
-  const coil = new THREE.Mesh(new THREE.TorusGeometry(60 * MM, 9 * MM, 10, 28), mat(0xc0392b)); coil.position.set(300 * MM, 430 * MM, 24 * MM); peg.add(coil);
-  const coil2 = new THREE.Mesh(new THREE.TorusGeometry(55 * MM, 8 * MM, 10, 28), mat(0x1c1d21)); coil2.position.set(430 * MM, 420 * MM, 24 * MM); peg.add(coil2);
-  box(peg, 160, 80, 70, 360, 160, 40, mat(0x2d3036));               // parts bin row
-  for (let i = 0; i < 4; i++) box(peg, 34, 30, 60, 300 + i * 40, 160, 76, mat([0xe0a800, 0x1f4fa8, 0xb3261e, 0x2f8f4a][i]));
+  [40, 46, 52, 58, 64].forEach((L, i) => hang(-500 + i * 34, 420, 10, L * 3, toolMat));
+  [-320, -290, -260, -230].forEach((x, i) => { hang(x, 450, 18, 90, i % 2 ? gripB : gripA); hang(x, 350, 6, 110, toolMat); });
+  hang(-140, 400, 22, 170, gripA, 0.18); hang(-112, 400, 22, 170, gripA, -0.18);
+  for (let i = 0; i < 7; i++) hang(-20 + i * 14, 420 - i * 6, 5, 120 - i * 10, gripB);
+  hang(130, 400, 120, 30, gripB); hang(130, 340, 24, 140, toolMat);
+  for (let i = 0; i < 5; i++) box(peg, 70, 50, 70, 260 + i * 80, 150, 40, mat(i % 2 ? 0xffffff : 0xe3e5e9));   // clear-ish bins
+  box(peg, 420, 6, 80, 420, 120, 40, mat(0xd0d3d8));                                                          // bin shelf
 
-  // Steel shelving on the side wall: spare printed parts, filament spools, a 3D printer on top
-  const shelf = prop(-560, -ROOM_Y + 230, FLOOR, 90);
-  const post = mat(0x7d838e, { metalness: 0.5, roughness: 0.45 }), board = mat(0x9aa0aa, { metalness: 0.4, roughness: 0.5 });
-  for (const sx of [-440, 440]) for (const sz of [-190, 190]) box(shelf, 30, 1500, 30, sx, 750, sz, post);
-  for (const y of [120, 520, 920, 1320]) box(shelf, 920, 20, 420, 0, y, 0, board);
-  const spoolCols = [0xe6e6e6, 0x111111, 0xd9541e, 0x2c6fd6, 0x4caf50, 0x9e9e9e];
-  spoolCols.forEach((c, i) => {
-    const s = new THREE.Group(); s.position.set((-360 + i * 140) * MM, 640 * MM, 0); s.rotation.x = Math.PI / 2; shelf.add(s);
-    const a = new THREE.Mesh(new THREE.CylinderGeometry(100 * MM, 100 * MM, 70 * MM, 28), mat(c, { roughness: 0.5 })); s.add(a);
-    for (const e of [-1, 1]) { const f = new THREE.Mesh(new THREE.CylinderGeometry(102 * MM, 102 * MM, 4 * MM, 28), mat(0x222326)); f.position.y = e * 37 * MM; s.add(f); }
-    a.castShadow = true;
-  });
-  // spare body tubes, a grid fin and a nose on the lower shelf
-  const spareTube = (x, len, m) => { const t = cyl(shelf, 39.3, len, x, 130 + 10 + 39.3, 0, m, 32); t.rotation.z = Math.PI / 2; return t; };
-  spareTube(-250, 200, mat(0xdfe2e6, { metalness: 0.35, roughness: 0.33 })); spareTube(60, 154, mat(0xdfe2e6, { metalness: 0.35, roughness: 0.33 }));
-  box(shelf, 60, 8, 40, 260, 134, 80, mat(0x16171a)); box(shelf, 60, 8, 40, 330, 134, -60, mat(0x16171a));
-  for (let i = 0; i < 3; i++) box(shelf, 260, 90, 300, -280 + i * 280, 975, 0, mat([0x6d5a3f, 0x5b4a33, 0x7a6547][i]));   // parts boxes
-  // 3D printer (open frame, bed, gantry) on top
-  const pr = new THREE.Group(); pr.position.set(0, 1330 * MM, 0); shelf.add(pr);
-  const frame = mat(0x2b2d33), bed = mat(0x111214);
-  for (const sx of [-180, 180]) for (const sz of [-160, 160]) box(pr, 20, 400, 20, sx, 200, sz, frame);
-  box(pr, 380, 20, 340, 0, 400, 0, frame); box(pr, 380, 40, 340, 0, 20, 0, frame);
-  box(pr, 250, 8, 250, 0, 90, 0, bed); box(pr, 340, 18, 24, 0, 300, 0, frame); box(pr, 40, 50, 40, 30, 275, 0, mat(0xd9541e));
-  box(pr, 70, 60, 70, -20, 125, 20, mat(0xd9541e));                 // a part on the bed
+  // White counter along the side wall with three enclosed 3D printers and filament drawers
+  const counter = prop(-480, -ROOM_Y + 320, FLOOR, 90);
+  const cab = mat(0xf5f6f8, { roughness: 0.6 }), top = mat(0xdadde2, { roughness: 0.35 }), handle = mat(0x8a9099, { metalness: 0.6 });
+  box(counter, 1100, 880, 600, 0, 440, 0, cab);
+  box(counter, 1120, 30, 620, 0, 895, 0, top);
+  for (let i = 0; i < 4; i++) { box(counter, 240, 4, 2, -412 + i * 275, 760, 301, handle); if (i) box(counter, 2, 840, 2, -550 + i * 275, 440, 301, mat(0xd4d7dc)); }
+  for (let i = 0; i < 3; i++) {                                                                        // enclosed printers
+    const pr = new THREE.Group(); pr.position.set((-360 + i * 360) * MM, 910 * MM, -40 * MM); counter.add(pr);
+    box(pr, 320, 370, 320, 0, 185, 0, mat(0x1c1d21, { roughness: 0.45 }));
+    const glass = box(pr, 270, 290, 4, 0, 185, 161, new THREE.MeshStandardMaterial({ color: 0x9ab7c9, transparent: true, opacity: 0.35, roughness: 0.05 }));
+    glass.castShadow = false;
+    box(pr, 240, 6, 240, 0, 75, 0, mat(0x2a2c31));                                                    // bed
+    box(pr, 50, 56, 50, -30 + i * 25, 106, 15, mat([0xd9541e, 0xf2f2f2, VIOLET][i]));                // a part printing
+    box(pr, 260, 12, 26, 0, 265, 0, mat(0x55585f));                                                   // gantry
+    const strip = box(pr, 290, 4, 4, 0, 356, 156, new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4e0, emissiveIntensity: 0.8 }));
+    strip.castShadow = false;
+    box(pr, 56, 22, 4, 95, 25, 162, new THREE.MeshStandardMaterial({ color: 0x0b0c0e, emissive: 0x2a8fff, emissiveIntensity: 0.4 }));   // screen
+  }
+  // Whiteboard on the side wall, further along
+  const wb = prop(250, -ROOM_Y + 10, TOP + 450, 90);
+  box(wb, 1200, 800, 16, 0, 400, 0, mat(0xd9dce1, { metalness: 0.4 }));
+  box(wb, 1170, 770, 4, 0, 400, 9, mat(0xfafafa, { roughness: 0.25 }));
+  const ink = mat(0x2a2c33); box(wb, 300, 6, 2, -350, 600, 12, ink); box(wb, 220, 6, 2, -390, 560, 12, ink); box(wb, 6, 200, 2, 150, 450, 12, mat(VIOLET)); box(wb, 260, 6, 2, 260, 450, 12, mat(VIOLET));
+  box(wb, 600, 20, 50, 0, -10, 25, mat(0xd9dce1));                                                    // marker tray
 
-  // Fire extinguisher by the back wall
-  const ext = prop(WALL_X + 120, 640, FLOOR, 0);
-  cyl(ext, 70, 520, 0, 260, 0, mat(0xc0201a, { roughness: 0.35 }), 24);
+  // Wall-mounted fire extinguisher with its sign
+  const ext = prop(WALL_X + 80, 700, FLOOR + 300, 0);
+  cyl(ext, 70, 520, 0, 260, 0, mat(0xc0201a, { roughness: 0.3 }), 24);
   cyl(ext, 22, 50, 0, 545, 0, mat(0x222326)); box(ext, 120, 18, 30, 30, 575, 0, mat(0x222326));
-  box(ext, 50, 140, 2, 0, 200, 71, mat(0xf2f2f2));
+  box(ext, 160, 220, 4, 0, 820, -60, mat(0xc0201a));                                                 // sign above
 
-  // Hazard tape: a striped square on the floor round the exhaust zone, under the rocket
-  const stripes = canvasTex(64, 16, (g, w, h) => {
-    g.fillStyle = '#e8b923'; g.fillRect(0, 0, w, h); g.fillStyle = '#111';
-    for (let x = -16; x < w + 16; x += 16) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 8, h); g.lineTo(x + 16, 0); g.lineTo(x + 8, 0); g.closePath(); g.fill(); }
-  });
-  const ZONE = 700, BAND = 50;
+  // Safety line: a thin yellow square on the floor round the exhaust zone, under the rocket
+  const ZONE = 700, BAND = 30, lineMat = mat(0xf2c200, { roughness: 0.5 });
   // [centre x, centre y, extent along rig x, extent along rig y]
   for (const [cx, cy, w, h] of [[ZONE / 2, 0, BAND, ZONE + BAND], [-ZONE / 2, 0, BAND, ZONE + BAND], [0, ZONE / 2, ZONE - BAND, BAND], [0, -ZONE / 2, ZONE - BAND, BAND]]) {
-    const t = stripes.clone(); t.needsUpdate = true;
-    const len = Math.max(w, h); t.repeat.set(len / (BAND * 4), 1);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(len * MM, BAND * MM), mat(0xffffff, { map: t, roughness: 0.7 }));
-    m.rotation.x = -Math.PI / 2; if (w > h) m.rotation.z = Math.PI / 2;   // the plane runs along rig y; turn the strips that run along rig x
+    const m = new THREE.Mesh(new THREE.BoxGeometry(h * MM, 0.6 * MM, w * MM), lineMat);
     m.position.copy(at(cx, cy, FLOOR + 0.3)); m.receiveShadow = true; root.add(m);
   }
 
-  // Hanging shop light over the table: shade, bulb, cord to the ceiling; warm light
-  const lampAt = at(-520, 0, TOP + 900);
-  const lamp = new THREE.Group(); lamp.position.copy(lampAt); root.add(lamp);
-  const shade = new THREE.Mesh(new THREE.ConeGeometry(160 * MM, 140 * MM, 28, 1, true), mat(0x2f5d50, { side: THREE.DoubleSide, roughness: 0.5, metalness: 0.3 }));
-  shade.position.y = 70 * MM; lamp.add(shade);
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(32 * MM, 16, 12), new THREE.MeshStandardMaterial({ color: 0xfff3dc, emissive: 0xffe2b0, emissiveIntensity: 1.4 }));
-  bulb.position.y = 20 * MM; lamp.add(bulb);
-  const cord = new THREE.Mesh(new THREE.CylinderGeometry(3 * MM, 3 * MM, (CEIL - (TOP + 1040)) * MM, 6), mat(0x111111));
-  cord.position.y = (140 + (CEIL - (TOP + 1040)) / 2) * MM; lamp.add(cord);
-  const lampLight = new THREE.PointLight(0xffd8a8, 1.1, 0, 0); lampLight.position.y = 10 * MM; lamp.add(lampLight);
-  const fill = new THREE.HemisphereLight(0xffe9cc, 0x2a2420, 0.25); root.add(fill);   // warm room bounce
+  // LED ceiling panels (cool white), hung on thin wires; soft, even light
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xf4f7ff, emissiveIntensity: 1.2 });
+  for (const [x, y] of [[-520, -300], [-520, 400], [200, -300], [200, 400]]) {
+    const pnl = prop(x, y, CEIL - 120, 0);
+    box(pnl, 600, 14, 1200, 0, 0, 0, panelMat).castShadow = false;
+    box(pnl, 620, 10, 1220, 0, 10, 0, mat(0xd4d7dc));
+    for (const sx of [-280, 280]) box(pnl, 2, 110, 2, sx, 70, 0, mat(0x777b82));
+  }
+  const lampLight = new THREE.PointLight(0xf2f5ff, 0.9, 0, 0); lampLight.position.copy(at(-300, 0, CEIL - 200)); root.add(lampLight);
+  const fill = new THREE.HemisphereLight(0xf6f8ff, 0x8a8c90, 0.3); root.add(fill);   // bright, neutral room bounce
 
   // ---------- Live update ----------
   function drawPsu(v, a, on) {

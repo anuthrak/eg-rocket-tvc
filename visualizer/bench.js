@@ -227,8 +227,8 @@ export function initBench() {
   const pla = new THREE.MeshStandardMaterial({ color: 0xc9ccd3, roughness: 0.6 });
   const plaDark = new THREE.MeshStandardMaterial({ color: 0x8e939d, roughness: 0.6 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x6d7380, metalness: 0.6, roughness: 0.4 });
-  const wood = new THREE.MeshStandardMaterial({ color: 0x5e4a3a, roughness: 0.8 });
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x2b2d33, metalness: 0.4, roughness: 0.6 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.55 });   // birch top
+  const legMat = new THREE.MeshStandardMaterial({ color: 0xe4e6ea, metalness: 0.3, roughness: 0.4 });   // white steel legs
   // rig (x, y, z) mm → scene; box from rig-frame bounds
   const rigBox = (parent, x0, x1, y0, y1, z0, z1, mat) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry((y1 - y0) * MM, (z1 - z0) * MM, (x1 - x0) * MM), mat);
@@ -306,6 +306,7 @@ export function initBench() {
     const fy = rigScene ? FLOOR_RIG : 0;
     grid.position.y = fy; floor.position.y = fy;
     grid.visible = floor.visible = !rigScene;   // the workshop has its own concrete floor
+    sun.intensity = rigScene ? 0.55 : 1.4;       // softer shadows indoors; the workshop's ceiling panels light the room
     $('sceneBtn')?.classList.toggle('on', rigScene);
     $('sceneBtn')?.setAttribute('aria-pressed', String(rigScene));
     resetView();
