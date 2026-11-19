@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { initCalib } from './calib.js';
 import { initLaser } from './laser.js';
 import { initThrottle } from './throttle.js';
@@ -208,7 +209,7 @@ export function initBench() {
   // TVC mount: the motor tube pivots about the gimbal point, in the same rotation sense as the rocket's tilt
   const tvc = new THREE.Group();
   tvc.position.y = GIMBAL * MM;
-  tvc.rotation.order = 'ZXY';
+  tvc.rotation.order = 'XZY';   // the K-9 chain: inner gimbal about scene X (rocket Y axis), then the tube about scene Z
   airframe.add(tvc);
   const tubeLen = TUBE_BELOW + TUBE_ABOVE;
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(TUBE_R * MM, TUBE_R * MM, tubeLen * MM, 24), tubeMat);
@@ -273,6 +274,7 @@ export function initBench() {
   rigBox(rigFixed, -305, -125, -12, 12, -5, 25, plaDark);            // arm
   rigBox(rigFixed, -305, -230, -35, 35, -DESK_H, -DESK_H + 8, plaDark);   // base, with its clamp ledges
   rigBox(rigFixed, -305, -230, -21, 21, -DESK_H + 8, -5, plaDark);
+  const nProcFixed = rigFixed.children.length;                       // the parts above are replaced by the CAD model once it loads
   for (const s of [1, -1]) {                                         // C-clamps on the ledges, reaching round the desk edge
     const y = s * 28;
     rigBox(rigFixed, -255, -REACH + 12, y - 4, y + 4, -DESK_H + 8, -DESK_H + 14, steel);                 // top jaw
@@ -290,9 +292,15 @@ export function initBench() {
 
   let rigScene = false;
   try { rigScene = localStorage.getItem('tvc-bench-scene') === 'rig'; } catch {}
+  const tableParts = rigFixed.children.slice(nProcFixed);
+  let detail = false;            // the CAD model (models/sldp45.glb) has loaded
+  const rigOnly = [];             // with the CAD model: arm, base, table, clamps (the rings also show in the plain view)
   function applyScene() {
-    plainRig.visible = !rigScene;
-    rigOnRocket.visible = middle.visible = rigFixed.visible = rigScene;
+    plainRig.visible = !rigScene && !detail;
+    rigOnRocket.visible = rigScene && !detail;
+    middle.visible = rigFixed.visible = rigScene || detail;
+    tableParts.forEach(o => { o.visible = rigScene; });   // table + clamps
+    rigOnly.forEach(o => { o.visible = rigScene; });
     const fy = rigScene ? FLOOR_RIG : 0;
     grid.position.y = fy; floor.position.y = fy;
     $('sceneBtn')?.classList.toggle('on', rigScene);
@@ -311,12 +319,16 @@ export function initBench() {
   const rocketMeshes = [];
   airframe.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
   plainRig.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
-  [...rocketMeshes, ...rigMeshes].forEach(m => {
-    m.userData.solidMat = m.material;
-    const plate = !!m.userData.plate;
-    m.userData.lineMat = plate ? finFillMat : fillMat;
-    if (plate) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
-  });
+  function prepOutline(list) {
+    list.forEach(m => {
+      if (m.userData.solidMat) return;
+      m.userData.solidMat = m.material;
+      const plate = !!m.userData.plate;
+      m.userData.lineMat = plate ? finFillMat : fillMat;
+      if (plate) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
+    });
+  }
+  prepOutline([...rocketMeshes, ...rigMeshes]);
   let outlineOn = false;
   function setOutline(on) {
     outlineOn = on;
@@ -325,6 +337,48 @@ export function initBench() {
       if (m.userData.edges) m.userData.edges.visible = on;
     });
   }
+
+  // ---------- Detailed model from the CAD (SLDP45 full GA with desk rig, STEP → models/sldp45.glb) ----------
+  // Built by cad/lib/step2glb.py: one mesh per part named "<group>|<colour>|<part>", in mm, already in scene axes
+  // (rocket +X → +Z, +Y → +X, z → up), tail at 0, rig pivot at 247. The simple model above stands in until it loads.
+  // Groups: rocket (moves with the rocket), inner (TVC inner gimbal + riding servo: turns with the X nozzle angle),
+  // tube (motor tube: both angles), middle (rig middle ring), fixed (outer ring, arm, base).
+  const innerG = new THREE.Group(); innerG.position.y = GIMBAL * MM; airframe.add(innerG);
+  const sledMat = new THREE.MeshStandardMaterial({ color: 0x3d5a46, roughness: 0.7 });
+  const kGimbalMat = new THREE.MeshStandardMaterial({ color: 0x4a4f58, roughness: 0.6 });
+  const servoMat = new THREE.MeshStandardMaterial({ color: 0x1c2333, roughness: 0.5 });
+  const CAD_MAT = { steel_body: bodyMat, steel_band: bandMat, steel_door: doorMat, black: gridMat, sled: sledMat,
+                    gimbal: kGimbalMat, servo: servoMat, tube: tubeMat, pla, pla2: plaDark, steel };
+  new GLTFLoader().load('models/sldp45.glb', gltf => {
+    const parts = [];
+    gltf.scene.traverse(o => { if (o.isMesh) parts.push(o); });
+    if (!parts.length) return;
+    // Out with the stand-ins (keep the plume, arrow, the inner-gimbal group and the table + clamps)
+    const keep = new Set([tvc, innerG]);
+    airframe.children.filter(o => !keep.has(o) && o !== forceArrow).forEach(o => airframe.remove(o));
+    tvc.remove(tube);
+    middle.clear();
+    rigFixed.children.filter(o => !tableParts.includes(o)).forEach(o => rigFixed.remove(o));
+    for (const m of parts) {
+      const [grp, col, name] = m.name.split('|');
+      const mesh = new THREE.Mesh(m.geometry, CAD_MAT[col] || pla);
+      mesh.name = name; mesh.geometry.computeVertexNormals();
+      mesh.scale.setScalar(MM); mesh.castShadow = true; mesh.receiveShadow = grp !== 'rocket';
+      if (grp === 'inner') { mesh.position.y = -GIMBAL * MM; innerG.add(mesh); }
+      else if (grp === 'tube') { mesh.position.y = -GIMBAL * MM; tvc.add(mesh); }
+      else if (grp === 'middle') { mesh.position.y = -CG * MM; middle.add(mesh); }
+      else if (grp === 'fixed') { mesh.position.y = -CG * MM; rigFixed.add(mesh); if (/^(5 Arm|6 Base)/.test(name)) rigOnly.push(mesh); }
+      else airframe.add(mesh);
+    }
+    rocketMeshes.length = 0;
+    airframe.traverse(o => { if (o.isMesh && !(o.material instanceof THREE.ShaderMaterial) && o.parent !== forceArrow) rocketMeshes.push(o); });
+    rigMeshes.length = 0;
+    [middle, rigFixed].forEach(g => g.traverse(o => { if (o.isMesh) rigMeshes.push(o); }));
+    prepOutline([...rocketMeshes, ...rigMeshes]);
+    setOutline(outlineOn);
+    detail = true;
+    applyScene();
+  }, undefined, err => console.warn('Detailed model not loaded, using the simple one:', err));
 
   // ---------- Thrust: plume out of the motor tube, arrow for the sideways force it puts on the rocket ----------
   // Added after the outline list above, so outline view leaves them as they are.
@@ -757,6 +811,7 @@ export function initBench() {
     const servoData = servoMode.checked;
     const gx = servoData ? shown.pitch * rig.xd / rig.spg : 0, gy = servoData ? shown.yaw * rig.yd / rig.spgy : 0;
     tvc.rotation.set(deg(gx), 0, deg(-gy));
+    innerG.rotation.x = deg(gx);
     // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
     const thr = throttle.level() ?? vector.level() ?? syscheck.level();
     updateThrust(linkStart !== null && lastLineT !== null && thr !== 0, gx, gy, demoTimer ? 1 : thr ?? 0.35);
