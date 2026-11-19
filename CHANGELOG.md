@@ -3,6 +3,8 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+
+## [2.11.0] – 2026-11-19
 Firmware v1.13.0.
 ### Changed
 - Bench 3D model updated to **SLDP-ST-008** (batch-002): tangent-ogive nose with forward ship flaps, aft flaps, hot-staging band, 4 grid fins, 4 strakes on part A instead of the old fins, and the avionics bay door. Colours: a light stainless-steel booster, and a black ship (part D, nose band, ogive and flaps) matching the black grid fins. The TVC gimbal is at 37 mm (was 57), the motor tube ends 57 mm below it, and the rig pivot is at 247 mm. The rocket now turns through the rig's gimbal chain (outer pivot, then inner), with the same attitude as before.
