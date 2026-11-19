@@ -108,38 +108,14 @@ export function initBench() {
   });
 
   // Booster (parts A, B, couplers, strakes, door): light stainless steel. Ship (part D, nose band, ogive, flaps) and
-  // grid fins: black, the ship covered in hexagonal heat-shield tiles.
+  // grid fins: black.
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdfe2e6, metalness: 0.35, roughness: 0.33 });
   const bandMat = new THREE.MeshStandardMaterial({ color: 0xaeb2b9, metalness: 0.4, roughness: 0.35 });
   const doorMat = new THREE.MeshStandardMaterial({ color: 0xc8cbd0, metalness: 0.35, roughness: 0.4 });
   const gridMat = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.3, roughness: 0.6 });
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 });
-  // Tile texture: pointy-top hexagons, 4 across, 2 rows high, so it repeats seamlessly. One repeat ≈ TILE_U × TILE_V mm.
-  const TILE_U = 28, TILE_V = TILE_U * 90 / 104;
-  const tileCanvas = (() => {
-    const c = document.createElement('canvas'); c.width = 104; c.height = 90;
-    const g = c.getContext('2d'), sz = 15, w = Math.sqrt(3) * sz;
-    g.fillStyle = '#040405'; g.fillRect(0, 0, c.width, c.height);   // grout
-    for (let row = -1; row <= 3; row++) for (let col = -1; col <= 4; col++) {
-      const cx = col * w + (row % 2 ? w / 2 : 0), cy = row * 1.5 * sz + sz / 2;
-      const shade = 46 + ((col * 7 + row * 13 + 40) % 9) * 2;          // slight tile-to-tile variation
-      g.fillStyle = `rgb(${shade},${shade},${shade + 2})`;
-      g.beginPath();
-      for (let k = 0; k < 6; k++) { const a = Math.PI / 3 * k + Math.PI / 6; g.lineTo(cx + (sz - 1.3) * Math.cos(a), cy + (sz - 1.3) * Math.sin(a)); }
-      g.closePath(); g.fill();
-    }
-    return c;
-  })();
-  function tileMat(repU, repV, double = false) {
-    const t = new THREE.CanvasTexture(tileCanvas);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repU, repV); t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 4;
-    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, metalness: 0.1, side: double ? THREE.DoubleSide : THREE.FrontSide });
-  }
-  const CIRC = 2 * Math.PI * RO, around = Math.round(CIRC / TILE_U);
-  const shipMat = tileMat(around, 140 / TILE_V), shipBandMat = tileMat(around, 15 / TILE_V);
-  const noseMat = tileMat(around, 1.25 * NOSE_L / TILE_V);
-  const finMat = tileMat(1 / (TILE_U * MM), 1 / (TILE_V * MM), true);   // flat plates: UVs are scene units
+  const shipMat = gridMat, shipBandMat = gridMat, noseMat = gridMat;
+  const finMat = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide });
   const bay = new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.9 });
 
   // CAD angle a (0° = rocket +X, 90° = +Y) → scene direction (sin a, 0, cos a): rocket +X is scene +Z, +Y is scene +X.
