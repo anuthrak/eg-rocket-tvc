@@ -51,12 +51,18 @@
 //
 // Throttle test (CT-4, calibration mode only; the visualizer's Bench → Throttle panel drives these):
 //   ARM               allow the motor to run (throttle must be 0). Replies with a THR status line.
+//   ARM REST          (v1.13.0, CT-5 breakaway) the same, but for a rocket resting on a rig stop: the next IMU reading
+//                     is kept as the rest attitude and the tilt cut becomes "moved more than REST_MOVE_CUT from rest"
+//                     (THR,CUT,MOVE) instead of "beyond ABORT_TILT from upright". Replies ARM,REST,<tiltX>,<tiltY>
+//                     (deg, after the level trim) then a THR status line; THR is refused until then. A rest lean beyond
+//                     REST_MAX_TILT (not on the rig, or the IMU is wrong) disarms with ERR,ARM REST lean.
 //   THR <pct>         target throttle 0..85 (capped at THROTTLE_CAP). Rises at THR_RAMP_UP, drops at once.
 //                     Every line received counts as a heartbeat: the motor is cut if nothing arrives for THR_LINK_MS.
 //   DISARM            motor to zero at once, disarmed.
 //   Status, 5 Hz while armed and on every change:  THR,<ARMED|SAFE>,<target %>,<actual %>,<ESC µs>
-//   Cuts (motor to zero, disarmed, then a SAFE status line):  THR,CUT,LINK | THR,CUT,TILT | THR,CUT,MODE
+//   Cuts (motor to zero, disarmed, then a SAFE status line):  THR,CUT,LINK | THR,CUT,TILT | THR,CUT,MOVE | THR,CUT,MODE
 //     LINK = no serial line for THR_LINK_MS, TILT = beyond ABORT_TILT for 3 readings in a row,
+//     MOVE = (ARM REST only) more than REST_MOVE_CUT from the rest attitude for 3 readings in a row,
 //     MODE = CAL or RUN received (leaving or re-entering calibration).
 //   The ESC sees ESC_MIN_US from the first moment of setup(), so it arms safely and never starts the fan on boot.
 //   HB                heartbeat only, no reply (keeps the link watchdog fed while nothing else is being sent)
@@ -77,7 +83,7 @@
 // Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.12.0";
+const char FW_VERSION[] = "1.13.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -112,6 +118,8 @@ const float THRUST_REF_G = 150.0;
 const float GMAX  = 8.0 * DEG_TO_RAD;     // design gimbal travel
 const float GRATE = 60.0 * DEG_TO_RAD;    // gimbal slew-rate limit (rad/s)
 const float ABORT_TILT = 25.0 * DEG_TO_RAD;
+const float REST_MOVE_CUT = 12.0 * DEG_TO_RAD;   // ARM REST: motor cut when this far from the rest attitude
+const float REST_MAX_TILT = 40.0 * DEG_TO_RAD;   // ARM REST: refuse a rest lean beyond this (rig stops are at ±30°)
 const float REARM_TILT = 5.0 * DEG_TO_RAD;
 const unsigned long REARM_MS = 1000;
 const float FREE_TEST_GAIN = 0.5;         // free-test only: multiplies Kp, Kd and Ki
@@ -245,6 +253,8 @@ float thrTarget = 0, thrNow = 0;          // throttle (0..1): commanded, and wha
 unsigned long lastRxMs = 0;               // last complete serial line (motor heartbeat)
 unsigned long thrLastMs = 0, thrReportMs = 0;
 uint8_t tiltHits = 0;                     // consecutive over-tilt readings while armed
+bool restMode = false, restPending = false;  // ARM REST: tilt cut measured from the rest attitude (restX, restY)
+float restX = 0, restY = 0;               // rest attitude (rad, after the level trim)
 bool escCalHigh = false;                  // ESCCAL HIGH: sending ESC_MAX_US for the ESC's range calibration
 unsigned long escCalStart = 0;
 
@@ -341,7 +351,7 @@ void printThr() {
 
 void motorCut(const char *why) {
   bool was = motorArmed || thrNow > 0;
-  motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+  motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;  restMode = restPending = false;
   esc.writeMicroseconds(ESC_MIN_US);
   if (!was) return;
   Serial.print("THR,CUT,"); Serial.println(why);
@@ -492,13 +502,17 @@ void runCommand(char *line) {
   } else if (!strcmp(cmd, "ARM")) {
     if (!calMode) { Serial.println("ERR,ARM needs CAL"); return; }
     if (escCalHigh) { escCalEnd("MODE"); Serial.println("ERR,ARM during ESCCAL"); return; }
+    bool rest = arg1 && !strcmp(arg1, "REST");
     if (!motorArmed) { motorArmed = true; thrTarget = thrNow = 0; tiltHits = 0; }
+    else if (rest != restMode && thrTarget > 0) { Serial.println(F("ERR,ARM mode change needs THR 0")); return; }
+    restMode = rest; restPending = rest;   // ARM REST: the CAL telemetry step keeps the next reading as the rest
     thrReportMs = millis();
-    printThr();
+    if (!rest) printThr();
   } else if (!strcmp(cmd, "THR") && arg1) {
     float v;
     if (!motorArmed) { Serial.println("ERR,THR needs ARM"); return; }
     if (!parseNum(arg1, v) || v < 0) { Serial.println("ERR,THR <percent>"); return; }
+    if (restPending && v > 0) { Serial.println(F("ERR,THR before ARM,REST")); return; }
     float t = constrain(v / 100.0f, 0.0f, THROTTLE_CAP);
     if (t != thrTarget) { thrTarget = t; printThr(); }
   } else if (!strcmp(cmd, "ESCCAL") && arg1) {
@@ -513,7 +527,7 @@ void runCommand(char *line) {
       Serial.println("ESCCAL,HIGH");
     } else Serial.println("ERR,ESCCAL HIGH or LOW");
   } else if (!strcmp(cmd, "DISARM")) {
-    motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;
+    motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;  restMode = restPending = false;
     esc.writeMicroseconds(ESC_MIN_US);
     printThr();
   } else if (!strcmp(cmd, "SAVE")) {
@@ -603,7 +617,21 @@ void calLoop() {
     float w[3]; toBody(g.gyro.x - biasX, g.gyro.y - biasY, g.gyro.z - biasZ, w);   // body rates, as in the flight loop
     // Throttle test: cut the motor if the rocket leans past the abort angle (3 readings in a row, so one
     // vibration spike doesn't trip it)
-    if (motorArmed) {
+    // ARM REST: the first reading is the rest attitude, and the cut is measured from it.
+    if (motorArmed && restPending) {
+      restPending = false;
+      restX = accelTiltX(b); restY = accelTiltY(b);
+      if (max(fabs(restX), fabs(restY)) > REST_MAX_TILT) {
+        motorArmed = false; restMode = false;
+        Serial.println(F("ERR,ARM REST lean")); printThr();
+      } else {
+        Serial.print(F("ARM,REST,")); Serial.print(restX * RAD_TO_DEG, 2); Serial.print(','); Serial.println(restY * RAD_TO_DEG, 2);
+        printThr();
+      }
+    } else if (motorArmed && restMode) {
+      if (max(fabs(accelTiltX(b) - restX), fabs(accelTiltY(b) - restY)) > REST_MOVE_CUT) { if (++tiltHits >= 3) motorCut("MOVE"); }
+      else tiltHits = 0;
+    } else if (motorArmed) {
       if (max(fabs(accelTiltX(b)), fabs(accelTiltY(b))) > ABORT_TILT) { if (++tiltHits >= 3) motorCut("TILT"); }
       else tiltHits = 0;
     }

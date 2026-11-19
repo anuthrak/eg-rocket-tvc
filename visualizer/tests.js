@@ -185,12 +185,11 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       series: [{ id: 'm', label: 'Measured', color: X, marker: true }, { id: 's', label: 'Spec (220 g × t²)', color: N, dash: true }], empty: 'Needs a scale (step test)' }),
     vcRate: new Chart(tile('home cal th vc'), { title: 'Body rate', sub: 'Gyro · 10 s', unit: '°/s', symmetric: true, minRange: 10,
       series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Calibration mode, firmware v1.12.0' }),
-    vcAuth: new Chart(tile('vc'), { kind: 'xy', title: 'Authority vs throttle', sub: '°/s² per gimbal °', xLabel: 'Throttle', xUnit: '%', unit: '°/s²/°', xMin: 0, xMax: 80,
-      series: [{ id: 'x', label: 'X', color: X, marker: true }, { id: 'y', label: 'Y', color: Y, marker: true }], empty: 'Run the test' }),
-    vcRel: new Chart(tile('vc'), { kind: 'xy', title: 'Relative thrust', sub: 'From authority · no scale', xLabel: 'Throttle', xUnit: '%', unit: '× top', xMin: 0, xMax: 80, yMin: 0,
-      series: [{ id: 'm', label: 'Measured', color: W, marker: true }, { id: 's', label: 'Spec shape (t²)', color: N, dash: true }], empty: 'Run the test on the pivot' }),
-    vcTrim: new Chart(tile('vc'), { kind: 'xy', title: 'Trim vs throttle', sub: 'Gimbal ° that cancels the drift', xLabel: 'Throttle', xUnit: '%', unit: '°', xMin: 0, xMax: 80, minRange: 1,
-      series: [{ id: 'x', label: 'X', color: X, marker: true }, { id: 'y', label: 'Y', color: Y, marker: true }], empty: 'Run the test on the pivot' }),
+    vcMove: new Chart(tile('vc'), { kind: 'xy', title: 'Off the stop vs throttle', sub: 'Each ramp · dashed: 1° lift-off line', xLabel: 'Throttle', xUnit: '%', unit: '°', xMin: 0, xMax: 30, yMin: -0.5, minRange: 2,
+      series: [{ id: 'a8', label: '8°', color: X, line: false }, { id: 'a6', label: '6°', color: Y, line: false }, { id: 'a4', label: '4°', color: W, line: false }, { id: 'a2', label: '2°', color: N, line: false }],
+      refs: [{ y: 1 }], empty: 'Run the test' }),
+    vcBreak: new Chart(tile('vc'), { kind: 'xy', title: 'Starts moving vs gimbal', sub: 'Dashed: same torque at every angle', xLabel: 'Gimbal', xUnit: '°', unit: '%', xMin: 0, xMax: 9, yMin: 0,
+      series: [{ id: 'm', label: 'Each repeat', color: X, line: false, marker: true }, { id: 's', label: 'Same torque', color: N, dash: true }], empty: 'Run the test' }),
   };
 
   for (const [k, c] of Object.entries(C)) c.tile.dataset.chart = k;   // for per-test ordering in CSS
@@ -237,17 +236,25 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       C.vib.tile.querySelector('.t-tile-h span').textContent = unit === 'g' ? 'Gyro rms over 0.5 s · 30 s' : 'Tilt spread over 0.5 s · 30 s (gyro needs CAL + v1.12.0)';
       C.vib.clear();
     }
-    // Thrust vector
+    // Thrust vector (breakaway): every ramp's "off the stop" against throttle, and the lift-off points
     const vc = vector.data();
-    const r = vc.run;
+    const r = vc.work || vc.run;
     if (r) {
-      const lv = r.levels.filter(l => l.res);
-      const xy = (fn) => lv.map(l => [l.pct, fn(l)]).filter(p => p[1] != null && Number.isFinite(p[1]));
-      C.vcAuth.set({ x: xy(l => l.res.auth.X), y: xy(l => l.res.auth.Y) });
-      C.vcTrim.set({ x: xy(l => l.res.trim.X), y: xy(l => l.res.trim.Y) });
-      const at = l => (l.res.auth.X != null && l.res.auth.Y != null ? (l.res.auth.X + l.res.auth.Y) / 2 : l.res.auth.X ?? l.res.auth.Y);
-      const top = lv.at(-1), ref = top && at(top);
-      C.vcRel.set({ m: ref ? xy(l => at(l) / ref) : [], s: ref ? Array.from({ length: 17 }, (_, i) => [i * 5, (i * 5 / top.pct) ** 2]).filter(p => p[1] <= 1.6) : [] });
+      const trials = r.angles.flatMap(a => a.trials.map(t => [a.deg, t]));
+      if (vc.cur && vc.work) { const a = r.angles.find(x => x.trials.length < r.reps); if (a) trials.push([a.deg, vc.cur]); }
+      const mv = { a8: [], a6: [], a4: [], a2: [] };
+      for (const [deg, t] of trials) for (const p of t.samples || [])
+        if (p.m != null && (p.ph === 'ramp' || p.ph === 'top') && mv['a' + deg]) mv['a' + deg].push([p.act ?? p.want, p.m]);
+      C.vcMove.o.xMax = Math.max(30, r.max + 2);
+      C.vcMove.set(mv);
+      const at = t => t.first ?? t.brk;
+      const pts = r.angles.flatMap(a => a.trials.filter(t => at(t) != null).map(t => [a.deg, at(t)]));
+      // Same-torque curve through the median lift-off at the biggest angle that lifted off
+      let ref = null;
+      for (const a of r.angles) { const b = a.trials.map(at).filter(v => v != null).sort((x, y) => x - y); if (b.length) { ref = [a.deg, b[(b.length - 1) >> 1]]; break; } }
+      const model = vc.thrustModel();
+      const curve = ref ? Array.from({ length: 33 }, (_, i) => 1 + i * 0.25).map(d => [d, vc.pctFor(model, model.g(ref[1]) * Math.sin(ref[0] * Math.PI / 180) / Math.sin(d * Math.PI / 180))]).filter(p => p[1] != null && p[1] <= 85) : [];
+      C.vcBreak.set({ m: pts, s: curve });
     }
   }
 

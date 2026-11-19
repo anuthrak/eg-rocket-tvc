@@ -1,28 +1,39 @@
-// Tests → Thrust vector: the CT-5 motor + gimbal test (firmware v1.12.0+: ARM / THR / GIM, gyro rates in CAL lines).
-// The rocket sits on the rig pivot at its centre of mass, so a gimbal angle under thrust turns it. No scale needed:
-// the IMU measures the result. At each throttle level:
-//   hold  gimbal centred for HOLD_MS: vibration (gyro rms) and drift (angular acceleration with no command,
-//         i.e. the thrust line misses the pivot, or the rocket isn't balanced)
-//   kicks +X, −X, +Y, −Y: gimbal ±kick for PULSE_MS, then the opposite for PULSE_MS (so the rocket ends up stopped),
-//         then centre and wait. The slope of the body rate during each half is the angular acceleration.
-//   authority = −(α − α0) / gimbal°   (°/s² per gimbal °; positive = the gimbal pushes the way the controller expects:
-//         gimbal +X answers a lean toward +X, so it must turn the rocket back toward −X)
-//   trim  between kicks the page holds the rocket upright with a gentle PD loop on the gimbal (GIM at 50 Hz, gains
-//         scaled down as the measured authority grows); the mean gimbal angle it settles at during the hold is the
-//         trim, the angle that cancels the drift. (Clamped: no loop, no trim.)
-//   relative thrust = authority / authority at the top level (authority ∝ thrust × lever arm ÷ inertia)
-// Safety: the firmware's (85 % cap, ramp limit, 0.5 s link watchdog, 25° tilt cut, cut on mode change) plus a stop
-// here past 12° lean or 90°/s, on Stop / Space / Esc, leaving the tab, hiding the page or losing the link.
+// Tests → Thrust vector: the CT-5 breakaway test (firmware v1.13.0+: ARM REST / THR / GIM, gyro rates in CAL lines).
+// "How much thrust does it take to move the rocket?" The rocket starts where it naturally rests: leaning on a rig
+// stop, pulled there by its imbalance (CG off the pivot, ESC on one side, cable tug) and held by pivot friction.
+// For each gimbal angle, each repeat:
+//   rest      motor armed at 0 % (ARM REST: the Nano measures its tilt cut from this attitude, not from upright),
+//             gimbal centred: the mean tilt is the rest lean, its direction is the way the rocket falls.
+//   aim       gimbal set to the chosen angle along that direction, so thrust pushes the rocket back toward upright
+//             (gimbal +X answers a lean toward +X). Baseline: noise of the lean and of the body rate.
+//   ramp      throttle rises slowly (START_PCT → max at the chosen %/s). Every IMU sample (50 Hz) gives
+//             "moved" = how far the rocket has come off its rest, toward upright.
+//   lift-off  moved > max(MOVE_DEG, 5 × noise) for 3 samples in a row (60 ms): the motor is cut at once from this
+//             page and the gimbal centred, so it settles back onto the stop.
+//   starts    the throttle where it really started to move, back-dated from lift-off by a curve fit (onset()).
+//             The thrust, side force and torque use this one.
+//   back      wait for it to settle back on the stop.
+// Results: lift-off throttle per angle (median of the repeats), the thrust there (from the Throttle step test's
+// scale readings if there are any, else the 220 g × t² spec), the side force T·sin(gimbal) and the torque about the
+// pivot (side force × LEVER_MM). That torque should be the same at every gimbal angle: it is what the imbalance and
+// friction hold the rocket with. Divided by the mass it gives the equivalent CG offset.
+// Safety: the firmware's (85 % cap, ramp limit, 0.5 s link watchdog, cut past 12° from rest, cut on mode change)
+// plus a stop here past MOVED_MAX from rest or 90°/s, on Stop / Space / Esc, leaving the tab, hiding the page or
+// losing the link.
 
 const $ = id => document.getElementById(id);
-const MIN_FW = [1, 12, 0];
-const HEARTBEAT_MS = 150, REPLY_MS = 2000, RAMP_MS = 5000;
-const SETTLE_MS = 1500, HOLD_MS = 2000, GAP_MS = 1200, SKIP_MS = 80;
-const LEAN_MAX = 12, RATE_MAX = 90;
-const AUTH_MIN = 1.0;   // °/s² per gimbal °: below this the kicks didn't measurably turn the rocket (noise)
-const KP_S = 1.0, KD_S = 0.25, STAB_MAX = 4, AUTH_REF = 15;   // stabiliser: gimbal ° per lean ° and per °/s, at authority AUTH_REF
-const KICKS = [['X', 1], ['X', -1], ['Y', 1], ['Y', -1]];
-const KEY_CUR = 'tvc-vector-current', KEY_HIST = 'tvc-vector-history', KEY_OPT = 'tvc-vector-options', HIST_MAX = 20;
+const MIN_FW = [1, 13, 0];
+const HEARTBEAT_MS = 150, REPLY_MS = 2000, TICK_MS = 100;
+const REST_MS = 800, AIM_MS = 600, BASE_MS = 1200, TOP_HOLD_MS = 1500, BACK_MAX_MS = 4000, BACK_EXTRA_MS = 800;
+const START_PCT = 5;
+const REST_MIN = 2;            // °: less than this and the rocket isn't resting on a lean (balanced, or upright)
+const MOVE_DEG = 1.0, FIRST_DEG = 0.3, HITS = 3;
+const MOVED_MAX = 6, RATE_MAX = 90;
+const LEVER_MM = 190;          // rig pivot (247 mm from the tail, SLDP-GS-001) to TVC gimbal point (57 mm)
+const MASS_G = 598;            // PROJECT_SUMMARY §5 estimate
+const SPEC_G = 220;            // QX 30 mm EDF at full throttle
+const KEY_CUR = 'tvc-breakaway-current', KEY_HIST = 'tvc-breakaway-history', KEY_OPT = 'tvc-breakaway-options', HIST_MAX = 20;
+const KEY_THRUST = 'tvc-thrust-current';   // throttle.js step test (scale readings)
 const ABORT = Symbol('abort');
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
@@ -32,76 +43,128 @@ const stamp = t => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 const mean = a => a.reduce((s, v) => s + v, 0) / (a.length || 1);
-// Least-squares slope of v against t (ms → per second). null with too few points.
-function slope(pts) {
-  if (pts.length < 4) return null;
-  const mt = mean(pts.map(p => p.t)), mv = mean(pts.map(p => p.v));
-  let num = 0, den = 0;
-  for (const p of pts) { num += (p.t - mt) * (p.v - mv); den += (p.t - mt) ** 2; }
-  return den ? num / den * 1000 : null;
-}
+const sd = a => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); };
+const median = a => { const s = [...a].sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; };
 const f = (v, d = 1) => (v == null || !Number.isFinite(v) ? '' : v.toFixed(d));
+const rad = d => d * Math.PI / 180;
 
-// ---------- One level's numbers from its recorded samples ----------
-export function analyse(lv, kick) {
-  const hold = lv.samples.filter(s => s.ph === 'hold');
-  const a0 = { X: slope(hold.map(s => ({ t: s.t, v: s.rx }))), Y: slope(hold.map(s => ({ t: s.t, v: s.ry }))) };
-  const mx = mean(hold.map(s => s.rx)), my = mean(hold.map(s => s.ry));
-  const vib = hold.length ? Math.sqrt(mean(hold.map(s => (s.rx - mx) ** 2 + (s.ry - my) ** 2))) : null;
-  const est = { X: [], Y: [] };
-  for (const k of lv.kicks) {
-    const key = k.axis === 'X' ? 'rx' : 'ry';
-    for (const half of k.halves) {
-      const pts = lv.samples.filter(s => s.t >= half.t0 + SKIP_MS && s.t <= half.t1).map(s => ({ t: s.t, v: s[key] }));
-      const a = slope(pts);
-      if (a == null || a0[k.axis] == null) continue;
-      half.alpha = a;
-      est[k.axis].push(-(a - a0[k.axis]) / (half.deg));
+// ---------- Thrust from throttle: the step test's scale readings if there are 2+, else the spec curve ----------
+export function thrustModel() {
+  const pts = (load(KEY_THRUST, null)?.pts || []).filter(p => p && p.g != null && Number.isFinite(p.g)).map(p => [p.pct, p.g]).sort((a, b) => a[0] - b[0]);
+  if (pts.length >= 2) {
+    const tab = [[0, 0], ...pts.filter(p => p[0] > 0)];
+    const g = pct => {
+      if (pct <= 0) return 0;
+      for (let i = 1; i < tab.length; i++) if (pct <= tab[i][0]) {
+        const [x0, y0] = tab[i - 1], [x1, y1] = tab[i];
+        return y0 + (y1 - y0) * (pct - x0) / (x1 - x0);
+      }
+      const [x0, y0] = tab.at(-2), [x1, y1] = tab.at(-1);   // past the table: extend the last segment
+      return y1 + (y1 - y0) * (pct - x1) / (x1 - x0);
+    };
+    return { g, src: 'scale' };
+  }
+  return { g: pct => SPEC_G * (Math.max(0, pct) / 100) ** 2, src: 'spec' };
+}
+// Throttle that gives g grams (bisection on the model)
+function pctFor(model, g) {
+  let lo = 0, hi = 85;
+  if (model.g(hi) < g) return null;
+  for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; model.g(m) < g ? (lo = m) : (hi = m); }
+  return (lo + hi) / 2;
+}
+
+// ---------- When it really started moving ----------
+// Lift-off (1° off the stop) comes after the torque balance is crossed: the rocket needs time to accelerate, and the
+// throttle keeps rising meanwhile. Off the stop, moved(t) ≈ A·(t − t0)^n: n = 3 when the excess torque grows with the
+// ramp, n = 2 when friction lets go at once (stick-slip). Grid search over t0 (20 ms) and n, least squares for A,
+// over the ramp samples up to lift-off. Returns the throttle at t0, or null when there are too few points.
+export function onset(samples, endIdx) {
+  const end = samples[endIdx];
+  if (!end) return null;
+  const pts = [];
+  for (let i = endIdx; i >= 0; i--) {
+    const s = samples[i];
+    if (s.ph !== 'ramp' && s.ph !== 'top') break;
+    if (end.t - s.t > 5000) break;
+    if (s.m != null) pts.unshift(s);
+  }
+  if (pts.length < 8) return null;
+  let best = null;
+  for (const n of [2, 3]) {
+    for (let t0 = pts[0].t; t0 < end.t - 40; t0 += 20) {
+      let sxy = 0, sxx = 0;
+      const xs = pts.map(p => (p.t > t0 ? ((p.t - t0) / 1000) ** n : 0));
+      pts.forEach((p, i) => { sxy += xs[i] * p.m; sxx += xs[i] * xs[i]; });
+      if (!sxx) continue;
+      const A = sxy / sxx;
+      if (A <= 0) continue;
+      let sse = 0;
+      pts.forEach((p, i) => { sse += (p.m - A * xs[i]) ** 2; });
+      if (!best || sse < best.sse) best = { sse, t0 };
     }
   }
-  // Clamped (no pivot loop): the rocket can't turn, so authority, trim and relative thrust mean nothing; vibration only.
-  // On the pivot, an authority inside the noise is "no response", not a number to divide by.
-  const real = v => (lv.stab && v != null && Math.abs(v) >= AUTH_MIN ? v : null);
-  const auth = { X: real(est.X.length ? mean(est.X) : null), Y: real(est.Y.length ? mean(est.Y) : null) };
-  // Stabilised hold: the mean gimbal is the trim. Without the loop, estimate it from the drift.
-  const trim = lv.stab && hold.length ? { X: mean(hold.map(s => s.gx)), Y: mean(hold.map(s => s.gy)) } : { X: null, Y: null };
-  return { a0, vib, auth, trim, kick };
+  if (!best) return null;
+  // Throttle at t0: the last sample at or before it
+  let k = pts.length - 1;
+  while (k > 0 && pts[k].t > best.t0) k--;
+  return pts[k].act ?? pts[k].want;
 }
-export function relThrust(run) {
-  const top = run.levels.at(-1);
-  const at = r => (r?.auth.X != null && r?.auth.Y != null ? (r.auth.X + r.auth.Y) / 2 : r?.auth.X ?? r?.auth.Y ?? null);
-  const ref = at(top?.res);
-  return run.levels.map(l => { const a = at(l.res); return a != null && ref ? a / ref : null; });
+
+// ---------- One gimbal angle's numbers ----------
+export function analyse(ang, model = thrustModel()) {
+  const ok = ang.trials.filter(t => t.brk != null);
+  const brk = median(ok.map(t => t.brk)), first = median(ok.filter(t => t.first != null).map(t => t.first));
+  const spread = ok.length > 1 ? Math.max(...ok.map(t => t.brk)) - Math.min(...ok.map(t => t.brk)) : null;
+  const at = first ?? brk;                       // torque from where it starts moving (lift-off is a little later)
+  const g = at != null ? model.g(at) : null;
+  const side = g != null ? g * Math.sin(rad(ang.deg)) : null;
+  const torque = side != null ? side * LEVER_MM : null;
+  const rest = median(ang.trials.map(t => t.restDeg).filter(v => v != null));
+  return { brk, first, spread, g, side, torque, rest, n: ang.trials.length, nOk: ok.length };
 }
+export function overall(run, model = thrustModel()) {
+  const res = run.angles.map(a => analyse(a, model));
+  const tq = res.map(r => r.torque).filter(v => v != null);
+  const torque = median(tq);
+  const t0 = run.angles.flatMap(a => a.trials)[0];
+  return { res, torque, cg: torque != null ? torque / MASS_G : null, restDeg: t0?.restDeg ?? null, restDir: t0?.restDir ?? null,
+           tqSpread: tq.length > 1 ? (Math.max(...tq) - Math.min(...tq)) / torque : null, src: model.src };
+}
+const dirName = d => {
+  if (d == null) return '';
+  const n = ((Math.round(d) % 360) + 360) % 360;
+  const near = [[0, '+X'], [90, '+Y'], [180, '−X'], [270, '−Y'], [360, '+X']].find(([a]) => Math.abs(n - a) <= 10);
+  return near ? `toward ${near[1]}` : `toward ${n}° (0° = +X, 90° = +Y)`;
+};
+
 function csv(run) {
-  const rows = ['throttle_pct,authority_x_dps2_per_deg,authority_y_dps2_per_deg,trim_x_deg,trim_y_deg,drift_x_dps2,drift_y_dps2,vibration_dps_rms,rel_thrust,spec_rel_thrust,mount,kick_deg,pulse_ms'];
-  const rel = relThrust(run), top = run.levels.at(-1)?.pct;
-  run.levels.forEach((l, i) => {
-    const r = l.res; if (!r) return;
-    rows.push([l.pct, f(r.auth.X, 2), f(r.auth.Y, 2), f(r.trim.X, 2), f(r.trim.Y, 2), f(r.a0.X, 2), f(r.a0.Y, 2), f(r.vib, 2),
-      f(rel[i], 3), f(top ? (l.pct / top) ** 2 : null, 3), run.mount, run.kick, run.pulse].join(','));
-  });
+  const model = thrustModel(), o = overall(run, model);
+  const rows = ['gimbal_deg,trial,rest_lean_deg,rest_dir_deg,starts_moving_pct,liftoff_pct,thrust_g,side_force_g,torque_gmm,noise_deg,threshold_deg,max_pct,ramp_pct_s,thrust_source'];
+  run.angles.forEach(a => a.trials.forEach((t, i) => {
+    const at = t.first ?? t.brk, g = at != null ? model.g(at) : null, side = g != null ? g * Math.sin(rad(a.deg)) : null;
+    rows.push([a.deg, i + 1, f(t.restDeg, 2), f(t.restDir, 0), f(t.first, 1), t.brk == null ? 'none' : f(t.brk, 1), f(g, 1), f(side, 1), f(side != null ? side * LEVER_MM : null, 0),
+      f(t.noise, 3), f(t.thresh, 2), run.max, run.ramp, o.src].join(','));
+  }));
   return rows.join('\n') + '\n';
 }
 function samplesCsv(run) {
-  const rows = ['throttle_pct,phase,t_ms,gimbal_x_deg,gimbal_y_deg,tilt_x_deg,tilt_y_deg,rate_x_dps,rate_y_dps,throttle_actual_pct'];
-  for (const l of run.levels) for (const s of l.samples)
-    rows.push([l.pct, s.ph, Math.round(s.t - run.t0), f(s.gx, 2), f(s.gy, 2), f(s.tx, 2), f(s.ty, 2), f(s.rx, 1), f(s.ry, 1), f(s.thr, 0)].join(','));
+  const rows = ['gimbal_deg,trial,phase,t_ms,throttle_cmd_pct,throttle_actual_pct,gimbal_x_deg,gimbal_y_deg,tilt_x_deg,tilt_y_deg,rate_x_dps,rate_y_dps,moved_deg'];
+  run.angles.forEach(a => a.trials.forEach((t, i) => {
+    for (const s of t.samples || [])
+      rows.push([a.deg, i + 1, s.ph, Math.round(s.t - run.t0), f(s.want, 1), f(s.act, 1), f(s.gx, 2), f(s.gy, 2), f(s.tx, 2), f(s.ty, 2), f(s.rx, 1), f(s.ry, 1), f(s.m, 2)].join(','));
+  }));
   return rows.join('\n') + '\n';
 }
-const dirOk = (run, ax) => {
-  const v = run.levels.map(l => l.res?.auth[ax]).filter(x => x != null);
-  return run.mount !== 'pivot' || !v.length ? null : v.every(x => x > 0) ? 'ok' : v.every(x => x < 0) ? 'rev' : 'mixed';
-};
 function summary(run) {
-  const rel = relThrust(run);
-  const lines = [`CT-5 thrust vector, ${stamp(run.t)}`, `Firmware v${run.fw} · ${run.mount === 'pivot' ? 'on the pivot' : 'clamped'} · kick ${run.kick}° × ${run.pulse} ms`];
-  run.levels.forEach((l, i) => {
-    const r = l.res; if (!r) return;
-    lines.push(`${String(l.pct).padStart(3)} %  authority X ${f(r.auth.X, 1) || '—'} Y ${f(r.auth.Y, 1) || '—'} °/s²/°  trim X ${f(r.trim.X, 2) || '—'} Y ${f(r.trim.Y, 2) || '—'}°  vibration ${f(r.vib, 1)} °/s  rel. thrust ${f(rel[i], 2) || '—'}`);
+  const o = overall(run);
+  const lines = [`CT-5 breakaway, ${stamp(run.t)}`, `Firmware v${run.fw} · ramp ${run.ramp} %/s up to ${run.max} % · ${run.reps} repeat${run.reps > 1 ? 's' : ''} · thrust from ${o.src === 'scale' ? 'the scale step test' : 'the spec curve (220 g × t²)'}`,
+    `Rest lean ${f(o.restDeg, 1)}° ${dirName(o.restDir)}`];
+  run.angles.forEach((a, i) => {
+    const r = o.res[i];
+    lines.push(`gimbal ${a.deg}°  lift-off ${r.brk != null ? f(r.brk, 1) + ' %' : 'none'}${r.spread != null ? ` (±${f(r.spread / 2, 1)})` : ''}  starts moving ${f(r.first, 1) || '—'} %  thrust ${f(r.g, 0) || '—'} g  side ${f(r.side, 1) || '—'} g  torque ${f(r.torque, 0) || '—'} g·mm  (${r.nOk}/${r.n})`);
   });
-  const dx = dirOk(run, 'X'), dy = dirOk(run, 'Y');
-  if (run.mount === 'pivot') lines.push(`Direction X ${dx === 'ok' ? 'OK' : dx === 'rev' ? 'REVERSED' : dx ?? '—'} · Y ${dy === 'ok' ? 'OK' : dy === 'rev' ? 'REVERSED' : dy ?? '—'}`);
+  if (o.torque != null) lines.push(`Torque to lift it off the stop ≈ ${f(o.torque, 0)} g·mm ≈ CG ${f(o.cg, 1)} mm off the pivot at ${MASS_G} g (includes pivot friction)`);
   return lines.join('\n');
 }
 function download(name, text) {
@@ -117,50 +180,70 @@ export function initVector({ send, link }) {
   const panel = $('vcPanel');
   let open = false, tab = 0;
   let cfg = null, calOn = false, hasRates = false;
-  let armed = false, fwAct = null, lastThr = 0;
+  let armed = false, fwAct = null, lastThr = 0, restReply = null;
   let checks = [false, false, false, false, false];
-  let opt = { mount: 'pivot', levels: [30, 40, 50], kick: 2, pulse: 400, ...load(KEY_OPT, {}) };
+  let opt = { angles: [8, 4], max: 25, ramp: 2, reps: 2, ...load(KEY_OPT, {}) };
+  if (!Array.isArray(opt.angles) || !opt.angles.length) opt.angles = [8, 4];
   let phase = 'idle';                      // idle | arming | running | done | error
-  let stepLabel = '', stepIdx = -1, want = 0, gim = { x: 0, y: 0 }, lean = 0;
+  let stepLabel = '', stepIdx = 0, want = 0, gim = { x: 0, y: 0 }, lean = 0, moved = null;
   let note = '', noteWarn = false, copied = 0;
   let beat = 0, cancelers = [], aborted = false;
-  let rec = null;                          // { lv, ph } while recording
-  let stab = false, gain = 1;              // stabiliser on (pivot, between kicks), its gain scale
+  let cur = null;                          // the trial being run: { ph, samples, u, s0, thresh, hits, brk, ... }
   let run = load(KEY_CUR, null);
-  if (!Array.isArray(run?.levels)) run = null;
-  let history = load(KEY_HIST, []);
+  if (!Array.isArray(run?.angles)) run = null;
+  let history = load(KEY_HIST, []).filter(h => Array.isArray(h?.angles));
   let work = null;
 
   // ---------- Firmware lines ----------
   function handle(line) {
     const p = line.split(',');
-    if (p[0] === 'CFG') { cfg = { xc: +p[1], yc: +p[2], xd: +p[3], yd: +p[4], tx: +p[5], ty: +p[6], spg: +p[7], spgy: p.length >= 13 ? +p[12] : +p[7] }; if (open && !calOn) send('CAL'); }
+    if (p[0] === 'CFG') { cfg = { tx: +p[5], ty: +p[6] }; if (open && !calOn) send('CAL'); }
     else if (p[0] === 'CAL' && p[1] === 'ON') calOn = true;
     else if (p[0] === 'CAL' && p[1] === 'OFF') { calOn = false; if (open && phase !== 'running') send('CAL'); }
     else if (p[0] === 'CAL' && p.length >= 5) {
       calOn = true; hasRates = p.length >= 7;
       if (cfg) {
         const tx = +p[3] - cfg.tx, ty = +p[4] - cfg.ty, rx = +p[5], ry = +p[6];
-        lean = Math.max(Math.abs(tx), Math.abs(ty));
-        if (rec && hasRates) rec.lv.samples.push({ t: performance.now(), ph: rec.ph, gx: gim.x, gy: gim.y, tx, ty, rx, ry, thr: fwAct });
-        if (phase === 'running' && stab && hasRates) {
-          const c = v => Math.max(-STAB_MAX, Math.min(STAB_MAX, v));
-          setGim(c(gain * (KP_S * tx + KD_S * rx)), c(gain * (KP_S * ty + KD_S * ry)));
-        }
-        if (phase === 'running' && opt.mount === 'pivot') {
-          if (lean > LEAN_MAX) abort(`Stopped: the rocket leaned ${lean.toFixed(0)}° (limit ${LEAN_MAX}°). Smaller kicks or shorter kicks, or re-balance it on the pivot.`);
-          else if (hasRates && Math.max(Math.abs(rx), Math.abs(ry)) > RATE_MAX) abort(`Stopped: the rocket turned faster than ${RATE_MAX}°/s. Use a smaller kick.`);
-        }
+        lean = Math.hypot(tx, ty);
+        if (cur && hasRates) sampleIn(tx, ty, rx, ry);
       }
-    } else if (p[0] === 'THR' && p[1] === 'CUT') {
-      const why = { LINK: 'the Nano stopped hearing this page (0.5 s)', TILT: 'the rocket leaned past 25°', MODE: 'the Nano changed mode' }[p[2]] || p[2];
+    } else if (p[0] === 'ARM' && p[1] === 'REST') restReply = { x: +p[2], y: +p[3] };
+    else if (p[0] === 'THR' && p[1] === 'CUT') {
+      const why = { LINK: 'the Nano stopped hearing this page (0.5 s)', MOVE: 'the rocket moved more than 12° from its rest', TILT: 'the rocket leaned past 25°', MODE: 'the Nano changed mode' }[p[2]] || p[2];
       armed = false;
       if (phase === 'running' || phase === 'arming') abort(`Motor cut by the Nano: ${why}.`, true);
     } else if (p[0] === 'THR' && p.length >= 5) {
       armed = p[1] === 'ARMED'; fwAct = +p[3]; lastThr = performance.now();
       if (!armed && phase === 'running') abort('Stopped: the motor was disarmed.', true);
-    } else if (p[0] === 'ERR' && (phase === 'running' || phase === 'arming')) abort(`The Nano said "${line}".`, true);
+    } else if (p[0] === 'ERR' && (phase === 'running' || phase === 'arming')) {
+      abort(line === 'ERR,ARM REST lean' ? 'The Nano reads a lean of more than 40°: is the rocket on the rig, and the IMU calibrated (Calibrate → Level)?' : `The Nano said "${line}".`, true);
+    }
     if (open) render();
+  }
+  // Every IMU sample during a trial (50 Hz). Lift-off is detected here, not in the sequencer, so the cut is immediate.
+  function sampleIn(tx, ty, rx, ry) {
+    const c = cur, now = performance.now();
+    const s = { t: now, ph: c.ph, want, act: fwAct, gx: gim.x, gy: gim.y, tx, ty, rx, ry, m: null };
+    if (c.u) {
+      s.m = c.s0 - (tx * c.u.x + ty * c.u.y);      // positive = off the stop, toward upright
+      moved = s.m;
+    }
+    c.samples.push(s);
+    if (phase !== 'running') return;
+    if (s.m != null && (c.ph === 'ramp' || c.ph === 'top')) {
+      c.hits = s.m > c.thresh ? c.hits + 1 : 0;
+      if (c.hits >= HITS && c.brk == null) {
+        // Lift-off: motor off and gimbal centred at once
+        want = 0; send('THR 0'); setGim(0, 0);
+        const i = c.samples.length - HITS;          // the first of the 3 samples over the line
+        c.brkIdx = i;
+        c.brk = c.samples[i].act ?? c.samples[i].want;
+        c.ph = 'back';
+        c.wake?.();
+      }
+    }
+    if (s.m != null && s.m > MOVED_MAX) abort(`Stopped: the rocket came ${s.m.toFixed(0)}° off its rest (limit ${MOVED_MAX}°). Use a lower ramp rate.`);
+    else if (Math.max(Math.abs(rx), Math.abs(ry)) > RATE_MAX) abort(`Stopped: the rocket turned faster than ${RATE_MAX}°/s.`);
   }
   function onLink() {
     cfg = null; calOn = false; armed = false; fwAct = null;
@@ -178,82 +261,115 @@ export function initVector({ send, link }) {
     const t0 = performance.now();
     while (!test()) {
       if (performance.now() - t0 > ms) throw new Error(what);
-      await wait(40);
+      await wait(20);
     }
   }
   function setGim(x, y) { gim = { x, y }; send(`GIM ${x.toFixed(2)} ${y.toFixed(2)}`, true); }
-  function setThr(pct) { want = pct; send(`THR ${pct}`); }
-  function startBeat() { clearInterval(beat); beat = setInterval(() => { if (armed || phase === 'arming') send(`THR ${want}`, true); }, HEARTBEAT_MS); }
+  function setThr(pct) { want = pct; send(`THR ${pct.toFixed(1)}`, true); }
+  function startBeat() { clearInterval(beat); beat = setInterval(() => { if (armed || phase === 'arming') send(`THR ${want.toFixed(1)}`, true); }, HEARTBEAT_MS); }
   function stopBeat() { clearInterval(beat); beat = 0; }
   function setNote(t, warn) { note = t; noteWarn = !!warn; }
+  const label = t => { stepLabel = t; render(); };
+
+  async function trial(ang, rep) {
+    const c = { ph: 'rest', samples: [], u: null, s0: 0, thresh: MOVE_DEG, hits: 0, brk: null, first: null, wake: null };
+    cur = c; moved = null;
+    const tag = `${ang.deg}° · ${rep + 1}/${work.reps}`;
+    // Rest: re-take the Nano's rest attitude (motor at 0), gimbal centred
+    label(`${tag} · resting on the stop`);
+    want = 0; if (armed) send('THR 0', true);   // THR before the first ARM is an error on the Nano
+    setGim(0, 0);
+    restReply = null; send('ARM REST');
+    await until(() => restReply && armed, REPLY_MS, 'No reply to ARM REST. Upload firmware v1.13.0 (firmware/nano_tvc).');
+    await wait(REST_MS);
+    const rs = c.samples.filter(s => s.ph === 'rest');
+    if (rs.length < 10) throw new Error('No IMU samples from the Nano.');
+    const r = { x: mean(rs.map(s => s.tx)), y: mean(rs.map(s => s.ty)) }, rl = Math.hypot(r.x, r.y);
+    if (rl < REST_MIN) throw new Error(`The rocket is resting only ${rl.toFixed(1)}° from upright, so there is no stop to lift it off. Let it lean onto a stop (or add a little weight to one side), then start again.`);
+    c.u = { x: r.x / rl, y: r.y / rl }; c.restDeg = rl; c.restDir = Math.atan2(r.y, r.x) * 180 / Math.PI;
+    // Aim: gimbal along the lean, so thrust pushes it back toward upright; then measure the noise
+    label(`${tag} · gimbal ${ang.deg}° against the lean`);
+    c.ph = 'aim';
+    setGim(ang.deg * c.u.x, ang.deg * c.u.y);
+    await wait(AIM_MS);
+    c.ph = 'base';
+    await wait(BASE_MS);
+    const bs = c.samples.filter(s => s.ph === 'base');
+    const lin = bs.map(s => s.tx * c.u.x + s.ty * c.u.y);
+    c.s0 = mean(lin); c.noise = sd(lin);
+    c.thresh = Math.max(MOVE_DEG, 5 * c.noise);
+    for (const s of bs) s.m = c.s0 - (s.tx * c.u.x + s.ty * c.u.y);
+    // Ramp until it lifts off (sampleIn cuts the motor) or the top is reached and held
+    c.ph = 'ramp';
+    const t0 = performance.now(), span = (work.max - START_PCT) / work.ramp * 1000;
+    await new Promise((res, rej) => {
+      if (aborted) { rej(ABORT); return; }
+      let topAt = 0;
+      const iv = setInterval(() => {
+        if (c.brk != null) return done();
+        const el = performance.now() - t0;
+        if (el < span) { label(`${tag} · ramping, ${want.toFixed(0)} %`); setThr(Math.min(work.max, START_PCT + work.ramp * el / 1000)); return; }
+        if (!topAt) { topAt = performance.now(); c.ph = 'top'; setThr(work.max); label(`${tag} · holding ${work.max} %`); }
+        else if (performance.now() - topAt > TOP_HOLD_MS) done();
+      }, TICK_MS);
+      const done = () => { clearInterval(iv); c.wake = null; res(); };
+      c.wake = done;
+      cancelers.push(() => { clearInterval(iv); rej(ABORT); });
+    });
+    // Back onto the stop
+    c.ph = 'back';
+    setThr(0); setGim(0, 0);
+    label(c.brk != null ? `${tag} · lifted off at ${c.brk.toFixed(1)} %, settling back` : `${tag} · no lift-off up to ${work.max} %, settling`);
+    const tb = performance.now();
+    await until(() => (moved ?? 0) < 0.5 || performance.now() - tb > BACK_MAX_MS, BACK_MAX_MS + 500, 'never');
+    await wait(BACK_EXTRA_MS);
+    // Starts moving: back-dated from lift-off by a curve fit (onset()); if the fit fails, where moved last left
+    // the small band on its way to lift-off
+    if (c.brk != null) {
+      c.first = onset(c.samples, c.brkIdx + HITS - 1);
+      if (c.first == null) {
+        const band = Math.max(FIRST_DEG, 3 * c.noise);
+        let k = c.brkIdx;
+        while (k > 0 && c.samples[k - 1].m != null && c.samples[k - 1].m > band && c.samples[k - 1].ph !== 'base') k--;
+        const s = c.samples[k];
+        c.first = s && s.ph !== 'base' ? (s.act ?? s.want) : null;
+      }
+    }
+    cur = null;
+    return { restDeg: c.restDeg, restDir: c.restDir, noise: c.noise, thresh: c.thresh, brk: c.brk, first: c.first,
+             samples: c.samples.map(s => ({ t: s.t, ph: s.ph, want: s.want, act: s.act, gx: s.gx, gy: s.gy, tx: s.tx, ty: s.ty, rx: s.rx, ry: s.ry, m: s.m })) };
+  }
 
   async function sequence() {
-    const levels = [...opt.levels].sort((a, b) => a - b);
-    work = { id: Date.now(), t: Date.now(), t0: performance.now(), fw: link().fw, mount: opt.mount, kick: opt.kick, pulse: opt.pulse,
-             levels: levels.map(pct => ({ pct, samples: [], kicks: [], res: null, stab: opt.mount === 'pivot' })) };
-    gain = 1; stab = false;
+    const angles = [...opt.angles].sort((a, b) => b - a);   // biggest first: lifts off soonest
+    work = { id: Date.now(), t: Date.now(), t0: performance.now(), fw: link().fw, max: opt.max, ramp: opt.ramp, reps: opt.reps,
+             angles: angles.map(deg => ({ deg, trials: [] })) };
     phase = 'arming'; setNote('', false); stepIdx = 0; render();
     want = 0; setGim(0, 0);
-    send('ARM'); startBeat();
-    await until(() => armed, REPLY_MS, 'No reply to ARM. Upload firmware v1.12.0 (firmware/nano_tvc).');
+    startBeat();
     phase = 'running';
-    stab = opt.mount === 'pivot';
-    for (const lv of work.levels) {
-      stepLabel = `${lv.pct} % · spin up`; render();
-      setThr(lv.pct);
-      await until(() => fwAct != null && fwAct >= lv.pct - 0.5, RAMP_MS, 'The throttle did not reach its level.');
-      stepLabel = `${lv.pct} % · settle`; render();
-      await wait(SETTLE_MS);
-      stepLabel = `${lv.pct} % · hold, gimbal centred`; render();
-      rec = { lv, ph: 'hold' };
-      await wait(HOLD_MS);
-      stepIdx++;
-      for (const [axis, sign] of KICKS) {
-        const d = sign * opt.kick, name = `${sign > 0 ? '+' : '−'}${axis}`;
-        stepLabel = `${lv.pct} % · kick ${name}`; render();
-        const k = { axis, sign, halves: [] };
-        lv.kicks.push(k);
-        // Kick around where the stabiliser was holding (last 0.5 s), with the loop off
-        const now = performance.now(), recent = lv.samples.filter(s => now - s.t < 500);
-        const bx = recent.length ? mean(recent.map(s => s.gx)) : 0, by = recent.length ? mean(recent.map(s => s.gy)) : 0;
-        stab = false;
-        rec = { lv, ph: `kick${name}` };
-        let t0 = performance.now();
-        axis === 'X' ? setGim(bx + d, by) : setGim(bx, by + d);
-        await wait(opt.pulse);
-        k.halves.push({ t0, t1: performance.now(), deg: d });
-        t0 = performance.now();
-        axis === 'X' ? setGim(bx - d, by) : setGim(bx, by - d);
-        await wait(opt.pulse);
-        k.halves.push({ t0, t1: performance.now(), deg: -d });
-        setGim(bx, by);
-        stab = opt.mount === 'pivot';
-        rec = { lv, ph: 'gap' };
-        await wait(GAP_MS);
-        stepIdx++;
+    for (const ang of work.angles) {
+      for (let rep = 0; rep < work.reps; rep++) {
+        ang.trials.push(await trial(ang, rep));
+        stepIdx++; render();
       }
-      rec = null;
-      lv.res = analyse(lv, opt.kick);
-      // Softer stabiliser at higher thrust: scale by the authority just measured
-      const a = [lv.res.auth.X, lv.res.auth.Y].filter(v => v > 0);
-      if (a.length) gain = Math.max(0.3, Math.min(1.5, AUTH_REF / mean(a)));
-      render();
     }
     finish();
   }
   function finish() {
-    rec = null; stab = false; want = 0; setGim(0, 0);
+    cur = null; want = 0; setGim(0, 0);
     send('THR 0'); send('DISARM'); stopBeat();
     armed = false; phase = 'done';
     run = work; work = null;
-    store(KEY_CUR, run);
+    // Keep the raw samples of this run only (localStorage is small)
+    if (!store2(KEY_CUR, run)) store(KEY_CUR, noSamples(run));
     history = [noSamples(run), ...history.filter(h => h.id !== run.id)].slice(0, HIST_MAX);
     store(KEY_HIST, history);
     setNote('Done: motor off, gimbal centred. See Results.', false);
     tab = 2; render();
   }
-  // Past runs keep the results only; the raw samples stay with the current run (localStorage is small)
-  const noSamples = r => ({ ...r, levels: r.levels.map(l => ({ ...l, samples: [] })) });
+  function store2(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch { return false; } }
+  const noSamples = r => ({ ...r, angles: r.angles.map(a => ({ ...a, trials: a.trials.map(t => ({ ...t, samples: [] })) })) });
 
   function start() {
     if (!ready()) return;
@@ -264,7 +380,7 @@ export function initVector({ send, link }) {
     if (phase !== 'running' && phase !== 'arming') { if (msg) setNote(msg, warn); return; }
     aborted = true;
     cancelers.forEach(c => c()); cancelers = [];
-    rec = null; stab = false; want = 0;
+    cur = null; want = 0; moved = null;
     if (link().port) { send('GIM 0 0'); send('THR 0'); send('DISARM'); }
     stopBeat();
     armed = false; phase = 'error'; work = null;
@@ -307,18 +423,18 @@ export function initVector({ send, link }) {
   panel.querySelectorAll('#vcCheck input').forEach((c, i) => { c.onchange = () => { checks[i] = c.checked; render(); }; });
   const saveOpt = () => { store(KEY_OPT, opt); render(); };
   const idle = () => phase !== 'running' && phase !== 'arming';
-  panel.querySelectorAll('[data-mount]').forEach(b => { b.onclick = () => { if (idle()) { opt.mount = b.dataset.mount; saveOpt(); } }; });
-  panel.querySelectorAll('[data-lv]').forEach(b => { b.onclick = () => {
+  panel.querySelectorAll('[data-ang]').forEach(b => { b.onclick = () => {
     if (!idle()) return;
-    const v = +b.dataset.lv, has = opt.levels.includes(v);
-    if (has && opt.levels.length === 1) return;
-    opt.levels = has ? opt.levels.filter(x => x !== v) : [...opt.levels, v].sort((a, c) => a - c);
+    const v = +b.dataset.ang, has = opt.angles.includes(v);
+    if (has && opt.angles.length === 1) return;
+    opt.angles = has ? opt.angles.filter(x => x !== v) : [...opt.angles, v].sort((a, c) => c - a);
     saveOpt();
   }; });
-  panel.querySelectorAll('[data-kick]').forEach(b => { b.onclick = () => { if (idle()) { opt.kick = +b.dataset.kick; saveOpt(); } }; });
-  panel.querySelectorAll('[data-pulse]').forEach(b => { b.onclick = () => { if (idle()) { opt.pulse = +b.dataset.pulse; saveOpt(); } }; });
+  panel.querySelectorAll('[data-max]').forEach(b => { b.onclick = () => { if (idle()) { opt.max = +b.dataset.max; saveOpt(); } }; });
+  panel.querySelectorAll('[data-ramp]').forEach(b => { b.onclick = () => { if (idle()) { opt.ramp = +b.dataset.ramp; saveOpt(); } }; });
+  panel.querySelectorAll('[data-rep]').forEach(b => { b.onclick = () => { if (idle()) { opt.reps = +b.dataset.rep; saveOpt(); } }; });
   $('vcGo').onclick = start;
-  $('vcCsv').onclick = () => { if (run) download(`ct5_vector_${fileStamp(run)}.csv`, csv(run)); };
+  $('vcCsv').onclick = () => { if (run) download(`ct5_breakaway_${fileStamp(run)}.csv`, csv(run)); };
   $('vcCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(summary(run) + '\n\n' + csv(run)); copied = Date.now(); render(); setTimeout(render, 1600); } catch {}
   };
@@ -326,9 +442,9 @@ export function initVector({ send, link }) {
   $('vcHist').onclick = e => {
     const b = e.target.closest('[data-hist]');
     const h = b && history.find(r => r.id === +b.dataset.hist);
-    if (h) download(`ct5_vector_${fileStamp(h)}.csv`, csv(h));
+    if (h) download(`ct5_breakaway_${fileStamp(h)}.csv`, csv(h));
     const s = e.target.closest('[data-raw]');
-    if (s && run) download(`ct5_vector_samples_${fileStamp(run)}.csv`, samplesCsv(run));
+    if (s && run) download(`ct5_breakaway_samples_${fileStamp(run)}.csv`, samplesCsv(run));
   };
 
   // ---------- Render ----------
@@ -341,15 +457,15 @@ export function initVector({ send, link }) {
     return false;
   };
   function setText(id, t) { const el = $(id); if (el.textContent !== t) el.textContent = t; }
-  const ready = () => calOn && hasRates && checks.every(Boolean) && idle();
-  const totalSteps = () => opt.levels.length * (1 + KICKS.length);
+  const ready = () => calOn && hasRates && checks.every(Boolean) && idle() && !fwOld(link().fw);
+  const totalSteps = () => opt.angles.length * opt.reps;
 
   function render() {
     if (!open) return;
     const L = link();
     let msg = '';
     if (!L.port) msg = L.demo ? 'The thrust-vector test needs the real Arduino. Stop the demo and connect it.' : 'Connect the Arduino to run the thrust-vector test.';
-    else if (fwOld(L.fw)) msg = `Firmware v${L.fw} doesn't send gyro rates in calibration mode. Upload firmware v1.12.0 or newer (firmware/nano_tvc).`;
+    else if (fwOld(L.fw)) msg = `Firmware v${L.fw} can't arm with the rocket resting on a stop (its 25° tilt cut would stop the motor). Upload firmware v1.13.0 or newer (firmware/nano_tvc).`;
     else if (!cfg) msg = 'Waiting for the Nano. It restarts when the port opens and takes about 5 s to boot (keep the rocket still).';
     $('vcMsg').textContent = msg;
     $('vcMsg').hidden = !msg || tab === 2;
@@ -367,28 +483,29 @@ export function initVector({ send, link }) {
     setText('vcNext', tab === 2 ? 'Close' : 'Next');
 
     // Setup
-    panel.querySelectorAll('[data-mount]').forEach(b => { b.classList.toggle('on', b.dataset.mount === opt.mount); b.disabled = busy; });
-    panel.querySelectorAll('[data-lv]').forEach(b => { b.classList.toggle('on', opt.levels.includes(+b.dataset.lv)); b.disabled = busy; });
-    panel.querySelectorAll('[data-kick]').forEach(b => { b.classList.toggle('on', +b.dataset.kick === opt.kick); b.disabled = busy; });
-    panel.querySelectorAll('[data-pulse]').forEach(b => { b.classList.toggle('on', +b.dataset.pulse === opt.pulse); b.disabled = busy; });
-    const secs = opt.levels.length * (2.5 + SETTLE_MS / 1000 + HOLD_MS / 1000 + KICKS.length * (2 * opt.pulse + GAP_MS) / 1000);
-    setText('vcPlan', `${opt.levels.join(', ')} % · ${totalSteps()} steps · about ${Math.round(secs)} s with the motor on.` +
-      (opt.mount === 'clamp' ? ' Clamped: the kicks still run (servos under load), but authority and trim need the pivot.' : ''));
+    panel.querySelectorAll('[data-ang]').forEach(b => { b.classList.toggle('on', opt.angles.includes(+b.dataset.ang)); b.disabled = busy; });
+    panel.querySelectorAll('[data-max]').forEach(b => { b.classList.toggle('on', +b.dataset.max === opt.max); b.disabled = busy; });
+    panel.querySelectorAll('[data-ramp]').forEach(b => { b.classList.toggle('on', +b.dataset.ramp === opt.ramp); b.disabled = busy; });
+    panel.querySelectorAll('[data-rep]').forEach(b => { b.classList.toggle('on', +b.dataset.rep === opt.reps); b.disabled = busy; });
+    const per = (REST_MS + AIM_MS + BASE_MS + 1500) / 1000 + (opt.max - START_PCT) / opt.ramp + 2;
+    setText('vcPlan', `Gimbal ${[...opt.angles].sort((a, b) => b - a).join('°, ')}° × ${opt.reps} · ${totalSteps()} ramps · up to about ${Math.round(per * totalSteps())} s, much less if it lifts off early.` +
+      (lean ? ` Resting now at ${lean.toFixed(1)}° from upright.` : ''));
     panel.querySelectorAll('#vcCheck input').forEach((c, i) => { c.checked = checks[i]; c.disabled = busy; });
 
     // Run
-    setText('vcAct', armed && fwAct != null ? fwAct.toFixed(0) : DASH);
+    setText('vcAct', armed && fwAct != null ? fwAct.toFixed(1) : DASH);
     setText('vcStep', busy ? `${Math.min(stepIdx + 1, totalSteps())} / ${totalSteps()}` : DASH);
     setText('vcGim', busy ? `${gim.x >= 0 ? '+' : ''}${gim.x.toFixed(1)}, ${gim.y >= 0 ? '+' : ''}${gim.y.toFixed(1)}` : DASH);
     setText('vcLean', calOn && cfg ? lean.toFixed(1) : DASH);
+    setText('vcMoved', busy && moved != null ? moved.toFixed(2) : DASH);
     const dots = $('vcDots');
     if (dots.childElementCount !== totalSteps()) dots.innerHTML = '<i></i>'.repeat(totalSteps());
     [...dots.children].forEach((d, i) => { d.className = busy ? (i < stepIdx ? 'ok' : i === stepIdx ? 'cur' : '') : phase === 'done' ? 'ok' : ''; });
     setText('vcPrompt', phase === 'arming' ? 'Arming…' : phase === 'running' ? stepLabel : phase === 'done' ? 'Done' : phase === 'error' ? 'Stopped' : 'Ready');
     setText('vcSub', busy ? 'Hands clear of the intake. Space or Stop motor ends it at once.'
       : !checks.every(Boolean) ? 'Tick the checklist on the Setup tab first.'
-      : !hasRates ? 'Waiting for gyro rates from the Nano (firmware v1.12.0).'
-      : 'Arm & start runs the whole sequence by itself. Keep a hand near the 12 V plug.');
+      : !hasRates ? 'Waiting for gyro rates from the Nano.'
+      : 'Arm & start runs every ramp by itself. Keep a hand near the 12 V plug.');
     $('vcGo').disabled = !ready();
     setText('vcGo', busy ? 'Running…' : 'Arm & start');
     $('vcStop').disabled = !busy;
@@ -396,37 +513,37 @@ export function initVector({ send, link }) {
     $('vcNote').classList.toggle('cal-warn', noteWarn && !!note);
 
     // Results
-    const r = run;
-    const rel = r ? relThrust(r) : [];
+    const r = run, o = r ? overall(r) : null;
     const cell = (v, d) => (v == null || !Number.isFinite(v) ? DASH : v.toFixed(d));
-    const rows = r ? r.levels.filter(l => l.res).map((l, i) =>
-      `<tr><td>${l.pct} %</td><td>${cell(l.res.auth.X, 1)}</td><td>${cell(l.res.auth.Y, 1)}</td><td>${cell(l.res.trim.X, 2)}</td><td>${cell(l.res.trim.Y, 2)}</td><td>${cell(l.res.vib, 1)}</td><td>${cell(rel[i], 2)}</td></tr>`).join('') : '';
+    const rows = r ? r.angles.map((a, i) => {
+      const x = o.res[i];
+      const lift = x.brk != null ? `${x.brk.toFixed(1)}${x.spread != null ? ` <small>±${(x.spread / 2).toFixed(1)}</small>` : ''}` : `none <small>≤ ${r.max}</small>`;
+      return `<tr><td>${a.deg}°</td><td>${lift}</td><td>${cell(x.first, 1)}</td><td>${cell(x.g, 0)}</td><td>${cell(x.side, 1)}</td><td>${cell(x.torque, 0)}</td><td>${x.nOk}/${x.n}</td></tr>`;
+    }).join('') : '';
     const tb = rows || `<tr><td colspan="7">${DASH}</td></tr>`;
     if ($('vcRows').innerHTML !== tb) $('vcRows').innerHTML = tb;
-    const dx = r && dirOk(r, 'X'), dy = r && dirOk(r, 'Y');
-    const dirTxt = d => (d === 'ok' ? 'OK' : d === 'rev' ? 'Reversed' : d === 'mixed' ? 'Unclear' : DASH);
-    setText('vcDirX', dirTxt(dx)); setText('vcDirY', dirTxt(dy));
-    $('vcDirX').className = dx === 'ok' ? 'ok' : dx ? 'bad' : '';
-    $('vcDirY').className = dy === 'ok' ? 'ok' : dy ? 'bad' : '';
-    const top = r?.levels.at(-1)?.res;
-    setText('vcOverall', !r ? 'No run yet.' : r.mount !== 'pivot' ? `Clamped run: vibration ${cell(top?.vib, 1)} °/s rms at ${r.levels.at(-1).pct} %.`
-      : dx === 'rev' || dy === 'rev' ? 'Gimbal pushes the wrong way on at least one axis: redo Calibrate → Direction.'
-      : `Authority at ${r.levels.at(-1).pct} %: X ${cell(top?.auth.X, 1)}, Y ${cell(top?.auth.Y, 1)} °/s² per gimbal °.`);
-    $('vcOverall').className = 'lz-overall' + (r && (dx === 'rev' || dy === 'rev') ? ' bad' : r ? ' ok' : '');
-    setText('vcMeta', r ? `${stamp(r.t)} · firmware v${r.fw} · ${r.mount === 'pivot' ? 'pivot' : 'clamped'} · kick ${r.kick}° × ${r.pulse} ms` : '');
+    setText('vcRest', o?.restDeg != null ? `${o.restDeg.toFixed(1)}° ${dirName(o.restDir)}` : DASH);
+    setText('vcTorque', o?.torque != null ? `${o.torque.toFixed(0)} g·mm ≈ CG ${o.cg.toFixed(1)} mm off` : DASH);
+    const none = r && o.res.every(x => x.brk == null);
+    setText('vcOverall', !r ? 'No run yet.'
+      : none ? `It never lifted off the stop up to ${r.max} %. Check Calibrate → Direction (the gimbal may be pushing it into the stop), then try a higher max throttle or a bigger gimbal angle.`
+      : `Lifts off at ${cell(o.res.find(x => x.brk != null).brk, 1)} % with ${r.angles[o.res.findIndex(x => x.brk != null)].deg}° of gimbal.` +
+        (o.tqSpread != null && o.tqSpread > 0.35 ? ' The torque differs a lot between angles: the thrust curve may be off (run the Throttle step test on a scale) or the pivot is sticky.' : ''));
+    $('vcOverall').className = 'lz-overall' + (none ? ' bad' : r ? ' ok' : '');
+    setText('vcMeta', r ? `${stamp(r.t)} · firmware v${r.fw} · ramp ${r.ramp} %/s to ${r.max} % · thrust from ${o.src === 'scale' ? 'your scale step test' : 'the spec curve (no scale step test yet)'} · lever ${LEVER_MM} mm` : '');
     $('vcCsv').disabled = $('vcCopy').disabled = !r;
     setText('vcCopy', Date.now() - copied < 1500 ? 'Copied ✓' : 'Copy summary');
     $('vcNew').disabled = busy;
     const hist = history.map(h => {
-      const t = h.levels.at(-1)?.res;
-      return `<li><span>${stamp(h.t)}</span><span>${t?.auth.X != null ? `X ${t.auth.X.toFixed(1)} · Y ${(t.auth.Y ?? 0).toFixed(1)} @ ${h.levels.at(-1).pct} %` : h.mount}</span><button data-hist="${h.id}">CSV</button></li>`;
-    }).join('') + (run?.levels.some(l => l.samples.length) ? '<li><span>This run, every sample</span><span></span><button data-raw="1">CSV</button></li>' : '');
+      const ho = overall(h), k = ho.res.findIndex(x => x.brk != null);
+      return `<li><span>${stamp(h.t)}</span><span>${k >= 0 ? `${ho.res[k].brk.toFixed(1)} % @ ${h.angles[k].deg}°` : `none ≤ ${h.max} %`}</span><button data-hist="${h.id}">CSV</button></li>`;
+    }).join('') + (run?.angles.some(a => a.trials.some(t => t.samples?.length)) ? '<li><span>This run, every sample</span><span></span><button data-raw="1">CSV</button></li>' : '');
     const hh = hist || '<li class="empty">No finished runs yet.</li>';
     if ($('vcHist').innerHTML !== hh) $('vcHist').innerHTML = hh;
   }
 
-  // For the charts (tests.js)
-  const data = () => ({ run, work, busy: !idle(), gim, want, armed, fwAct });
+  // For the charts (tests.js): finished trials plus the one running now
+  const data = () => ({ run, work, cur, busy: !idle(), opt, thrustModel, pctFor, LEVER_MM });
   const level = () => (!open ? null : armed && fwAct != null && performance.now() - lastThr < 1000 ? fwAct / 85 : 0);
   return { handle, onLink, isOpen: () => open, close: hide, data, level, refresh: () => open && render() };
 }

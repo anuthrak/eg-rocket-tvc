@@ -12,7 +12,7 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
-- [x] Firmware v1.12.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode, EDF throttle (ESC on D3), gimbal hold (`GIM`), gyro rates in calibration mode
+- [x] Firmware v1.13.0: IMU → PID → servos, calibration over serial, tilt abort, free-test mode, EDF throttle (ESC on D3), gimbal hold (`GIM`), gyro rates in calibration mode, `ARM REST` (motor test from a rocket resting on a rig stop)
 - [x] Web visualizer: live Bench view, Tests tab (System check, Calibrate, Free-hand, Laser CT-1, Throttle CT-4, Thrust vector CT-5), Mission sim
 - [ ] Joint test, body and sled printed and assembled
 - [x] EDF + ESC arrived, first spin-up, System check passing (Nov 17)
@@ -90,7 +90,7 @@ In the visualizer: **Connect Arduino → Tests → Calibrate**. Five steps, appl
 
 **Throttle test (CT-4):** Tests → **Throttle** runs the EDF with the gimbal held at centre. Tick the safety checklist, Arm, then use the slider/presets or the 9-point step test (10 → 85 %), typing the scale reading (and supply current, optional) at each step. Results table, CSV and past runs as in the laser test. Needs firmware v1.9.0 (`ARM` / `THR` / `DISARM`). If the ESC keeps double-beeping and won't arm, run **ESC throttle range** on the Safety tab once (firmware v1.10.0, `ESCCAL`), starting with the 12 V off. The motor stops on Stop motor or Space, closing the panel, hiding the tab, a lost link (0.5 s with no heartbeat), or a tilt past 25°.
 
-**Thrust vector (CT-5):** Tests → **Thrust vector** runs the motor and the gimbal together with the rocket on the rig pivot, and measures with the IMU instead of a scale: control authority (°/s² per gimbal °), kick direction, trim and relative thrust at each throttle. Needs the IMU in the rocket and the rocket on the rig, and firmware v1.12.0. Clamped mode reports vibration only.
+**Thrust vector (CT-5):** Tests → **Thrust vector** finds how much thrust it takes to move the rocket. It starts with the rocket resting on a rig stop. For each gimbal angle (8/6/4/2°) the gimbal points against the lean and the throttle ramps slowly (1–4 %/s, up to 25/40/60 %). The IMU detects lift-off (1° off the stop) and the motor is cut at once. A curve fit back-dates that to where it started moving. Results: throttle, thrust, side force and torque per angle, the rest lean and its direction, and the equivalent CG offset. Thrust comes from the Throttle step test if it has scale readings, otherwise from the spec curve. Needs firmware v1.13.0 (`ARM REST`: the Nano's motor cut is measured from the rest attitude, 12°, instead of 25° from upright).
 
 Without the visualizer, type the same commands into the Serial Monitor (115200, newline): `CAL`, `SET XC 92`, `LEVEL`, `PULSE X`, `SAVE`, `RUN`… The full list is at the top of the sketch.
 
