@@ -305,6 +305,7 @@ export function initBench() {
     rigOnly.forEach(o => { o.visible = rigScene; });
     const fy = rigScene ? FLOOR_RIG : 0;
     grid.position.y = fy; floor.position.y = fy;
+    grid.visible = floor.visible = !rigScene;   // the workshop has its own concrete floor
     $('sceneBtn')?.classList.toggle('on', rigScene);
     $('sceneBtn')?.setAttribute('aria-pressed', String(rigScene));
     resetView();
