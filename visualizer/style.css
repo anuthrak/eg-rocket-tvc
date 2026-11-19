@@ -235,6 +235,9 @@ h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); 
 .lz-dots i.ok { background: var(--ok); border-color: var(--ok); }
 .lz-dots i.bad { background: var(--warn); border-color: var(--warn); }
 .lz-dots i.cur { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.lz-dots.quick { grid-template-columns: 38px repeat(5, minmax(0, 1fr)); }
+.lz-tab td small { color: var(--dim); font-size: 10px; letter-spacing: .06em; }
+.lz-sum td[id^="lzG"] { font-size: 13px; white-space: nowrap; }
 .cal-prompt.dim { color: var(--muted); }
 .lz-entry { display: grid; grid-template-columns: minmax(0, 1fr) 96px 92px; gap: 8px; align-items: center;
   padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

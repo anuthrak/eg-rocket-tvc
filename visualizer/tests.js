@@ -220,9 +220,9 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
     if (lz) {
       const m = { X: lz.running && lz.axis === 'X' ? lz.work : lz.run.meas.X, Y: lz.running && lz.axis === 'Y' ? lz.work : lz.run.meas.Y };
       const pts = (a, from, to) => (m[a] || []).slice(from, to).map((v, i) => (v == null ? null : [lz.seq[from + i], v])).filter(Boolean);
-      const err = (a, from, to) => pts(a, from, to).map(([c, v]) => [c, v - c]);
+      const errDir = (a, up) => (m[a] || []).map((v, i) => (v == null || (lz.dirs[i] === 'down') === up ? null : [lz.seq[i], v - lz.seq[i]])).filter(Boolean);
       C.lzCvm.set({ x: pts('X', 0, lz.seq.length), y: pts('Y', 0, lz.seq.length) });
-      C.lzErr.set({ xu: err('X', 0, lz.half), xd: err('X', lz.half), yu: err('Y', 0, lz.half), yd: err('Y', lz.half) });
+      C.lzErr.set({ xu: errDir('X', true), xd: errDir('X', false), yu: errDir('Y', true), yd: errDir('Y', false) });
     }
     // Throttle step test (if a scale was used)
     const th = throttle.data?.();
