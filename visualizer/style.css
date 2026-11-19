@@ -70,6 +70,12 @@ main { --side: clamp(260px, 21vw, 360px); display: grid; min-height: 0;
 #view { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #viewNote { position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 1; pointer-events: none; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
 .mb-slot #viewNote { display: none; }
+.view-tog { position: absolute; top: 10px; right: 10px; z-index: 2; padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: rgba(11, 11, 13, .82); color: var(--muted); font: 500 11px var(--label); letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.view-tog:hover { color: var(--text); border-color: var(--muted); }
+.view-tog.on { color: #000; background: var(--text); border-color: var(--text); }
+.view-tog:focus-visible { outline: 2px solid var(--pitch); outline-offset: 2px; }
+.mb-slot .view-tog { display: none; }
 #view canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; touch-action: none; }
 aside { background: var(--bg); padding: 12px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 10px; }
@@ -235,6 +241,9 @@ h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); 
 .lz-dots i.ok { background: var(--ok); border-color: var(--ok); }
 .lz-dots i.bad { background: var(--warn); border-color: var(--warn); }
 .lz-dots i.cur { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.lz-dots.quick { grid-template-columns: 38px repeat(5, minmax(0, 1fr)); }
+.lz-tab td small { color: var(--dim); font-size: 10px; letter-spacing: .06em; }
+.lz-sum td[id^="lzG"] { font-size: 13px; white-space: nowrap; }
 .cal-prompt.dim { color: var(--muted); }
 .lz-entry { display: grid; grid-template-columns: minmax(0, 1fr) 96px 92px; gap: 8px; align-items: center;
   padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

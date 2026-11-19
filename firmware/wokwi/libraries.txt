@@ -1,0 +1,5 @@
+# Wokwi installs these for the simulation (same as the Arduino IDE setup in the README)
+Adafruit MPU6050
+Adafruit Unified Sensor
+Adafruit BusIO
+Servo

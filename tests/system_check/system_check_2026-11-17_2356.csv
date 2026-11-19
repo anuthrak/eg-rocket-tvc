@@ -1,0 +1,9 @@
+step,name,status,detail
+1,"Power and link",pass,"firmware v1.12.0 · 50 Hz · gyro rates yes · ESC tune OK"
+2,"IMU still",pass,"tilt noise 0.13° · gyro offset 0.03°/s · gyro noise 0.08°/s · resting lean X −4.7° Y +1.3°"
+3,"IMU axes",pass,"+X read +14°, gyro agrees · +Y read +16°, gyro agrees"
+4,"Servos",pass,"servo travel X ±45° Y ±42° (expected ±45° / ±42°)"
+5,"Control loop",pass,"X 1.12 gimbal°/lean° (r 0.84) · Y 1.16 gimbal°/lean° (r 0.83)"
+6,"Motor",pass,"10 % in 0.4 s, held 10 % · 20 % in 0.3 s, held 20 % · 30 % in 0.3 s, held 30 %"
+7,"Motor + servos",pass,"vibration 0.1°/s motor only, 0.1°/s with the sweep · longest data gap 25 ms"
+8,"Safety cuts",warn,"Space stop 41 ms · tilt cut 3405 ms after 25° · kill switch not tested"

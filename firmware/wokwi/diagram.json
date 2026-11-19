@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "author": "SLDP 45 Rocket TVC",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-arduino-nano", "id": "nano", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-mpu6050", "id": "imu", "top": 150, "left": -220, "attrs": {} },
+    { "type": "wokwi-servo", "id": "servoX", "top": -120, "left": 260, "attrs": { "hornColor": "#2f78d8" } },
+    { "type": "wokwi-servo", "id": "servoY", "top": 20, "left": 260, "attrs": { "hornColor": "#ec6b35" } },
+    { "type": "wokwi-servo", "id": "esc", "top": 160, "left": 260, "attrs": { "hornColor": "#888888" } }
+  ],
+  "connections": [
+    [ "imu:VCC", "nano:5V", "red", [] ],
+    [ "imu:GND", "nano:GND.2", "black", [] ],
+    [ "imu:SDA", "nano:A4", "green", [] ],
+    [ "imu:SCL", "nano:A5", "blue", [] ],
+
+    [ "servoX:PWM", "nano:9", "orange", [] ],
+    [ "servoX:GND", "nano:GND.1", "black", [] ],
+
+    [ "servoY:PWM", "nano:10", "yellow", [] ],
+    [ "servoY:GND", "nano:GND.1", "black", [] ],
+
+    [ "esc:PWM", "nano:3", "white", [] ],
+    [ "esc:GND", "nano:GND.1", "black", [] ],
+
+    [ "nano:TX", "$serialMonitor:RX", "", [] ],
+    [ "nano:RX", "$serialMonitor:TX", "", [] ]
+  ],
+  "serialMonitor": { "display": "terminal", "newline": "lf" },
+  "dependencies": {}
+}
