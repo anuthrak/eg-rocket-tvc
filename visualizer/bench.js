@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createWorkshop } from './workshop.js';
 import { initCalib } from './calib.js';
 import { initLaser } from './laser.js';
 import { initThrottle } from './throttle.js';
@@ -300,6 +301,7 @@ export function initBench() {
     rigOnRocket.visible = rigScene && !detail;
     middle.visible = rigFixed.visible = rigScene || detail;
     tableParts.forEach(o => { o.visible = rigScene; });   // table + clamps
+    workshop.group.visible = rigScene;
     rigOnly.forEach(o => { o.visible = rigScene; });
     const fy = rigScene ? FLOOR_RIG : 0;
     grid.position.y = fy; floor.position.y = fy;
@@ -343,6 +345,7 @@ export function initBench() {
   // (rocket +X → +Z, +Y → +X, z → up), tail at 0, rig pivot at 247. The simple model above stands in until it loads.
   // Groups: rocket (moves with the rocket), inner (TVC inner gimbal + riding servo: turns with the X nozzle angle),
   // tube (motor tube: both angles), middle (rig middle ring), fixed (outer ring, arm, base).
+  const procAirframe = airframe.children.filter(o => o !== tvc);   // the simple model's parts, replaced on load
   const innerG = new THREE.Group(); innerG.position.y = GIMBAL * MM; airframe.add(innerG);
   const sledMat = new THREE.MeshStandardMaterial({ color: 0x3d5a46, roughness: 0.7 });
   const kGimbalMat = new THREE.MeshStandardMaterial({ color: 0x4a4f58, roughness: 0.6 });
@@ -354,8 +357,7 @@ export function initBench() {
     gltf.scene.traverse(o => { if (o.isMesh) parts.push(o); });
     if (!parts.length) return;
     // Out with the stand-ins (keep the plume, arrow, the inner-gimbal group and the table + clamps)
-    const keep = new Set([tvc, innerG]);
-    airframe.children.filter(o => !keep.has(o) && o !== forceArrow).forEach(o => airframe.remove(o));
+    procAirframe.forEach(o => airframe.remove(o));
     tvc.remove(tube);
     middle.clear();
     rigFixed.children.filter(o => !tableParts.includes(o)).forEach(o => rigFixed.remove(o));
@@ -379,6 +381,10 @@ export function initBench() {
     detail = true;
     applyScene();
   }, undefined, err => console.warn('Detailed model not loaded, using the simple one:', err));
+
+  // ---------- Workshop around the desk rig (workshop.js): supply, laptop, kill switch, beacon, cables, test props ----------
+  const workshop = createWorkshop({ MM, PIVOT_Y, DESK_H, TABLE_H, airframe, tvc, TUBE_BELOW, RO });
+  scene.add(workshop.group);
 
   // ---------- Thrust: plume out of the motor tube, arrow for the sideways force it puts on the rocket ----------
   // Added after the outline list above, so outline view leaves them as they are.
@@ -795,6 +801,8 @@ export function initBench() {
   // ---------- Loop ----------
   const deg = THREE.MathUtils.degToRad;
   let lastUi = 0, warmed = false;
+  let lastTest = null;
+  try { lastTest = localStorage.getItem('tvc-last-test'); } catch {}
   function animate(now) {
     requestAnimationFrame(animate);
     const k = smooth.checked ? 0.18 : 1;
@@ -815,6 +823,13 @@ export function initBench() {
     // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
     const thr = throttle.level() ?? vector.level() ?? syscheck.level();
     updateThrust(linkStart !== null && lastLineT !== null && thr !== 0, gx, gy, demoTimer ? 1 : thr ?? 0.35);
+    const live = linkStart !== null && lastLineT !== null && !demoTimer;
+    // Test props: the last test opened (Throttle and Thrust vector close when you leave the Tests tab, which has no 3D view)
+    const openTest = laser.isOpen() ? 'laser' : vector.isOpen() ? 'vector' : throttle.isOpen() ? 'throttle' : null;
+    if (openTest && openTest !== lastTest) { lastTest = openTest; try { localStorage.setItem('tvc-last-test', lastTest); } catch {} }
+    workshop.update({ now, live, armed: live && thr != null, thr: live && thr ? thr * 0.85 : 0,
+      pitch: target.pitch, yaw: target.yaw, history,
+      tests: { laser: lastTest === 'laser', vector: lastTest === 'vector', throttle: lastTest === 'throttle' } });
     controls.update();
     fenceTarget();
     // One warm-up frame (uploads textures to the GPU), then skip drawing while the loading screen covers everything
