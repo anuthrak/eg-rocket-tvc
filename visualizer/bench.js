@@ -107,13 +107,39 @@ export function initBench() {
     plainRig.add(pin);
   });
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdcdce6, roughness: 0.5 });
-  const bandMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.5 });
-  const noseMat = new THREE.MeshStandardMaterial({ color: 0xc82828, roughness: 0.45 });
-  const finMat  = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5, side: THREE.DoubleSide });
-  const gridMat = new THREE.MeshStandardMaterial({ color: 0x2838c8, roughness: 0.5 });
+  // Booster (parts A, B, couplers, strakes, door): light stainless steel. Ship (part D, nose band, ogive, flaps) and
+  // grid fins: black, the ship covered in hexagonal heat-shield tiles.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdfe2e6, metalness: 0.35, roughness: 0.33 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0xaeb2b9, metalness: 0.4, roughness: 0.35 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0xc8cbd0, metalness: 0.35, roughness: 0.4 });
+  const gridMat = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.3, roughness: 0.6 });
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0x55585f, metalness: 0.7, roughness: 0.35 });
-  const doorMat = new THREE.MeshStandardMaterial({ color: 0xb4b6c0, roughness: 0.55 });
+  // Tile texture: pointy-top hexagons, 4 across, 2 rows high, so it repeats seamlessly. One repeat ≈ TILE_U × TILE_V mm.
+  const TILE_U = 28, TILE_V = TILE_U * 90 / 104;
+  const tileCanvas = (() => {
+    const c = document.createElement('canvas'); c.width = 104; c.height = 90;
+    const g = c.getContext('2d'), sz = 15, w = Math.sqrt(3) * sz;
+    g.fillStyle = '#040405'; g.fillRect(0, 0, c.width, c.height);   // grout
+    for (let row = -1; row <= 3; row++) for (let col = -1; col <= 4; col++) {
+      const cx = col * w + (row % 2 ? w / 2 : 0), cy = row * 1.5 * sz + sz / 2;
+      const shade = 46 + ((col * 7 + row * 13 + 40) % 9) * 2;          // slight tile-to-tile variation
+      g.fillStyle = `rgb(${shade},${shade},${shade + 2})`;
+      g.beginPath();
+      for (let k = 0; k < 6; k++) { const a = Math.PI / 3 * k + Math.PI / 6; g.lineTo(cx + (sz - 1.3) * Math.cos(a), cy + (sz - 1.3) * Math.sin(a)); }
+      g.closePath(); g.fill();
+    }
+    return c;
+  })();
+  function tileMat(repU, repV, double = false) {
+    const t = new THREE.CanvasTexture(tileCanvas);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repU, repV); t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, metalness: 0.1, side: double ? THREE.DoubleSide : THREE.FrontSide });
+  }
+  const CIRC = 2 * Math.PI * RO, around = Math.round(CIRC / TILE_U);
+  const shipMat = tileMat(around, 140 / TILE_V), shipBandMat = tileMat(around, 15 / TILE_V);
+  const noseMat = tileMat(around, 1.25 * NOSE_L / TILE_V);
+  const finMat = tileMat(1 / (TILE_U * MM), 1 / (TILE_V * MM), true);   // flat plates: UVs are scene units
   const bay = new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.9 });
 
   // CAD angle a (0° = rocket +X, 90° = +Y) → scene direction (sin a, 0, cos a): rocket +X is scene +Z, +Y is scene +X.
@@ -131,7 +157,7 @@ export function initBench() {
     const s = new THREE.Shape(pts.map(([r, z]) => new THREE.Vector2(r * MM, z * MM)));
     const g = new THREE.ExtrudeGeometry(s, { depth: t * MM, bevelEnabled: false });
     g.translate(0, 0, -t / 2 * MM);
-    const m = new THREE.Mesh(g, mat); m.castShadow = true;
+    const m = new THREE.Mesh(g, mat); m.castShadow = true; m.userData.plate = true;
     return radial(a, m);
   }
 
@@ -141,7 +167,7 @@ export function initBench() {
     m.position.y = (z0 + z1) / 2 * MM; m.castShadow = true; airframe.add(m);
   }
   section(0, Z_C1, bodyMat); section(Z_C1, Z_B, bandMat); section(Z_B, Z_C2, bodyMat);
-  section(Z_C2, Z_D, bandMat); section(Z_D, Z_NOSE, bodyMat); section(Z_NOSE, Z_CONE, noseMat);
+  section(Z_C2, Z_D, bandMat); section(Z_D, Z_NOSE, shipMat); section(Z_NOSE, Z_CONE, shipBandMat);
 
   // Tangent-ogive nose (length 1.3 × OD) with a blunt 4 mm tip
   {
@@ -311,7 +337,7 @@ export function initBench() {
   plainRig.traverse(o => { if (o.isMesh) rocketMeshes.push(o); });
   [...rocketMeshes, ...rigMeshes].forEach(m => {
     m.userData.solidMat = m.material;
-    const plate = m.material === finMat;
+    const plate = !!m.userData.plate;
     m.userData.lineMat = plate ? finFillMat : fillMat;
     if (plate) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat); e.visible = false; m.add(e); m.userData.edges = e; }
   });
