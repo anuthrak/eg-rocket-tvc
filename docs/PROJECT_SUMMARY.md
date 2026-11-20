@@ -169,8 +169,18 @@ tower catch with the chopstick tower → full reusable mini mission.
   each and join the wires (or get a male XT60), check polarity with a meter, then CT-5. Until then, runs ≤ 25 %
   only, with the 12 V plug as the stop.
 - Visualizer Tests tab (Nov 17): all bench tests on one page with live charts. **CT-5 thrust vector** (Nov 19, firmware v1.13.0 `ARM REST`) is a breakaway test. The rocket starts resting on a rig stop, the gimbal points against the lean and the throttle ramps until the IMU sees it come off the stop. It gives the thrust and torque needed to move it, and the equivalent CG offset. It replaces the kick test, which needed a balanced, upright rocket.
-- CT-4 next: ESC range calibration (Throttle → Safety), then the full step test 10 → 85 % on the scale with
-  hearing protection.
+- CT-4 (Nov 20): ESC range calibrated (Throttle → Safety). The fan now starts at ~6–7 % and stops at ~5–6 % (was
+  15 %). Next: the full step test 10 → 85 % on a scale with hearing protection (no scale yet; the spec curve is
+  ~15–20 % high at 40 %).
+- Rig balance (Nov 20): at the original pivot the bare rocket swings back in ~1.6 s (CG ~40 mm below the pivot,
+  from 107 / T² mm with I ≈ 0.017 kg·m²). With the pivot on part A it falls away with the nose cone on and swings
+  back without it, so the balance point of the complete rocket is between part A and the original position: the
+  real CG is lower than the ~240 mm estimate. The ESC pulls it sideways (needs a small weight at pivot height on
+  the opposite side). Cables were ruled out as the spring. GS-001: an adjustable collar, or a pivot position
+  between part A and part B, so the complete rocket is neutral with no added weight.
+- Visualizer Authority test (IT-5, Nov 20): gimbal step from upright on the pivot, with the IT-3 swing fit
+  removing gravity and friction. First real runs were invalid (gravity 40–75 °/s² at 5° against ~30 °/s² from
+  the TVC at 40 %); rerun once the rocket is near neutral.
 - EDF + ESC arrived: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
   (assumed ~172 mm in part A) and design the EDF retainer.
 - Weigh every part and update COMPONENTS in the body model (real CG, mass).

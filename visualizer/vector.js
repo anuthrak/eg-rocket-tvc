@@ -8,7 +8,7 @@
 //             (gimbal +X answers a lean toward +X). Baseline: noise of the lean and of the body rate.
 //   ramp      throttle rises slowly (START_PCT → max at the chosen %/s). Every IMU sample (50 Hz) gives
 //             "moved" = how far the rocket has come off its rest, toward upright.
-//   lift-off  moved > max(MOVE_DEG, 5 × noise) for 3 samples in a row (60 ms): the motor is cut at once from this
+//   lift-off  moved > max(MOVE_DEG, 5 × noise) for 5 samples in a row (100 ms): the motor is cut at once from this
 //             page and the gimbal centred, so it settles back onto the stop.
 //   starts    the throttle where it really started to move, back-dated from lift-off by a curve fit (onset()).
 //             The thrust, side force and torque use this one.
@@ -27,8 +27,8 @@ const HEARTBEAT_MS = 150, REPLY_MS = 2000, TICK_MS = 100;
 const REST_MS = 800, AIM_MS = 600, BASE_MS = 1200, TOP_HOLD_MS = 1500, BACK_MAX_MS = 4000, BACK_EXTRA_MS = 800;
 const START_PCT = 5;
 const REST_MIN = 2;            // °: less than this and the rocket isn't resting on a lean (balanced, or upright)
-const MOVE_DEG = 1.0, FIRST_DEG = 0.3, HITS = 3;
-const MOVED_MAX = 6, RATE_MAX = 90;
+const MOVE_DEG = 2.5, FIRST_DEG = 0.3, HITS = 5;   // lift-off: 2.5° off the stop for 5 samples (100 ms), so motor shake and settling on the stop don't count
+const MOVED_MAX = 9, RATE_MAX = 90;   // the Nano cuts at 12° from rest by itself
 const LEVER_MM = 190;          // rig pivot (247 mm from the tail, SLDP-GS-001) to TVC gimbal point (57 mm)
 const MASS_G = 598;            // PROJECT_SUMMARY §5 estimate
 const SPEC_G = 220;            // QX 30 mm EDF at full throttle
@@ -75,7 +75,7 @@ function pctFor(model, g) {
 }
 
 // ---------- When it really started moving ----------
-// Lift-off (1° off the stop) comes after the torque balance is crossed: the rocket needs time to accelerate, and the
+// Lift-off (2.5° off the stop) comes after the torque balance is crossed: the rocket needs time to accelerate, and the
 // throttle keeps rising meanwhile. Off the stop, moved(t) ≈ A·(t − t0)^n: n = 3 when the excess torque grows with the
 // ramp, n = 2 when friction lets go at once (stick-slip). Grid search over t0 (20 ms) and n, least squares for A,
 // over the ramp samples up to lift-off. Returns the throttle at t0, or null when there are too few points.
@@ -235,7 +235,7 @@ export function initVector({ send, link }) {
       if (c.hits >= HITS && c.brk == null) {
         // Lift-off: motor off and gimbal centred at once
         want = 0; send('THR 0'); setGim(0, 0);
-        const i = c.samples.length - HITS;          // the first of the 3 samples over the line
+        const i = c.samples.length - HITS;          // the first of the HITS samples over the line
         c.brkIdx = i;
         c.brk = c.samples[i].act ?? c.samples[i].want;
         c.ph = 'back';

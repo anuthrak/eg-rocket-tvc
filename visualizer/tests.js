@@ -8,7 +8,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const DASH = '—';
 const GMAX = 8;
 
-export function initTests({ calib, laser, throttle, vector, syscheck, send, link }) {
+export function initTests({ calib, laser, throttle, vector, authority, syscheck, send, link }) {
   // ---------- Live telemetry ----------
   let cfg = null;                                  // from CFG: centres, directions, trims, linkage ratios
   const T = { t: 0, mode: null, tx: null, ty: null, gx: null, gy: null, sx: null, sy: null, rx: null, ry: null, thr: null, tgt: null, thrT: 0 };
@@ -65,8 +65,8 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
 
   // ---------- Test list: one open at a time ----------
   const fh = { open: false, isOpen: () => fh.open, close: () => fhHide(), refresh: () => fhRender() };
-  const tests = { sc: syscheck, cal: calib, fh, lz: laser, th: throttle, vc: vector };
-  const btnOf = { sc: 'scBtn', cal: 'calBtn', fh: 'fhBtn', lz: 'lzBtn', th: 'thBtn', vc: 'vcBtn' };
+  const tests = { sc: syscheck, cal: calib, fh, lz: laser, th: throttle, vc: vector, au: authority };
+  const btnOf = { sc: 'scBtn', cal: 'calBtn', fh: 'fhBtn', lz: 'lzBtn', th: 'thBtn', vc: 'vcBtn', au: 'auBtn' };
   for (const [key, id] of Object.entries(btnOf)) {
     // Capture: runs before the module's own onclick (which toggles). Clicking the open test does nothing;
     // clicking another closes the open one first (Calibrate may ask about unsaved changes and stay open).
@@ -177,21 +177,25 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       series: [{ id: 'xu', label: 'X up', color: X, marker: true }, { id: 'xd', label: 'X down', color: X, dash: true, marker: true, hollow: true },
                { id: 'yu', label: 'Y up', color: Y, marker: true }, { id: 'yd', label: 'Y down', color: Y, dash: true, marker: true, hollow: true }],
       refs: [{ y: 1 }, { y: -1 }], empty: 'Measure an axis' }),
-    thThr: new Chart(tile('sc th'), { title: 'Throttle', sub: '30 s', unit: '%', span: 30, yMin: 0, yMax: 90,
+    thThr: new Chart(tile('sc th au'), { title: 'Throttle', sub: '30 s', unit: '%', span: 30, yMin: 0, yMax: 90,
       series: [{ id: 'a', label: 'Actual', color: X }, { id: 't', label: 'Target', color: N, dash: true }], empty: 'Arm to see the throttle' }),
     vib: new Chart(tile('home sc cal th'), { title: 'Vibration', sub: 'Gyro rms over 0.5 s · 30 s', unit: '°/s', span: 30, yMin: 0, minRange: 2,
       series: [{ id: 'v', label: 'Vibration', color: W }] }),
     thThrust: new Chart(tile('th'), { kind: 'xy', title: 'Thrust vs throttle', sub: 'Step test · dashed: spec', xLabel: 'Throttle', xUnit: '%', unit: 'g', xMin: 0, xMax: 90, yMin: 0,
       series: [{ id: 'm', label: 'Measured', color: X, marker: true }, { id: 's', label: 'Spec (220 g × t²)', color: N, dash: true }], empty: 'Needs a scale (step test)' }),
-    vcRate: new Chart(tile('home cal th vc'), { title: 'Body rate', sub: 'Gyro · 10 s', unit: '°/s', symmetric: true, minRange: 10,
+    vcRate: new Chart(tile('home cal th vc au'), { title: 'Body rate', sub: 'Gyro · 10 s', unit: '°/s', symmetric: true, minRange: 10,
       series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Calibration mode, firmware v1.12.0' }),
-    vcMove: new Chart(tile('vc'), { kind: 'xy', title: 'Off the stop vs throttle', sub: 'Each ramp · dashed: 1° lift-off line', xLabel: 'Throttle', xUnit: '%', unit: '°', xMin: 0, xMax: 30, yMin: -0.5, minRange: 2,
+    vcMove: new Chart(tile('vc'), { kind: 'xy', title: 'Off the stop vs throttle', sub: 'Each ramp · dashed: 2.5° lift-off line', xLabel: 'Throttle', xUnit: '%', unit: '°', xMin: 0, xMax: 30, yMin: -0.5, minRange: 2,
       series: [{ id: 'a8', label: '8°', color: X, line: false }, { id: 'a6', label: '6°', color: Y, line: false }, { id: 'a4', label: '4°', color: W, line: false }, { id: 'a2', label: '2°', color: N, line: false }],
-      refs: [{ y: 1 }], empty: 'Run the test' }),
+      refs: [{ y: 2.5 }], empty: 'Run the test' }),
     vcBreak: new Chart(tile('vc'), { kind: 'xy', title: 'Starts moving vs gimbal', sub: 'Dashed: same torque at every angle', xLabel: 'Gimbal', xUnit: '°', unit: '%', xMin: 0, xMax: 9, yMin: 0,
       series: [{ id: 'm', label: 'Each repeat', color: X, line: false, marker: true }, { id: 's', label: 'Same torque', color: N, dash: true }], empty: 'Run the test' }),
     vcTorque: new Chart(tile('vc'), { kind: 'xy', title: 'Torque to move it vs gimbal', sub: 'Each repeat · dashed: median · should be level', xLabel: 'Gimbal', xUnit: '°', unit: 'g·mm', xMin: 0, xMax: 9, yMin: 0,
       series: [{ id: 'm', label: 'Each repeat', color: Y, line: false, marker: true }, { id: 'med', label: 'Median', color: N, dash: true }], empty: 'Run the test' }),
+    auTip: new Chart(tile('au'), { kind: 'xy', title: 'Tipping rate in each tip', sub: 'From the gimbal step · slope = acceleration', xLabel: 'Time', xUnit: 's', unit: '°/s', xMin: 0, xMax: 1, yMin: -5, minRange: 10,
+      series: [{ id: 'a8', label: '8°', color: X, line: false }, { id: 'a6', label: '6°', color: Y, line: false }, { id: 'a4', label: '4°', color: W, line: false }, { id: 'a2', label: '2°', color: N, line: false }], empty: 'Run the test' }),
+    auAcc: new Chart(tile('au'), { kind: 'xy', title: 'Acceleration vs gimbal', sub: 'Each tip · dashed: design at this throttle', xLabel: 'Gimbal', xUnit: '°', unit: '°/s²', xMin: 0, xMax: 9, yMin: 0,
+      series: [{ id: 'm', label: 'Each tip', color: X, line: false, marker: true }, { id: 'd', label: 'Design', color: N, dash: true }], empty: 'Run the test' }),
   };
 
   for (const [k, c] of Object.entries(C)) c.tile.dataset.chart = k;   // for per-test ordering in CSS
@@ -265,6 +269,29 @@ export function initTests({ calib, laser, throttle, vector, syscheck, send, link
       const sub = `Each repeat · dashed: median · thrust from ${model.src === 'scale' ? 'scale' : 'spec curve'}`;
       const el = C.vcTorque.tile.querySelector('.t-tile-h span');
       if (el.textContent !== sub) el.textContent = sub;
+    }
+    // Authority: each tip's rate (toward its own tipping direction) from the gimbal step, and the fitted accelerations
+    const au = authority.data();
+    const ar = au.work || au.run;
+    if (ar) {
+      const tips = [...ar.tips];
+      if (au.cur && au.work && au.cur.stepAt) tips.push(au.cur);
+      const tr = { a8: [], a6: [], a4: [], a2: [] };
+      let tMax = 0.5;
+      for (const t of tips) {
+        if (!t.stepAt || !tr['a' + t.deg]) continue;
+        for (const p of t.samples || []) {
+          if (p.ph !== 'step' && p.ph !== 'brake') continue;
+          const x = (p.t - t.stepAt) / 1000;
+          tMax = Math.max(tMax, x);
+          tr['a' + t.deg].push([x, (t.axis === 'X' ? p.rx : p.ry) * t.s]);
+        }
+      }
+      C.auTip.o.xMax = Math.ceil(tMax * 4) / 4;
+      C.auTip.set(tr);
+      const model = au.thrustModel(), g = model.g(ar.thr);
+      C.auAcc.set({ m: ar.tips.filter(t => t.acc != null).map(t => [t.deg, t.acc]),
+                    d: Array.from({ length: 33 }, (_, i) => i * 0.25).map(d => [d, au.design(g, d)]) });
     }
   }
 
