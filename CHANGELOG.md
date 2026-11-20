@@ -4,6 +4,17 @@ Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION
 
 ## [Unreleased]
 
+## [2.12.0] – 2026-11-20
+Firmware v1.13.1.
+### Added
+- Tests → **Authority (IT-5)**: how hard the TVC turns the rocket, from balanced upright on the pivot (`visualizer/authority.js`). Options: throttle 25/40/60 %, gimbal 8/6/4/2°, axes X/Y, 1–3 repeats each way. Each tip: wait until the rocket is still within 12° of upright, motor up with the gimbal centred (drift), gimbal step so it tips across upright, and the body-rate slope after the gimbal arrives is the angular acceleration. After 5° the gimbal reverses until the rate is zero, then motor off, so tips alternate sides with no hands. Results per axis and angle: acceleration, per gimbal degree (*b*), % of design (185 °/s² at 8° and 220 g, scaled by the throttle's thrust), torque (I = 0.017 kg·m²), implied thrust, and the CG offset it could lift at 25°. Charts: rate in each tip from the gimbal step, acceleration vs gimbal with the design line, plus throttle and body rate. Download CSV, raw samples CSV, Copy summary, past runs. Stops past 20°, 120°/s, a tip the wrong way (2°) or 6° of drift with the gimbal centred; Space / Stop / Esc / leaving the tab stop the motor. A negative corrected result is shown as not valid.
+- Authority → **Swing X / Swing Y (IT-3)**, motor off: tip the rocket, hold, let go; 15 s are recorded. A least-squares fit of rate − rate₀ = −k·∫tilt dt + k·eq·t − c·Δtilt + offset gives the gravity spring k (swing period, pull at 5°), the pivot damping c and where it settles; neutral and "moved a little and stopped" (friction) are recognised, and a gyro-vs-tilt check warns if they disagree. Every tip is corrected with it (the CSV keeps the uncorrected value too). Results show the time they were measured.
+### Changed
+- Thrust vector (CT-5): lift-off now needs 2.5° off the stop for 5 samples (100 ms) instead of 1° for 3, so motor shake and settling on the stop no longer count; the page's stop is 9° off the stop (was 6°).
+- Firmware v1.13.1: every fixed serial message is in flash (`F()`), freeing ~500 bytes of RAM (77 % → ~55 %). Output unchanged.
+### Fixed
+- The `ARM,REST,…` reply never reached the tests (the line filter didn't pass `ARM`), so Thrust vector always failed with "No reply to ARM REST" even on firmware v1.13.0.
+
 ## [2.11.0] – 2026-11-19
 Firmware v1.13.0.
 ### Changed

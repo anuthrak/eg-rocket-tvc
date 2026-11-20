@@ -654,7 +654,8 @@ body[data-tab="tests"] #testsMain { display: grid; grid-template-areas: none; gr
 .t-charts > [data-for] { display: none; }
 body[data-test="home"] .t-charts > [data-for~="home"], body[data-test="sc"] .t-charts > [data-for~="sc"], body[data-test="cal"] .t-charts > [data-for~="cal"],
 body[data-test="fh"] .t-charts > [data-for~="fh"], body[data-test="lz"] .t-charts > [data-for~="lz"],
-body[data-test="th"] .t-charts > [data-for~="th"], body[data-test="vc"] .t-charts > [data-for~="vc"] { display: flex; }
+body[data-test="th"] .t-charts > [data-for~="th"], body[data-test="vc"] .t-charts > [data-for~="vc"],
+body[data-test="au"] .t-charts > [data-for~="au"] { display: flex; }
 .t-tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 8px; flex-direction: column; gap: 6px; min-width: 0; }
 .t-pair .t-tile { display: flex; }
 .t-tile-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
@@ -691,7 +692,7 @@ body[data-test="th"] .t-charts > [data-for~="th"], body[data-test="vc"] .t-chart
 .fh-check b { font: 600 18px var(--cond); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .fh-check b.ok { color: var(--ok); } .fh-check b.bad { color: var(--warn); }
 .fh-check small { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#fhState.bad, #vcState.bad { color: var(--warn); }
+#fhState.bad, #vcState.bad, #auState.bad { color: var(--warn); }
 .vc-seg { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; border: 1px solid var(--line-2); border-radius: 6px; padding: 2px; background: var(--bg); }
 .vc-seg button { border: 0; background: transparent; padding: 4px 9px; border-radius: 4px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
 .vc-seg button.on { background: var(--text); color: #000; }

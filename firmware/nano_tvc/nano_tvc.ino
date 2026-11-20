@@ -83,7 +83,7 @@
 // Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.13.0";
+const char FW_VERSION[] = "1.13.1";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -197,7 +197,7 @@ void saveConfig() {
 }
 
 void printConfig() {
-  Serial.print("CFG,");
+  Serial.print(F("CFG,"));
   Serial.print(cfg.xCenter); Serial.print(',');
   Serial.print(cfg.yCenter); Serial.print(',');
   Serial.print(cfg.xDir); Serial.print(',');
@@ -331,19 +331,19 @@ void checkAbort() {
   if (freeTest) return;
   float tilt = max(fabs(tiltX), fabs(tiltY));
   if (!aborted) {
-    if (tilt > ABORT_TILT) { aborted = true; uprightSince = 0; Serial.println("ABORT,TILT"); }
+    if (tilt > ABORT_TILT) { aborted = true; uprightSince = 0; Serial.println(F("ABORT,TILT")); }
     return;
   }
   if (tilt > REARM_TILT) { uprightSince = 0; return; }
   if (!uprightSince) uprightSince = millis() | 1;
-  else if (millis() - uprightSince >= REARM_MS) { aborted = false; uprightSince = 0; Serial.println("ABORT,CLEAR"); }
+  else if (millis() - uprightSince >= REARM_MS) { aborted = false; uprightSince = 0; Serial.println(F("ABORT,CLEAR")); }
 }
 
 // ---------- Motor (throttle test) ----------
 int escUs(float t) { return ESC_MIN_US + (int)(constrain(t, 0.0f, THROTTLE_CAP) * (ESC_MAX_US - ESC_MIN_US) + 0.5); }
 
 void printThr() {
-  Serial.print("THR,"); Serial.print(motorArmed ? "ARMED" : "SAFE"); Serial.print(',');
+  Serial.print(F("THR,")); Serial.print(motorArmed ? "ARMED" : "SAFE"); Serial.print(',');
   Serial.print(thrTarget * 100, 1); Serial.print(',');
   Serial.print(thrNow * 100, 1); Serial.print(',');
   Serial.println(escUs(thrNow));
@@ -354,7 +354,7 @@ void motorCut(const char *why) {
   motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;  restMode = restPending = false;
   esc.writeMicroseconds(ESC_MIN_US);
   if (!was) return;
-  Serial.print("THR,CUT,"); Serial.println(why);
+  Serial.print(F("THR,CUT,")); Serial.println(why);
   printThr();
 }
 
@@ -362,7 +362,7 @@ void escCalEnd(const char *why) {
   if (!escCalHigh) return;
   escCalHigh = false;
   esc.writeMicroseconds(ESC_MIN_US);
-  Serial.print("ESCCAL,"); Serial.println(why);
+  Serial.print(F("ESCCAL,")); Serial.println(why);
 }
 
 // Every loop, in both modes: watchdog, ramp, ESC pulse, status line
@@ -402,7 +402,7 @@ bool parseNum(const char *s, float &out) {
 void endSweep() {
   if (!sweepMode) return;
   sweepMode = 0;
-  Serial.println("SWEEP,DONE");
+  Serial.println(F("SWEEP,DONE"));
 }
 
 void runCommand(char *line) {
@@ -417,14 +417,14 @@ void runCommand(char *line) {
     motorCut("MODE"); escCalEnd("MODE");
     calMode = true; pulseAxis = 0; endSweep(); endGim();
     xServo.writeMicroseconds(servoUs(cfg.xCenter)); yServo.writeMicroseconds(servoUs(cfg.yCenter));
-    Serial.println("CAL,ON");
+    Serial.println(F("CAL,ON"));
     printConfig();
   } else if (!strcmp(cmd, "RUN")) {
     motorCut("MODE"); escCalEnd("MODE");
     calMode = false; pulseAxis = 0; endSweep(); endGim();
     seedAttitude();
     lastLoop = micros();
-    Serial.println("CAL,OFF");
+    Serial.println(F("CAL,OFF"));
   } else if (!strcmp(cmd, "GET")) {
     printConfig();
   } else if (!strcmp(cmd, "SET") && arg1 && arg2) {
@@ -441,7 +441,7 @@ void runCommand(char *line) {
     else if (!strcmp(arg1, "SWAP")) { cfg.swapPins = v != 0; attachServos(); }
     else if (!strcmp(arg1, "UP")) {
       int u = (int)round(v);
-      if (u == 0 || abs(u) > 3) { Serial.println("ERR,UP is 1..3 or -1..-3"); return; }
+      if (u == 0 || abs(u) > 3) { Serial.println(F("ERR,UP is 1..3 or -1..-3")); return; }
       if (u != cfg.up) cfg.rot = 0;
       cfg.up = u;
     }
@@ -455,7 +455,7 @@ void runCommand(char *line) {
       }
       cfg.rot = r;
     }
-    else { Serial.println("ERR,unknown key"); return; }
+    else { Serial.println(F("ERR,unknown key")); return; }
     cfgDirty = true;
     printConfig();
   } else if (!strcmp(cmd, "LEVEL")) {
@@ -477,31 +477,31 @@ void runCommand(char *line) {
     cfgDirty = true;
     printConfig();
   } else if (!strcmp(cmd, "PULSE") && arg1) {
-    if (!calMode) { Serial.println("ERR,PULSE needs CAL"); return; }
-    if (arg1[0] != 'X' && arg1[0] != 'Y') { Serial.println("ERR,PULSE X or Y"); return; }
+    if (!calMode) { Serial.println(F("ERR,PULSE needs CAL")); return; }
+    if (arg1[0] != 'X' && arg1[0] != 'Y') { Serial.println(F("ERR,PULSE X or Y")); return; }
     endSweep(); endGim();
     pulseAxis = arg1[0];
     pulseDeg = arg2 ? constrain(atoi(arg2), 3, 30) : 15;
     pulseEnd = millis() + 1200;
   } else if (!strcmp(cmd, "SWEEP") && arg1) {
-    if (!calMode) { Serial.println("ERR,SWEEP needs CAL"); return; }
+    if (!calMode) { Serial.println(F("ERR,SWEEP needs CAL")); return; }
     if (!strcmp(arg1, "OFF")) { endSweep(); return; }
-    if (strcmp(arg1, "CIRCLE") && strcmp(arg1, "CORNERS")) { Serial.println("ERR,SWEEP CIRCLE, CORNERS or OFF"); return; }
+    if (strcmp(arg1, "CIRCLE") && strcmp(arg1, "CORNERS")) { Serial.println(F("ERR,SWEEP CIRCLE, CORNERS or OFF")); return; }
     pulseAxis = 0; endGim();
     sweepMode = arg1[1] == 'I' ? 'C' : 'K';
     sweepStart = millis();
   } else if (!strcmp(cmd, "GIM") && arg1) {
-    if (!calMode) { Serial.println("ERR,GIM needs CAL"); return; }
+    if (!calMode) { Serial.println(F("ERR,GIM needs CAL")); return; }
     float x = 0, y = 0;   // GIM OFF = slew back to centre (same as GIM 0 0)
-    if (strcmp(arg1, "OFF") && (!parseNum(arg1, x) || !parseNum(arg2, y))) { Serial.println("ERR,GIM <x> <y> in gimbal degrees"); return; }
+    if (strcmp(arg1, "OFF") && (!parseNum(arg1, x) || !parseNum(arg2, y))) { Serial.println(F("ERR,GIM <x> <y> in gimbal degrees")); return; }
     const float lim = GMAX * RAD_TO_DEG;
     pulseAxis = 0; endSweep();
     if (!gimOn) { gimOn = true; gimX = gimY = 0; gimLastMs = millis(); }   // CAL holds the servos at centre
     gimTX = constrain(x, -lim, lim); gimTY = constrain(y, -lim, lim);
     gimReported = false;
   } else if (!strcmp(cmd, "ARM")) {
-    if (!calMode) { Serial.println("ERR,ARM needs CAL"); return; }
-    if (escCalHigh) { escCalEnd("MODE"); Serial.println("ERR,ARM during ESCCAL"); return; }
+    if (!calMode) { Serial.println(F("ERR,ARM needs CAL")); return; }
+    if (escCalHigh) { escCalEnd("MODE"); Serial.println(F("ERR,ARM during ESCCAL")); return; }
     bool rest = arg1 && !strcmp(arg1, "REST");
     if (!motorArmed) { motorArmed = true; thrTarget = thrNow = 0; tiltHits = 0; }
     else if (rest != restMode && thrTarget > 0) { Serial.println(F("ERR,ARM mode change needs THR 0")); return; }
@@ -510,22 +510,22 @@ void runCommand(char *line) {
     if (!rest) printThr();
   } else if (!strcmp(cmd, "THR") && arg1) {
     float v;
-    if (!motorArmed) { Serial.println("ERR,THR needs ARM"); return; }
-    if (!parseNum(arg1, v) || v < 0) { Serial.println("ERR,THR <percent>"); return; }
+    if (!motorArmed) { Serial.println(F("ERR,THR needs ARM")); return; }
+    if (!parseNum(arg1, v) || v < 0) { Serial.println(F("ERR,THR <percent>")); return; }
     if (restPending && v > 0) { Serial.println(F("ERR,THR before ARM,REST")); return; }
     float t = constrain(v / 100.0f, 0.0f, THROTTLE_CAP);
     if (t != thrTarget) { thrTarget = t; printThr(); }
   } else if (!strcmp(cmd, "ESCCAL") && arg1) {
     if (!strcmp(arg1, "LOW") || !strcmp(arg1, "OFF")) {
       escCalHigh = false; esc.writeMicroseconds(ESC_MIN_US);
-      Serial.println("ESCCAL,LOW");
+      Serial.println(F("ESCCAL,LOW"));
     } else if (!strcmp(arg1, "HIGH")) {
-      if (!calMode) { Serial.println("ERR,ESCCAL needs CAL"); return; }
-      if (motorArmed || thrNow > 0) { Serial.println("ERR,ESCCAL needs DISARM"); return; }
+      if (!calMode) { Serial.println(F("ERR,ESCCAL needs CAL")); return; }
+      if (motorArmed || thrNow > 0) { Serial.println(F("ERR,ESCCAL needs DISARM")); return; }
       escCalHigh = true; escCalStart = millis();
       esc.writeMicroseconds(ESC_MAX_US);
-      Serial.println("ESCCAL,HIGH");
-    } else Serial.println("ERR,ESCCAL HIGH or LOW");
+      Serial.println(F("ESCCAL,HIGH"));
+    } else Serial.println(F("ERR,ESCCAL HIGH or LOW"));
   } else if (!strcmp(cmd, "DISARM")) {
     motorArmed = false; thrTarget = thrNow = 0; tiltHits = 0;  restMode = restPending = false;
     esc.writeMicroseconds(ESC_MIN_US);
@@ -544,7 +544,7 @@ void runCommand(char *line) {
     aborted = false; uprightSince = 0;   // switching on releases a held abort; switching off re-checks the tilt
     Serial.println(freeTest ? "FREE,ON" : "FREE,OFF");
   } else {
-    Serial.println("ERR,unknown command");
+    Serial.println(F("ERR,unknown command"));
   }
 }
 
@@ -603,7 +603,7 @@ void calLoop() {
     xa = (int)round(xs); ya = (int)round(ys);
     if (!gimReported && gimX == gimTX && gimY == gimTY) {
       gimReported = true;
-      Serial.print("GIM,"); Serial.print(gimX, 2); Serial.print(','); Serial.println(gimY, 2);
+      Serial.print(F("GIM,")); Serial.print(gimX, 2); Serial.print(','); Serial.println(gimY, 2);
     }
   }
   xServo.writeMicroseconds(servoUs(xs));
@@ -635,7 +635,7 @@ void calLoop() {
       if (max(fabs(accelTiltX(b)), fabs(accelTiltY(b))) > ABORT_TILT) { if (++tiltHits >= 3) motorCut("TILT"); }
       else tiltHits = 0;
     }
-    Serial.print("CAL,");
+    Serial.print(F("CAL,"));
     Serial.print(xa); Serial.print(',');
     Serial.print(ya); Serial.print(',');
     Serial.print(tiltFromX(b) * RAD_TO_DEG, 2); Serial.print(',');
@@ -653,7 +653,7 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
-  Serial.print("TVC firmware v");
+  Serial.print(F("TVC firmware v"));
   Serial.println(FW_VERSION);
 
   loadConfig();
@@ -661,7 +661,7 @@ void setup() {
 
   // Initialize MPU6050
   if (!mpu.begin()) {
-    Serial.println("Failed to find MPU6050 chip");
+    Serial.println(F("Failed to find MPU6050 chip"));
     while (1) {
       delay(10);
     }
@@ -672,11 +672,11 @@ void setup() {
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_44_HZ);
 
-  Serial.println("Calibrating gyro - keep still...");
+  Serial.println(F("Calibrating gyro - keep still..."));
   calibrateGyro();
   printConfig();
-  Serial.println("FREE,OFF");
-  Serial.println("TVC Gimbal Hardware Initialized!");
+  Serial.println(F("FREE,OFF"));
+  Serial.println(F("TVC Gimbal Hardware Initialized!"));
   lastLoop = micros();
 }
 
@@ -720,18 +720,18 @@ void loop() {
   if (millis() - lastTelemetry >= TELEMETRY_MS) {
     lastTelemetry = millis();
     Serial.print(roll * RAD_TO_DEG, 1);
-    Serial.print(",");
+    Serial.print(',');
     if (TELEMETRY_SERVO) {
       Serial.print(90 + (int)round(xDeg - cfg.xCenter));
-      Serial.print(",");
+      Serial.print(',');
       Serial.print(90 + (int)round(yDeg - cfg.yCenter));
-      Serial.print(",");
+      Serial.print(',');
       Serial.print(tiltX * RAD_TO_DEG, 1);
-      Serial.print(",");
+      Serial.print(',');
       Serial.println(tiltY * RAD_TO_DEG, 1);
     } else {
       Serial.print(tiltX * RAD_TO_DEG, 1);
-      Serial.print(",");
+      Serial.print(',');
       Serial.println(tiltY * RAD_TO_DEG, 1);
     }
   }

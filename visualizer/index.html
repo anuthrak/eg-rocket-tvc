@@ -174,7 +174,7 @@
 
 <!-- ======================= TESTS TAB ======================= -->
 <!-- Test list | live telemetry strip over (procedure | charts, rig view, serial log). tests.js runs the page; each test
-     is its own module (calib.js, laser.js, throttle.js, vector.js; Free-hand lives in tests.js). One test at a time. -->
+     is its own module (calib.js, laser.js, throttle.js, vector.js, authority.js; Free-hand lives in tests.js). One test at a time. -->
 <main id="testsMain">
   <aside class="t-rail" aria-label="Tests">
     <div class="t-rail-h">Tests<span>In this order</span></div>
@@ -184,7 +184,8 @@
     <button id="lzBtn" class="t-pick" data-test="lz"><span class="t-num">3</span><span class="t-name">Laser<small>CT-1</small></span><span class="t-desc">Gimbal accuracy: a laser on the motor tube marks each angle on a wall.</span></button>
     <button id="thBtn" class="t-pick" data-test="th"><span class="t-num">4</span><span class="t-name">Throttle<small>CT-4</small></span><span class="t-desc">Run the EDF: throttle, ESC pulse and vibration. ESC range calibration.</span></button>
     <button id="vcBtn" class="t-pick" data-test="vc"><span class="t-num">5</span><span class="t-name">Thrust vector<small>CT-5</small></span><span class="t-desc">From rest on the stop: the throttle and torque it takes to move the rocket. No scale.</span></button>
-    <p class="t-note">The motor only runs in Throttle and Thrust vector. It stops when you close the test, leave this tab, hide the page, or press Space.</p>
+    <button id="auBtn" class="t-pick" data-test="au"><span class="t-num">6</span><span class="t-name">Authority<small>IT-5</small></span><span class="t-desc">From balanced upright: how hard the gimbal turns the rocket, at a set throttle.</span></button>
+    <p class="t-note">The motor only runs in Throttle, Thrust vector and Authority. It stops when you close the test, leave this tab, hide the page, or press Space.</p>
   </aside>
 
   <div class="t-work">
@@ -211,7 +212,8 @@
             <li><b>Free-hand</b> checks the loop pushes the right way before anything spins.</li>
             <li><b>Laser</b> (CT-1) proves the gimbal goes where it is told, within 1°.</li>
             <li><b>Throttle</b> (CT-4) runs the EDF on its own and shows the vibration it adds.</li>
-            <li><b>Thrust vector</b> (CT-5) runs both: how hard the gimbal can turn the rocket, at each throttle.</li>
+            <li><b>Thrust vector</b> (CT-5) runs both: the thrust it takes to move the rocket off a rig stop.</li>
+            <li><b>Authority</b> (IT-5) tips the balanced rocket from upright: how hard the gimbal turns it, the controller's <i>b</i>.</li>
           </ol>
         </section>
   <!-- System check: every part, guided, nothing rewired (syscheck.js) -->
@@ -571,7 +573,7 @@
       <div class="cal-body" id="vcBody">
         <!-- 1 Setup -->
         <div class="cal-step vc-step" data-tab="0">
-          <p class="cal-p">Finds <b>how much thrust it takes to move the rocket</b>. Start with it resting where it falls on the rig, leaning on a stop. The page points the gimbal so thrust pushes it back toward upright, then raises the throttle slowly while the Nano's IMU watches. The moment it comes <b>1° off the stop</b>, the motor is cut and it settles back. That throttle is the <b>lift-off</b> point. Each repeat starts from rest again.</p>
+          <p class="cal-p">Finds <b>how much thrust it takes to move the rocket</b>. Start with it resting where it falls on the rig, leaning on a stop. The page points the gimbal so thrust pushes it back toward upright, then raises the throttle slowly while the Nano's IMU watches. The moment it comes <b>2.5° off the stop</b>, the motor is cut and it settles back. That throttle is the <b>lift-off</b> point. Each repeat starts from rest again.</p>
           <div class="cal-line"><span>Gimbal angles<small>°, biggest first</small></span>
             <span class="vc-seg vc-multi" id="vcAngles"><button data-ang="8">8</button><button data-ang="6">6</button><button data-ang="4">4</button><button data-ang="2">2</button></span></div>
           <div class="cal-line"><span>Max throttle<small>% (25 % until the supply fix)</small></span>
@@ -588,7 +590,7 @@
             <li><label><input type="checkbox"> Intake and outlet clear, EDF retainer in, fuse fitted, 12 V plug within reach</label></li>
             <li><label><input type="checkbox"> Eye protection on, a hand ready near the nose (not over the intake)</label></li>
           </ul>
-          <p class="cal-p">Stops by itself past 6° off the stop or 90°/s. The Nano also cuts the motor 12° from where it was resting. Needs firmware v1.13.0 (<code>ARM REST</code>).</p>
+          <p class="cal-p">Stops by itself past 9° off the stop or 90°/s. The Nano also cuts the motor 12° from where it was resting. Needs firmware v1.13.0 (<code>ARM REST</code>).</p>
         </div>
         <!-- 2 Run -->
         <div class="cal-step vc-step" data-tab="1" hidden>
@@ -620,7 +622,7 @@
           </table>
           <p class="cal-p" id="vcMeta"></p>
           <div class="cal-acts"><button id="vcCsv" class="primary">Download CSV</button><button id="vcCopy">Copy summary</button><button id="vcNew">New test</button></div>
-          <p class="cal-p"><b>Lift-off</b>: the throttle where it came 1° off the stop (median of the repeats, ± half the spread). <b>Starts moving</b>: where it really began to move, back-dated from lift-off by a curve fit (it needs a moment to accelerate, while the throttle keeps rising). The thrust, side force and torque use this one. <b>Thrust</b> comes from your Throttle step test if you entered scale readings, otherwise from the spec curve. <b>Side force</b> = thrust × sin(gimbal). <b>Torque</b> = side force × 190 mm (pivot to gimbal). The torque should come out about the same at every gimbal angle: it is what the imbalance and pivot friction hold the rocket down with. Divided by the 598 g mass it gives how far the CG sits off the pivot.</p>
+          <p class="cal-p"><b>Lift-off</b>: the throttle where it came 2.5° off the stop (median of the repeats, ± half the spread). <b>Starts moving</b>: where it really began to move, back-dated from lift-off by a curve fit (it needs a moment to accelerate, while the throttle keeps rising). The thrust, side force and torque use this one. <b>Thrust</b> comes from your Throttle step test if you entered scale readings, otherwise from the spec curve. <b>Side force</b> = thrust × sin(gimbal). <b>Torque</b> = side force × 190 mm (pivot to gimbal). The torque should come out about the same at every gimbal angle: it is what the imbalance and pivot friction hold the rocket down with. Divided by the 598 g mass it gives how far the CG sits off the pivot.</p>
           <details class="cal-measure">
             <summary>Past runs (this browser)</summary>
             <ul class="lz-hist" id="vcHist"></ul>
@@ -628,6 +630,85 @@
         </div>
       </div>
       <div class="cal-foot"><button id="vcBack">Back</button><button id="vcNext" class="primary">Next</button></div>
+    </div>
+  </section>
+
+  <!-- Authority (IT-5): open-loop gimbal step from upright. Drives ARM / THR / GIM / DISARM (authority.js). -->
+  <section id="auPanel" class="cal vc" hidden aria-label="Gimbal authority test">
+    <div class="cal-card">
+      <div class="cal-head">
+        <h2>Authority<span id="auState">IT-5</span></h2>
+        <button id="auKill" class="th-kill" hidden title="Stop the motor (Space)">Stop motor</button>
+        <button id="auClose" class="cal-x" title="Close and stop the motor (Esc)" aria-label="Close">
+          <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <nav class="cal-steps lz-tabs" id="auTabs">
+        <button data-tab="0">1 · Setup</button><button data-tab="1">2 · Run</button><button data-tab="2">3 · Results</button>
+      </nav>
+      <p id="auMsg" class="cal-msg" hidden></p>
+      <div class="cal-body" id="auBody">
+        <!-- 1 Setup -->
+        <div class="cal-step au-step" data-tab="0">
+          <p class="cal-p">Finds <b>how hard the TVC can turn the rocket</b>. Balance it on the pivot so it stays where you leave it near upright. For each tip the motor comes up with the gimbal centred, then the gimbal steps to the chosen angle and the gyro measures how fast the rocket <b>speeds up</b> as it tips. After 5° the gimbal reverses to stop it, the motor goes off, and the next tip goes back the other way across upright. First do the <b>swing</b> on each axis (motor off): tip it about 10°, let go, and the page measures how much gravity pulls it back and how much the pivot slows it, then removes both from every tip.</p>
+          <div class="cal-line"><span>Throttle<small>%</small></span>
+            <span class="vc-seg" id="auThr"><button data-thr="25">25</button><button data-thr="40">40</button><button data-thr="60">60</button></span></div>
+          <div class="cal-line"><span>Gimbal angles<small>°, biggest first</small></span>
+            <span class="vc-seg" id="auAngles"><button data-ang="8">8</button><button data-ang="6">6</button><button data-ang="4">4</button><button data-ang="2">2</button></span></div>
+          <div class="cal-line"><span>Axes</span>
+            <span class="vc-seg" id="auAxes"><button data-axis="X">X</button><button data-axis="Y">Y</button></span></div>
+          <div class="cal-line"><span>Repeats<small>each way</small></span>
+            <span class="vc-seg" id="auReps"><button data-rep="1">1</button><button data-rep="2">2</button><button data-rep="3">3</button></span></div>
+          <div class="cal-line"><span>Swing<small>motor off, once per setup</small></span>
+            <span class="vc-seg" id="auSwing"><button data-swing="X" id="auSwingX">Swing X</button><button data-swing="Y" id="auSwingY">Swing Y</button></span></div>
+          <p class="cal-p" id="auSwingTxt"></p>
+          <p class="cal-p" id="auPlan"></p>
+          <ul class="th-check" id="auCheck">
+            <li><label><input type="checkbox"> Calibrate done and saved (level, directions, linkage ratios)</label></li>
+            <li><label><input type="checkbox"> Rocket on the pivot near upright, no nose weight, nothing else touching it; swing done for each axis you test</label></li>
+            <li><label><input type="checkbox"> Rig base weighed down (books, water bottles) or clamped; hands off the rig</label></li>
+            <li><label><input type="checkbox"> Intake and outlet clear, EDF retainer in, fuse fitted, 12 V plug within reach</label></li>
+            <li><label><input type="checkbox"> Eye protection on, hands clear of the rocket while the motor runs</label></li>
+          </ul>
+          <p class="cal-p">Stops by itself past 20° from upright, 120°/s, a tip the wrong way, or if the thrust alone turns it 6° with the gimbal centred. The Nano also cuts the motor past 25°. Needs firmware v1.12.0 (gyro rates).</p>
+        </div>
+        <!-- 2 Run -->
+        <div class="cal-step au-step" data-tab="1" hidden>
+          <div class="th-live">
+            <div class="th-big"><span>Throttle</span><b id="auAct">—</b><small>%</small></div>
+            <dl class="kv th-kv">
+              <dt>Tip</dt><dd id="auStep">—</dd><dd class="u"></dd>
+              <dt>Gimbal</dt><dd id="auGim">—</dd><dd class="u">°</dd>
+              <dt>Tilt</dt><dd id="auTilt">—</dd><dd class="u">°</dd>
+              <dt>Rate</dt><dd id="auRate">—</dd><dd class="u">°/s</dd>
+            </dl>
+          </div>
+          <div class="lz-dots vc-dots" id="auDots" aria-hidden="true"></div>
+          <div class="cal-prompt" id="auPrompt">Ready</div>
+          <p class="cal-p" id="auSub"></p>
+          <div class="cal-acts"><button id="auGo" class="primary">Arm &amp; start</button><button id="auStop">Stop motor</button></div>
+          <p class="cal-note" id="auNote"></p>
+        </div>
+        <!-- 3 Results -->
+        <div class="cal-step au-step" data-tab="2" hidden>
+          <div class="lz-overall" id="auOverall">No run yet.</div>
+          <div class="vc-dir">
+            <div class="fh-check"><span class="cal-name">Turns it at</span><b id="auAcc">—</b></div>
+            <div class="fh-check"><span class="cal-name">Lifts a 25° lean with CG up to</span><b id="auCg">—</b></div>
+          </div>
+          <table class="lz-tab vc-tab">
+            <thead><tr><th>Gimbal</th><th>Accel<small>°/s²</small></th><th>Per gimbal °<small>°/s²</small></th><th>Design<small>%</small></th><th>Torque<small>g·mm</small></th><th>Thrust<small>g</small></th><th>Tips</th></tr></thead>
+            <tbody id="auRows"></tbody>
+          </table>
+          <p class="cal-p" id="auMeta"></p>
+          <div class="cal-acts"><button id="auCsv" class="primary">Download CSV</button><button id="auCopy">Copy summary</button><button id="auNew">New test</button></div>
+          <p class="cal-p"><b>Accel</b>: how fast the tipping speeds up once the gimbal is there, from the gyro (median of the tips, ± half the spread), minus the drift the thrust gave with the gimbal centred. <b>Per gimbal °</b> is the controller's <i>b</i> at this throttle. <b>Design</b> compares it with ~185 °/s² at 8° and 220 g, scaled to this throttle's thrust (your scale step test if you did one, otherwise the spec curve). <b>Torque</b> = 0.017 kg·m² (estimated inertia) × accel. <b>Thrust</b> is what that torque implies: torque / (sin gimbal × 190 mm). The CG figure is how far above the pivot a 598 g rocket's CG could sit and still be lifted off a 25° lean by this torque (pivot friction not included).</p>
+          <details class="cal-measure">
+            <summary>Past runs (this browser)</summary>
+            <ul class="lz-hist" id="auHist"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="cal-foot"><button id="auBack">Back</button><button id="auNext" class="primary">Next</button></div>
     </div>
   </section>
       </div>
