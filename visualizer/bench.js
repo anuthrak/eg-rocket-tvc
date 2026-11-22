@@ -8,7 +8,7 @@ import { initCalib } from './calib.js';
 import { initLaser } from './laser.js';
 import { initThrottle } from './throttle.js';
 import { initVector } from './vector.js';
-import { initAuthority } from './authority.js';
+import { initStability } from './stability.js';
 import { initSysCheck } from './syscheck.js';
 import { createDemoSim } from './demo-sim.js';
 
@@ -509,7 +509,7 @@ export function initBench() {
       laser.handle(line);
       throttle.handle(line);
       vector.handle(line);
-      authority.handle(line);
+      stability.handle(line);
       // Show the held servo positions on the rig and gimbal dial while calibrating
       if (cal) {
         const tx = cal[3] - rig.tx, ty = cal[4] - rig.ty;
@@ -583,9 +583,9 @@ export function initBench() {
     peak.pitch = peak.yaw = 0; raw.pitch = raw.yaw = null; portLabel = label; fwVersion = label === 'Demo' ? 'Demo' : '—';
     rig = { ...NO_CFG };
     setFree(false); $('freeBtn').disabled = !port;
-    calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); authority.onLink();
+    calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); stability.onLink();
   }
-  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); authority.onLink(); }
+  function endLink() { linkStart = lastLineT = null; portLabel = '—'; setFree(false); $('freeBtn').disabled = true; calib.onLink(); laser.onLink(); throttle.onLink(); vector.onLink(); stability.onLink(); }
 
   // Commands to the Nano (calibration). Writes are chained so two quick clicks can't fight over the writer lock.
   // quiet = not shown in the serial log (the throttle test's heartbeat).
@@ -604,7 +604,7 @@ export function initBench() {
   const laser = initLaser({ send, link: linkInfo, calib });
   const throttle = initThrottle({ send, link: linkInfo, calib, laser });
   const vector = initVector({ send, link: linkInfo });
-  const authority = initAuthority({ send, link: linkInfo });
+  const stability = initStability({ send, link: linkInfo });
   const syscheck = initSysCheck({ send, link: linkInfo });   // listens to 'tvc:line' itself
   // The tests all use the Nano's CAL mode; tests.js makes sure only one is open at a time
   const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
@@ -826,7 +826,7 @@ export function initBench() {
     tvc.rotation.set(deg(gx), 0, deg(-gy));
     innerG.rotation.x = deg(gx);
     // On the real rig the plume follows the throttle test's real throttle; otherwise it stays dim (the command, not real thrust)
-    const thr = throttle.level() ?? vector.level() ?? authority.level() ?? syscheck.level();
+    const thr = throttle.level() ?? vector.level() ?? syscheck.level();
     updateThrust(linkStart !== null && lastLineT !== null && thr !== 0, gx, gy, demoTimer ? 1 : thr ?? 0.35);
     const live = linkStart !== null && lastLineT !== null && !demoTimer;
     // Test props: the last test opened (Throttle and Thrust vector close when you leave the Tests tab, which has no 3D view)
@@ -854,7 +854,7 @@ export function initBench() {
     const linked = linkStart !== null, hasData = linked && lastLineT !== null;
     $('viewNote').textContent = !hasData ? '' : demoTimer
       ? 'Drag the rocket and let go. Simulated gusts, thrust and recovery. Arrow = sideways force on the rocket.'
-      : throttle.isOpen() || vector.isOpen() || authority.isOpen() || syscheck.isOpen() ? 'Motor test: the plume shows the real throttle.'
+      : throttle.isOpen() || vector.isOpen() || syscheck.isOpen() ? 'Motor test: the plume shows the real throttle.'
       : 'Motor off: plume and arrow show the commanded thrust.';
     const f1 = v => (hasData ? v.toFixed(1) : DASH), d1 = v => (hasData ? v.toFixed(1) + '°' : DASH);
     $('pitchVal').textContent = f1(target.pitch);
@@ -919,5 +919,5 @@ export function initBench() {
   }
   requestAnimationFrame(animate);
 
-  return { calib, laser, throttle, vector, authority, syscheck, send, link: linkInfo };
+  return { calib, laser, throttle, vector, stability, syscheck, send, link: linkInfo };
 }
