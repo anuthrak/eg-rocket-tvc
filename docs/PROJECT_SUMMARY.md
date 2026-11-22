@@ -178,9 +178,16 @@ tower catch with the chopstick tower → full reusable mini mission.
   real CG is lower than the ~240 mm estimate. The ESC pulls it sideways (needs a small weight at pivot height on
   the opposite side). Cables were ruled out as the spring. GS-001: an adjustable collar, or a pivot position
   between part A and part B, so the complete rocket is neutral with no added weight.
-- Visualizer Authority test (IT-5, Nov 20): gimbal step from upright on the pivot, with the IT-3 swing fit
-  removing gravity and friction. First real runs were invalid (gravity 40–75 °/s² at 5° against ~30 °/s² from
-  the TVC at 40 %); rerun once the rocket is near neutral.
+- Visualizer Stability test (IT-3, Nov 22) replaces the Authority test (IT-5), whose runs were swamped by gravity: motor off, several hand releases per axis,
+  fitted for CG height vs the pivot, period, damping and dry pivot friction, with the tab slide + nose ballast that balances it. Nov 22 on the rig:
+  X swings back (~2 s) while Y looks neutral; the rig axes cross at one point (GS-001), so Y is most likely held by pivot friction.
+  X at 5/10/15° releases: ~2.2 s, CG ~25 mm below the pivot (15° most consistent). The printed tabs have no slide, so it is
+  balanced with AA cells (~23 g each): 2 at the tip were too nose-heavy (falls away); now 1 AA high on the nose (opposite the
+  ESC) + 2 AA below the door (side balance for the EDF hanging out): X returns slowly to upright with no overshoot (near
+  neutral). Y inner-pivot nuts are too tight (dead band ~±4°) and can't be reached without opening the rocket: loosen them
+  when it is apart for the EDF retainer. The 12 V cable alone made X overshoot and pushed Y over: routed with its weight on
+  the rig, a slack loop to the rocket at pivot height near an outer pivot, both axes are neutral (stay where left). GS-001
+  revision: a tether clip on the outer ring and an entry point at pivot height.
 - EDF + ESC arrived: measure the duct OD (≤ 31.6 mm fits the Ø32 bore), real EDF dimensions, ESC location
   (assumed ~172 mm in part A) and design the EDF retainer.
 - Weigh every part and update COMPONENTS in the body model (real CG, mass).

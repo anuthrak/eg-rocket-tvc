@@ -8,7 +8,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const DASH = '—';
 const GMAX = 8;
 
-export function initTests({ calib, laser, throttle, vector, authority, syscheck, send, link }) {
+export function initTests({ calib, laser, throttle, vector, stability, syscheck, send, link }) {
   // ---------- Live telemetry ----------
   let cfg = null;                                  // from CFG: centres, directions, trims, linkage ratios
   const T = { t: 0, mode: null, tx: null, ty: null, gx: null, gy: null, sx: null, sy: null, rx: null, ry: null, thr: null, tgt: null, thrT: 0 };
@@ -65,8 +65,8 @@ export function initTests({ calib, laser, throttle, vector, authority, syscheck,
 
   // ---------- Test list: one open at a time ----------
   const fh = { open: false, isOpen: () => fh.open, close: () => fhHide(), refresh: () => fhRender() };
-  const tests = { sc: syscheck, cal: calib, fh, lz: laser, th: throttle, vc: vector, au: authority };
-  const btnOf = { sc: 'scBtn', cal: 'calBtn', fh: 'fhBtn', lz: 'lzBtn', th: 'thBtn', vc: 'vcBtn', au: 'auBtn' };
+  const tests = { sc: syscheck, cal: calib, fh, lz: laser, th: throttle, vc: vector, st: stability };
+  const btnOf = { sc: 'scBtn', cal: 'calBtn', fh: 'fhBtn', lz: 'lzBtn', th: 'thBtn', vc: 'vcBtn', st: 'stBtn' };
   for (const [key, id] of Object.entries(btnOf)) {
     // Capture: runs before the module's own onclick (which toggles). Clicking the open test does nothing;
     // clicking another closes the open one first (Calibrate may ask about unsaved changes and stay open).
@@ -177,13 +177,13 @@ export function initTests({ calib, laser, throttle, vector, authority, syscheck,
       series: [{ id: 'xu', label: 'X up', color: X, marker: true }, { id: 'xd', label: 'X down', color: X, dash: true, marker: true, hollow: true },
                { id: 'yu', label: 'Y up', color: Y, marker: true }, { id: 'yd', label: 'Y down', color: Y, dash: true, marker: true, hollow: true }],
       refs: [{ y: 1 }, { y: -1 }], empty: 'Measure an axis' }),
-    thThr: new Chart(tile('sc th au'), { title: 'Throttle', sub: '30 s', unit: '%', span: 30, yMin: 0, yMax: 90,
+    thThr: new Chart(tile('sc th'), { title: 'Throttle', sub: '30 s', unit: '%', span: 30, yMin: 0, yMax: 90,
       series: [{ id: 'a', label: 'Actual', color: X }, { id: 't', label: 'Target', color: N, dash: true }], empty: 'Arm to see the throttle' }),
     vib: new Chart(tile('home sc cal th'), { title: 'Vibration', sub: 'Gyro rms over 0.5 s · 30 s', unit: '°/s', span: 30, yMin: 0, minRange: 2,
       series: [{ id: 'v', label: 'Vibration', color: W }] }),
     thThrust: new Chart(tile('th'), { kind: 'xy', title: 'Thrust vs throttle', sub: 'Step test · dashed: spec', xLabel: 'Throttle', xUnit: '%', unit: 'g', xMin: 0, xMax: 90, yMin: 0,
       series: [{ id: 'm', label: 'Measured', color: X, marker: true }, { id: 's', label: 'Spec (220 g × t²)', color: N, dash: true }], empty: 'Needs a scale (step test)' }),
-    vcRate: new Chart(tile('home cal th vc au'), { title: 'Body rate', sub: 'Gyro · 10 s', unit: '°/s', symmetric: true, minRange: 10,
+    vcRate: new Chart(tile('home cal th vc'), { title: 'Body rate', sub: 'Gyro · 10 s', unit: '°/s', symmetric: true, minRange: 10,
       series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Calibration mode, firmware v1.12.0' }),
     vcMove: new Chart(tile('vc'), { kind: 'xy', title: 'Off the stop vs throttle', sub: 'Each ramp · dashed: 2.5° lift-off line', xLabel: 'Throttle', xUnit: '%', unit: '°', xMin: 0, xMax: 30, yMin: -0.5, minRange: 2,
       series: [{ id: 'a8', label: '8°', color: X, line: false }, { id: 'a6', label: '6°', color: Y, line: false }, { id: 'a4', label: '4°', color: W, line: false }, { id: 'a2', label: '2°', color: N, line: false }],
@@ -192,13 +192,24 @@ export function initTests({ calib, laser, throttle, vector, authority, syscheck,
       series: [{ id: 'm', label: 'Each repeat', color: X, line: false, marker: true }, { id: 's', label: 'Same torque', color: N, dash: true }], empty: 'Run the test' }),
     vcTorque: new Chart(tile('vc'), { kind: 'xy', title: 'Torque to move it vs gimbal', sub: 'Each repeat · dashed: median · should be level', xLabel: 'Gimbal', xUnit: '°', unit: 'g·mm', xMin: 0, xMax: 9, yMin: 0,
       series: [{ id: 'm', label: 'Each repeat', color: Y, line: false, marker: true }, { id: 'med', label: 'Median', color: N, dash: true }], empty: 'Run the test' }),
-    auTip: new Chart(tile('au'), { kind: 'xy', title: 'Tipping rate in each tip', sub: 'From the gimbal step · slope = acceleration', xLabel: 'Time', xUnit: 's', unit: '°/s', xMin: 0, xMax: 1, yMin: -5, minRange: 10,
-      series: [{ id: 'a8', label: '8°', color: X, line: false }, { id: 'a6', label: '6°', color: Y, line: false }, { id: 'a4', label: '4°', color: W, line: false }, { id: 'a2', label: '2°', color: N, line: false }], empty: 'Run the test' }),
-    auAcc: new Chart(tile('au'), { kind: 'xy', title: 'Acceleration vs gimbal', sub: 'Each tip · dashed: design at this throttle', xLabel: 'Gimbal', xUnit: '°', unit: '°/s²', xMin: 0, xMax: 9, yMin: 0,
-      series: [{ id: 'm', label: 'Each tip', color: X, line: false, marker: true }, { id: 'd', label: 'Design', color: N, dash: true }], empty: 'Run the test' }),
+    // Stability (IT-3): every release, motor off. Lines break between releases.
+    stLive: new Chart(tile('st'), { title: 'Tilt', sub: 'Live, after level trim · 20 s', unit: '°', span: 20, symmetric: true, minRange: 6,
+      series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Waiting for the Nano' }),
+    stTrace: new Chart(tile('st'), { kind: 'xy', title: 'Swing after letting go', sub: 'Tilt vs time from the release · every release', xLabel: 'Time', xUnit: 's', unit: '°', xMin: 0, xMax: 5, symmetric: true, minRange: 6,
+      series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Let go of the rocket' }),
+    stPhase: new Chart(tile('st'), { kind: 'xy', title: 'Phase portrait', sub: 'Rate vs tilt · spiral in = settles · flat stop = friction', xLabel: 'Tilt', xUnit: '°', unit: '°/s', symmetric: true, minRange: 20,
+      series: [{ id: 'x', label: 'X', color: X }, { id: 'y', label: 'Y', color: Y }], empty: 'Let go of the rocket' }),
+    stPull: new Chart(tile('st'), { kind: 'xy', title: 'Pull-back vs tilt', sub: 'Angular accel vs tilt from settle · slope = gravity spring', xLabel: 'From settle', xUnit: '°', unit: '°/s²', symmetric: true, minRange: 40,
+      series: [{ id: 'x', label: 'X', color: X, line: false }, { id: 'y', label: 'Y', color: Y, line: false },
+               { id: 'fx', label: 'X fit', color: X, dash: true, hideLegend: true }, { id: 'fy', label: 'Y fit', color: Y, dash: true, hideLegend: true }], empty: 'Let go of the rocket' }),
+    stDecay: new Chart(tile('st'), { kind: 'xy', title: 'Swing size per half swing', sub: 'Straight line = dry friction · curve = damping', xLabel: 'Half swing', xUnit: '', unit: '°', xMin: 0, yMin: 0,
+      series: [{ id: 'x', label: 'X', color: X, marker: true }, { id: 'y', label: 'Y', color: Y, marker: true }], empty: 'Needs a release that swings' }),
+    stCg: new Chart(tile('st'), { kind: 'xy', title: 'CG height vs pivot', sub: 'Each release · + above · dashed: neutral and target', xLabel: 'Release', xUnit: '', unit: 'mm', xMin: 0.5, minRange: 10,
+      series: [{ id: 'x', label: 'X', color: X, line: false }, { id: 'y', label: 'Y', color: Y, line: false }], refs: [{ y: 0 }], empty: 'Run the test' }),
   };
 
   for (const [k, c] of Object.entries(C)) c.tile.dataset.chart = k;   // for per-test ordering in CSS
+  stability.onSample = (now, s) => C.stLive.push(now, { x: s.tx, y: s.ty });   // also fed in Demo (simulated rig)
 
   // Live feeds: every telemetry sample
   function feed(now) {
@@ -270,29 +281,39 @@ export function initTests({ calib, laser, throttle, vector, authority, syscheck,
       const el = C.vcTorque.tile.querySelector('.t-tile-h span');
       if (el.textContent !== sub) el.textContent = sub;
     }
-    // Authority: each tip's rate (toward its own tipping direction) from the gimbal step, and the fitted accelerations
-    const au = authority.data();
-    const ar = au.work || au.run;
-    if (ar) {
-      const tips = [...ar.tips];
-      if (au.cur && au.work && au.cur.stepAt) tips.push(au.cur);
-      const tr = { a8: [], a6: [], a4: [], a2: [] };
-      let tMax = 0.5;
-      for (const t of tips) {
-        if (!t.stepAt || !tr['a' + t.deg]) continue;
-        for (const p of t.samples || []) {
-          if (p.ph !== 'step' && p.ph !== 'brake') continue;
-          const x = (p.t - t.stepAt) / 1000;
-          tMax = Math.max(tMax, x);
-          tr['a' + t.deg].push([x, (t.axis === 'X' ? p.rx : p.ry) * t.s]);
-        }
+    // Stability: every release of the run (or the one being recorded), lines broken between releases
+    const st = stability.data();
+    const sr = st.work || st.run;
+    const rels = sr ? [...sr.rels] : [];
+    if (st.rec && !st.rec.stuck) rels.push(st.rec);
+    const tr = { x: [], y: [] }, ph = { x: [], y: [] }, pl = { x: [], y: [] }, dc = { x: [], y: [] }, cg = { x: [], y: [] };
+    let tMax = 2;
+    const nPull = rels.reduce((n, r) => n + (r.pts?.length || 0), 0), every = Math.max(1, Math.ceil(nPull / 1500));
+    const count = { X: 0, Y: 0 };
+    for (const r of rels) {
+      const id = r.axis === 'X' ? 'x' : 'y', pts = r.pts || [];
+      count[r.axis]++;
+      if (r.res?.h != null) cg[id].push([count[r.axis], r.res.h]);
+      if (!pts.length) continue;
+      for (const p of pts) { tr[id].push([p[0], p[1]]); ph[id].push([p[1], p[2] - r.bias]); tMax = Math.max(tMax, p[0]); }
+      tr[id].push([pts.at(-1)[0], null]); ph[id].push([pts.at(-1)[1], null]);
+      // Angular acceleration: slope of the rate over ±60 ms, against the tilt from where it settled
+      const eq = r.res?.eq ?? pts.at(-1)[1];
+      for (let i = 3; i < pts.length - 3; i += every) {
+        const dt = pts[i + 3][0] - pts[i - 3][0];
+        if (dt > 0) pl[id].push([pts[i][1] - eq, (pts[i + 3][2] - pts[i - 3][2]) / dt]);
       }
-      C.auTip.o.xMax = Math.ceil(tMax * 4) / 4;
-      C.auTip.set(tr);
-      const model = au.thrustModel(), g = model.g(ar.thr);
-      C.auAcc.set({ m: ar.tips.filter(t => t.acc != null).map(t => [t.deg, t.acc]),
-                    d: Array.from({ length: 33 }, (_, i) => i * 0.25).map(d => [d, au.design(g, d)]) });
+      if (r.res?.amps?.length > 1) { r.res.amps.forEach((a, i) => dc[id].push([i, a])); dc[id].push([r.res.amps.length - 1, null]); }
     }
+    C.stTrace.o.xMax = Math.ceil(Math.min(tMax, 30));
+    C.stTrace.set(tr); C.stPhase.set(ph); C.stDecay.set(dc); C.stCg.set(cg);
+    // Fit lines on the pull-back chart: −k·x per axis (median k of the fitted releases)
+    const kOf = ax => { const ks = rels.filter(r => r.axis === ax && r.res?.k != null).map(r => r.res.k).sort((a, b) => a - b); return ks.length ? ks[(ks.length - 1) >> 1] : null; };
+    const span = Math.max(5, ...pl.x.concat(pl.y).map(p => Math.abs(p[0])));
+    const line = k => (k == null ? [] : [[-span, k * span], [span, -k * span]]);
+    C.stPull.set({ ...pl, fx: line(kOf('X')), fy: line(kOf('Y')) });
+    C.stCg.o.xMax = Math.max(2, count.X, count.Y) + 0.5;
+    C.stCg.o.refs = st.target ? [{ y: 0 }, { y: st.target }] : [{ y: 0 }];
   }
 
   // ---------- Strip + drawing loop (only while the Tests tab is showing) ----------

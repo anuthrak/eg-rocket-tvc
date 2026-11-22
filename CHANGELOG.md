@@ -3,6 +3,9 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+### Changed
+- Tests → **Authority (IT-5) replaced by Stability (IT-3)** (`visualizer/stability.js`; `authority.js` removed). Motor off: the whole test is the rig balance that the old Swing X / Swing Y buttons only sampled. Settings: axes X/Y, 2/4/6 releases per axis (+ and − sides in turn), release angle 5/10/15/20°, record up to 10/20/30 s, target neutral or 5/10 mm nose-heavy, and the rocket's mass, inertia, ballast point and tab slide. Guided releases: tip, hold still (detected), let go (detected and back-dated), recorded until still, at a stop or out of time; "It stayed", "Redo last", Stop (keeps finished releases). Each release is fitted with accel = −k·(tilt − settle) − c·rate − f·sign(rate) plus peaks: CG height vs the pivot, period (fit and peaks), pull at 5°, damping ratio, dry friction torque and dead band, decay shape (dry vs viscous), settle angle and time, gyro check. Per axis and overall: best CG estimate, the axes-disagree check (the GS-001 pivots cross at one point), a friction lower bound for an axis that never moves, and the fix (tab slide, then nose grams). Six charts: live tilt, swing vs time, phase portrait, pull-back vs tilt with the fit line, swing size per half swing, CG per release. Download CSV, samples CSV, Copy summary, past runs. Demo mode runs it on a simulated rig.
+- Charts: XY series accept `[x, null]` to break a line.
 
 ## [2.12.0] – 2026-11-20
 Firmware v1.13.1.

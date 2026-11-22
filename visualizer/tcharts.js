@@ -22,6 +22,7 @@ const fmt = (v, step) => {
 };
 
 export class Chart {
+  // XY data may hold [x, null] points: the line breaks there.
   // tile: container; opts: { kind: 'strip'|'xy', title, sub, unit, xUnit, xLabel, span, yMin, yMax, minRange, symmetric,
   //                          xMin, xMax, series: [{ id, label, color, dash, line, marker }], refs: [{ y } | { fn }], empty }
   constructor(tile, opts) {
@@ -87,7 +88,7 @@ export class Chart {
     }
     // y range from what's on screen
     const ys = [];
-    for (const s of o.series) for (const [x, y] of this.data[s.id]) if (x >= x0 - 1 && x <= x1 + 1) ys.push(y);
+    for (const s of o.series) for (const [x, y] of this.data[s.id]) if (y != null && x >= x0 - 1 && x <= x1 + 1) ys.push(y);
     for (const r of o.refs || []) if (r.y != null) ys.push(r.y);
     let y0 = o.yMin ?? (ys.length ? Math.min(...ys) : -1), y1 = o.yMax ?? (ys.length ? Math.max(...ys) : 1);
     if (o.yMin == null && o.zero !== false) y0 = Math.min(y0, 0);
@@ -138,10 +139,13 @@ export class Chart {
       if (s.line !== false && pts.length > 1) {
         ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.setLineDash(s.dash ? [5, 4] : []);
-        ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y)))); ctx.stroke();
+        ctx.beginPath(); let pen = false;   // a null y breaks the line
+        for (const [x, y] of pts) { if (y == null) { pen = false; continue; } if (pen) ctx.lineTo(X(x), Y(y)); else ctx.moveTo(X(x), Y(y)); pen = true; }
+        ctx.stroke();
         ctx.setLineDash([]);
       }
       if (s.marker || s.line === false) for (const [x, y] of pts) {
+        if (y == null) continue;
         ctx.beginPath(); ctx.arc(X(x), Y(y), 4, 0, Math.PI * 2);
         ctx.fillStyle = s.hollow ? surf : color; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = s.hollow ? color : surf; ctx.stroke();
@@ -170,6 +174,7 @@ export class Chart {
     } else {
       let best = null;
       for (const s of o.series) for (const p of this.data[s.id]) {
+        if (p[1] == null) continue;
         const d = Math.hypot(X(p[0]) - hx, Y(p[1]) - hy);
         if (d < 24 && (!best || d < best.d)) best = { s, p, d };
       }
