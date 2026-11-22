@@ -1,15 +1,15 @@
 // Landing tab physics (Mars), kept free of Three.js so it can be checked in Node.
 // Units: metres, seconds, kilograms; degrees at the interface, radians inside.
 //
-// The ship is a Starship-style upper stage, 50 m x 9 m. The flight has two halves:
-//   1. Entry, autopilot (createEntry): belly-first fall through the thin air, the flip, and the landing burn that
-//      brings it to 16.5 m/s at 150 m over the pad. A planar rigid body: drag on the body, flaps holding the belly
-//      into the wind, engine thrust through the gimbal and nose RCS turning it.
-//   2. Terminal, the TVC (createTerminal): from 150 m to touchdown. Attitude comes from a source:
-//        rig - the real rocket's tilt on the desk rig (bench.js 'tvc:sample' events), so pushing it pushes the ship;
+// The ship is a Starship-style upper stage, 50 m x 9 m. The flight:
+//   0. Orbit, deorbit and the plasma entry are a scripted, time-compressed sequence in the orbit scene (ENTRY below).
+//   1. Belly flop and flip, autopilot (createFlight): a rigid body falling belly-first from 8 km through the thin air,
+//      flaps trimming it, then nose RCS and the gimballed engines swinging it upright.
+//   2. TVC landing, right after the flip: the autopilot keeps commanding the attitude it needs to stop over the pad,
+//      and the TVC source's tilt and nozzle angles are added on top. That source is either
+//        rig - the real rocket on the desk rig (bench.js 'tvc:sample' events), or
 //        sim - createAttitudeSim(): two axes flown by the Nano's controller (controller.js), with gusts.
-//      The thrust leaves through the nozzle, which the gimbal tips off the body axis: its sideways part shoves the
-//      tail and the whole ship, so leaning and gimbal both move the ship across the ground.
+//      Thrust leaves through the nozzle: its sideways part shoves the tail and moves the whole ship.
 
 import { gimbalStep, AUTHORITY } from './controller.js';
 
@@ -21,112 +21,140 @@ export const G = 3.71;               // Mars
 const RHO0 = 0.020, HS = 11100;      // surface air density (kg/m³), scale height (m)
 export const rho = h => RHO0 * Math.exp(-Math.max(h, 0) / HS);
 
-// The ship (Starship-like numbers on the SLDP 45 shape)
 export const SHIP = {
   L: 50, D: 9,                       // length, diameter
-  m0: 128e3,                         // at the start of the entry (kg): dry + landing propellant
-  T: 3.7e6, ISP: 350,                // full thrust (N), specific impulse (s)
+  m0: 128e3,                         // at the start of the belly flop (kg): dry + landing propellant
+  T: 3.7e6, ISP: 350,                // full thrust of the three centre engines (N), specific impulse (s)
   cdSide: 1.15, cdEnd: 0.75,
   I: 128e3 * 50 * 50 / 12,           // pitch inertia, a rod about its middle (kg·m²)
 };
-SHIP.aSide = SHIP.L * SHIP.D;                    // m² belly area
-SHIP.aEnd = Math.PI * (SHIP.D / 2) ** 2;         // m² end-on area
+SHIP.aSide = SHIP.L * SHIP.D;
+SHIP.aEnd = Math.PI * (SHIP.D / 2) ** 2;
 
-export const H_START = 8000;         // entry starts this high
-export const H_HAND = 150;           // the TVC takes over here
+export const H_START = 8000;         // the belly flop starts this high (the cut from the orbit scene)
 export const PAD_R = 25;             // landing pad radius
-export const ABORT_DEG = 25;         // same tilt abort as the firmware: past this the ship is lost
+export const ABORT_DEG = 25;         // TVC deviation past this = the ship is lost (same abort as the firmware)
 export const LAND_OK_DEG = 8;        // touchdown tilt for a clean landing
 export const TIP_DEG = 15;           // touchdown tilt past which it falls over
-export const LEGS_AT = 400;          // legs deploy below this height
+export const LEGS_AT = 700;          // legs deploy below this height
 
-// Terminal guidance: vertical speed target vs height. 16.5 m/s at the handover, 1.5 m/s at the ground, ~24 s.
-const VS_K = 0.1, VS_MIN = 1.5;
-export const vsTarget = h => -(VS_MIN + VS_K * Math.max(h, 0));
-export const timeToGo = h => Math.log((Math.max(h, 0) + VS_MIN / VS_K) / (VS_MIN / VS_K)) / VS_K;
-export const V_HAND = -vsTarget(H_HAND);
+// Scripted orbit → entry sequence (screen seconds). The real entry takes ~6 minutes: shown about 30x faster.
+export const ENTRY = { deorbit: 3.0, entry: 12.0, warp: 30, h0: 200e3, h1: 12e3, v0: 3450, v1: 420 };
 
-// ---------- 1. Entry: belly flop, flip, landing burn (autopilot) ----------
-// Planar: x across the ground (+x = direction of travel), h up. Pitch th: 0 = upright, +90° = belly-first, nose toward +x.
-export function createEntry(x0 = 0) {
+// ---------- 1 + 2. The flight from the belly flop to touchdown ----------
+// Attitude is a pair of tilts in the Bench convention (tiltY leans toward +x, the direction of travel; tiltX toward
+// +z). Belly-first is tiltY = +84°. cmd = the autopilot's attitude; dev = the TVC source's deviation on top of it.
+export function createFlight(x0 = 0) {
   const s = {
-    phase: 'entry', t: 0, tPh: 0,
-    x: x0, h: H_START, vx: 62, vh: -330,
-    th: 84 * DEG, w: 0,              // pitch and pitch rate
-    m: SHIP.m0, thr: 0,              // throttle 0..1
-    gim: 0, flap: 0, rcs: 0,         // for the visuals: gimbal (rad), flap trim (-1..1), RCS firing (-1..1)
-    q: 0, mach: 0, acc: 0,           // dynamic pressure (Pa), Mach, acceleration (Earth g) for the HUD
+    phase: 'belly', t: 0, tPh: 0,
+    x: x0, h: H_START, z: 0, vx: 28, vh: -330, vz: 0,
+    cmd: { x: 0, y: 84, wx: 0, wy: 0 },   // commanded tilts (deg) and their rates (deg/s)
+    gA: { x: 0, y: 0 },                   // the autopilot's own gimbal (deg), from the torque it asks for
+    m: SHIP.m0, thr: 0, flap: 0, rcs: 0,
+    q: 0, acc: 0,
+    dev: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 },
+    tilt: 0,                              // total tilt from vertical (deg)
   };
-  const T_FLIP = 4.5;
-  // The height the engine needs to stop at the handover speed (with margin and the flip time)
+  const T_FLIP = 4.5, MARGIN = 0.95;
+  let aRef = 16;
+  // Speed target for the TVC phase (negative = down). Deceleration a(h) = A_LOW below 40 m, ramping up to A_LOW + aRef
+  // by 160 m: hard braking high up, a gentle last 40 m, 1.5 m/s at the ground. v² = 1.5² + 2∫a dh.
+  const A_LOW = 6.5, H0 = 22, H1 = 90;
+  const ramp = h => h <= H0 ? 0 : h < H1 ? (h - H0) ** 2 / (2 * (H1 - H0)) : (H1 - H0) / 2 + (h - H1);
+  const vProfile = h => -Math.sqrt(2.25 + 2 * (A_LOW * h + aRef * ramp(h)));
+  const aProfile = h => A_LOW + aRef * (h <= H0 ? 0 : h < H1 ? (h - H0) / (H1 - H0) : 1);
+  // The height the burn needs from here (at MARGIN of full thrust), plus the flip time
   const stopH = () => {
-    const aNet = 0.72 * (SHIP.T / s.m - G);
-    return (s.vh * s.vh - V_HAND * V_HAND) / (2 * aNet) + H_HAND + Math.abs(s.vh) * T_FLIP * 0.55;
+    const aNet = MARGIN * (SHIP.T / s.m - G);
+    return s.vh * s.vh / (2 * aNet) + Math.abs(s.vh) * T_FLIP * 0.55;
   };
-  function step() {
-    const v = Math.hypot(s.vx, s.vh), r = rho(s.h);
-    // Angle of attack: between the body axis (sin th, cos th) and the airflow (-velocity)
-    const ax = Math.sin(s.th), ah = Math.cos(s.th);
-    const cosA = v > 1 ? -(ax * s.vx + ah * s.vh) / v : 1;
+  // Rate-limited PD of one commanded tilt toward its target; returns the angular acceleration (deg/s²)
+  function drive(axis, target, alphaMax) {
+    const key = axis === 'x' ? 'wx' : 'wy';
+    const wCmd = clamp(1.3 * (target - s.cmd[axis]), -36, 36);
+    const alpha = clamp(4 * (wCmd - s.cmd[key]), -alphaMax, alphaMax);
+    s.cmd[key] += alpha * DT; s.cmd[axis] += s.cmd[key] * DT;
+    return alpha;
+  }
+  // dev: the TVC source's attitude (deg) once it flies, else null
+  function step(dev) {
+    const v = Math.hypot(s.vx, s.vh, s.vz), r = rho(s.h);
+    const d = s.phase === 'tvc' && dev ? dev : { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
+    s.dev = d;
+    const tx = s.cmd.x + d.tiltX, ty = s.cmd.y + d.tiltY;
+    const ax = axisFromTilt(tx, ty);
+    // Drag on the body: belly area across the flow, end area along it
+    const cosA = v > 1 ? -(ax.x * s.vx + ax.y * s.vh + ax.z * s.vz) / v : 1;
     const cdA = SHIP.cdSide * SHIP.aSide * Math.sqrt(Math.max(0, 1 - cosA * cosA)) + SHIP.cdEnd * SHIP.aEnd * Math.abs(cosA);
     const drag = 0.5 * r * v * v * cdA;
-    let fx = v > 1 ? -drag * s.vx / v : 0, fh = (v > 1 ? -drag * s.vh / v : 0) - s.m * G;
-    s.q = 0.5 * r * v * v; s.mach = v / 240;
+    let fx = v > 1 ? -drag * s.vx / v : 0, fh = (v > 1 ? -drag * s.vh / v : 0) - s.m * G, fz = v > 1 ? -drag * s.vz / v : 0;
+    s.q = 0.5 * r * v * v;
 
-    let thT = s.th, alphaMax = 0.08, thrust = 0;
-    if (s.phase === 'entry') {
-      thT = 84 * DEG;                 // belly into the wind, nose a little up; the flaps trim it
-      s.flap = clamp((thT - s.th) * 4 - s.w * 2, -1, 1);
+    let tgtX = 0, tgtY = s.cmd.y, alphaMax = 5, need = 0;
+    if (s.phase === 'belly') {
+      tgtY = 84;
+      s.flap = clamp((84 - s.cmd.y) * 0.07 - s.cmd.wy * 0.035, -1, 1);
       if (s.h <= stopH()) { s.phase = 'flip'; s.tPh = s.t; }
-    }
-    if (s.phase === 'flip' || s.phase === 'burn') {
-      // Burn guidance: the acceleration that stops the fall at the handover point over the pad
-      const dh = Math.max(s.h - H_HAND, 5);
-      const aH = clamp((s.vh * s.vh - V_HAND * V_HAND) / (2 * dh) * (s.vh < 0 ? 1 : -1) + G, 0, 40);
-      const aX = clamp(-0.32 * s.vx - 0.022 * s.x, -9, 9);
-      thT = clamp(Math.atan2(aX, aH), -25 * DEG, 25 * DEG);
-      const need = Math.hypot(aX, aH) * s.m / SHIP.T;
+    } else {
+      // Guidance. Flip: a suicide burn (constant deceleration to the ground). TVC phase: follow a speed profile that
+      // brakes hard high up and eases off near the ground (1.5 m/s at touchdown), steering over the pad.
+      const hh = Math.max(s.h, 0);
+      let aH;
+      if (s.phase === 'flip') aH = (s.vh * s.vh) / (2 * Math.max(hh, 5)) * (s.vh < 0 ? 1 : -1) + G;
+      else aH = G + aProfile(hh) + clamp((vProfile(hh) - s.vh) * 2.5, -6, 20);   // feed-forward + speed error
+      aH = clamp(aH, 0, 40);
+      const tv = s.phase === 'tvc';
+      const aX = clamp(-(tv ? 0.7 : 0.32) * s.vx - (tv ? 0.05 : 0.022) * s.x, -9, 9);
+      const aZ = clamp(-(tv ? 0.7 : 0.2) * s.vz - (tv ? 0.05 : 0.01) * s.z, -9, 9);
+      const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 12 : 25;    // near the ground: stand up straight
+      tgtY = clamp(Math.atan2(aX, aH) / DEG, -lim, lim);
+      tgtX = clamp(Math.atan2(aZ, aH) / DEG, -lim, lim);
+      need = aH / Math.max(ax.y, 0.35) * s.m / SHIP.T;    // throttle for the vertical part; the lean does the sideways part
       if (s.phase === 'flip') {
         const k = clamp((s.t - s.tPh) / T_FLIP, 0, 1);
-        s.thr = (0.4 + 0.6 * k * k) * (s.th < 70 * DEG ? 1 : 0.45);
-        alphaMax = 0.42;               // nose RCS + full gimbal swing it through
-        if (Math.abs(s.th - thT) < 4 * DEG && Math.abs(s.w) < 0.08) s.phase = 'burn';
+        s.thr = (0.4 + 0.6 * k * k) * (s.cmd.y < 70 ? 1 : 0.45);
+        alphaMax = 24;                     // nose RCS + full gimbal swing it through
+        if (Math.abs(s.cmd.y - tgtY) < 4 && Math.abs(s.cmd.wy) < 4.5) {
+          s.phase = 'tvc'; s.tPh = s.t;
+          aRef = Math.max((s.vh * s.vh - 2.25 - 2 * A_LOW * s.h) / (2 * ramp(Math.max(s.h, 200))), 2);   // the profile starts at the current speed
+        }
       } else {
-        s.thr = clamp(need, 0.3, 1);
-        alphaMax = 0.25;
+        s.thr = clamp(need, 0.05, 1);   // down to one engine throttled low: the light ship can hover
+        alphaMax = 14;
       }
-      thrust = s.thr * SHIP.T;
       s.flap *= 0.98;
-      if (s.h <= H_HAND) s.phase = 'handover';
     }
-    // Pitch: a rate command toward the target, limited, then the torque to reach that rate (flaps in the entry,
-    // nose RCS + gimbal afterwards). Rate-limiting the swing keeps the flip from overshooting.
-    const wCmd = clamp(1.3 * (thT - s.th), -0.62, 0.62);
-    const alpha = clamp(4 * (wCmd - s.w), -alphaMax, alphaMax);
-    s.rcs = s.phase === 'flip' ? clamp(alpha / alphaMax, -1, 1) : 0;
-    s.gim = thrust > 0 ? clamp(alpha * SHIP.I / Math.max(thrust * 0.4 * SHIP.L, 1), -8 * DEG, 8 * DEG) : 0;
-    s.w += alpha * DT; s.th += s.w * DT;
-    // Thrust along the nozzle: the body axis turned by the gimbal
-    fx += thrust * Math.sin(s.th + s.gim); fh += thrust * Math.cos(s.th + s.gim);
-    s.vx += fx / s.m * DT; s.vh += fh / s.m * DT;
-    s.x += s.vx * DT; s.h += s.vh * DT;
+    const alY = drive('y', tgtY, alphaMax), alX = drive('x', tgtX, alphaMax);
+    s.rcs = s.phase === 'flip' ? clamp(alY / alphaMax, -1, 1) : 0;
+    const thrust = s.phase === 'belly' ? 0 : s.thr * SHIP.T;
+    // The autopilot's gimbal: the angle that makes the torque it asks for (arm 0.4 L to the CG)
+    const gfor = al => thrust > 0 ? clamp(al * DEG * SHIP.I / (thrust * 0.4 * SHIP.L) / DEG, -8, 8) : 0;
+    s.gA.y = gfor(alY); s.gA.x = gfor(alX);
+    // Thrust along the nozzle: the body axis tipped by the gimbal (autopilot's + the TVC source's)
+    const n = nozzleDir({ tiltX: tx, tiltY: ty, gx: d.gx + s.gA.x, gy: d.gy + s.gA.y });
+    fx += thrust * n.x; fh += thrust * n.y; fz += thrust * n.z;
+    s.vx += fx / s.m * DT; s.vh += fh / s.m * DT; s.vz += fz / s.m * DT;
+    s.x += s.vx * DT; s.h += s.vh * DT; s.z += s.vz * DT;
     s.m -= thrust / (SHIP.ISP * 9.81) * DT;
-    s.acc = Math.hypot(fx, fh + s.m * G) / s.m / 9.81;
+    s.acc = Math.hypot(fx, fh + s.m * G, fz) / s.m / 9.81;
+    s.tilt = tiltOf(tx, ty);
     s.t += DT;
   }
-  return { s, step, stopH };
+  return { s, step, stopH, get drift() { return Math.hypot(s.x, s.z); },
+    get devTilt() { return tiltOf(s.dev.tiltX, s.dev.tiltY); },
+    // Seconds to touchdown at the current deceleration (for the HUD)
+    get ttg() { const a = Math.max(s.thr * SHIP.T / s.m - G, 0.5); return Math.max(0, -s.vh / a); } };
 }
-// Where the entry ends up from x = 0, and how long it takes. Runs start at minus that x, so they hand over above the pad.
-function runFrom(x0) {
-  const e = createEntry(x0);
-  while (e.s.phase !== 'handover' && e.s.t < 200) e.step();
-  return e.s;
+function runFrom(x0) {   // to the ground, with no TVC input
+  const f = createFlight(x0);
+  while (f.s.h > 0 && f.s.t < 200) f.step(null);
+  return f;
 }
-export function entryStart() {
+// Where to start the belly flop so that, with no TVC input, it lands on the pad centre
+export function flightStart() {
   let x0 = 0;
-  for (let i = 0; i < 8; i++) x0 -= 0.8 * runFrom(x0).x;
-  const s = runFrom(x0);
-  return { x0, t: s.t, end: { x: s.x, vx: s.vx, vh: s.vh, m: s.m, th: s.th } };
+  for (let i = 0; i < 10; i++) x0 -= 0.9 * runFrom(x0).s.x;
+  return { x0 };
 }
 
 // ---------- Simulated attitude: the demo source for the terminal phase ----------
@@ -180,32 +208,6 @@ export function nozzleDir(a) {
   const n = { x: ax.x + Math.sin((a.gy || 0) * DEG), y: ax.y, z: ax.z + Math.sin((a.gx || 0) * DEG) };
   const l = Math.hypot(n.x, n.y, n.z);
   return { x: n.x / l, y: n.y / l, z: n.z / l };
-}
-
-// ---------- 2. Terminal: height, speed and drift from the TVC's attitude ----------
-// from = { x, h, vx, vh, m } at the handover (x across the ground, z sideways = 0).
-export function createTerminal(from) {
-  const s = { h: from.h, vs: from.vh, x: from.x, z: 0, vx: from.vx, vz: 0, acc: G, t: 0, m: from.m };
-  return {
-    s,
-    // One DT with attitude a = { tiltX, tiltY, gx, gy } (deg). Returns the thrust acceleration.
-    step(a) {
-      const n = nozzleDir(a);
-      const aV = clamp((vsTarget(s.h) - s.vs) / 0.8, -3, 3);            // guidance: follow the speed profile
-      const acc = clamp((G + aV) / Math.max(n.y, 0.35), 0, SHIP.T / s.m);
-      s.vs += (acc * n.y - G) * DT;
-      s.h += s.vs * DT;
-      // Sideways: the nozzle's push, less a little drag and the RCS holding position
-      s.vx += (acc * n.x - 0.2 * s.vx) * DT;
-      s.vz += (acc * n.z - 0.2 * s.vz) * DT;
-      s.x += s.vx * DT; s.z += s.vz * DT;
-      s.m -= acc * s.m / (SHIP.ISP * 9.81) * DT;
-      s.acc = acc; s.t += DT;
-      return acc;
-    },
-    get throttle() { return s.acc * s.m / SHIP.T; },
-    get drift() { return Math.hypot(s.x, s.z); },
-  };
 }
 
 // ---------- Disturbance tracker: "pushed to 12.4°, back in 0.58 s" ----------

@@ -43,7 +43,8 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── stability.js                 Tests → Stability: IT-3 rig balance, motor off (CG vs pivot, friction, fix)
 ├── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
 ├── landing.js                   Landing tab: Starship-style Mars landing, last 150 m flown by the real rig or simulated
-├── landing-sim.js               Landing tab physics (entry, flip, burn, TVC phase, gusts, push timer); no Three.js
+├── landing-sim.js               Landing tab physics (belly flop, flip, TVC landing, gusts, push timer); no Three.js
+├── landing-orbit.js             Landing tab: Mars from orbit (planet, clouds, atmosphere glow, stars)
 └── public/                      static assets: favicon, app icons, images
 cad/                             CadQuery models + drawing generators (Python)
 ├── lib/                         shared: sheet helpers, hidden-line removal, TVC assembly, paths
@@ -104,7 +105,7 @@ Without the visualizer, type the same commands into the Serial Monitor (115200, 
 Three.js and Web Serial, with no build step.
 
 - **Mission** (home page): Earth-to-Moon flight sim with a TVC controller and a SpaceX-style dashboard.
-- **Landing:** a Starship-style ship landing on Mars: belly flop, flip and landing burn on autopilot, then the TVC flies the last 150 m. **Rig · live**: the ship's attitude is the real rocket's tilt on the desk rig, so pushing the real rocket pushes the ship. **Simulated**: no hardware; the Nano's controller flies it, with gusts (**Gust** or G), a **TVC: Off** switch and **Auto-loop** for a booth.
+- **Landing:** a Starship-style ship from Mars orbit to touchdown: plasma entry, belly flop and flip on autopilot, then the TVC lands it from right after the flip. **Rig · live**: the real rocket's tilt and nozzle on the desk rig are added to the ship's attitude, so pushing the real rocket pushes the ship. **Simulated**: no hardware; the Nano's controller flies it, with gusts (**Gust** or G), a **TVC: Off** switch, **Pause** (Space) and **Auto-loop** for a booth.
 - **Bench:** live 3D view of the rig from the Arduino, with readouts and a chart on the left and gimbal/link details on the right.
 
 **Live:** https://eg-rocket-tvc.vercel.app (every push to `main` redeploys)
