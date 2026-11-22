@@ -48,7 +48,7 @@ export function createOrbitScene(sunDir) {
         float limb = pow(1.0 - max(dot(normalize(vN), V), 0.0), 3.0);
         vec3 haze = vec3(1.0, 0.55, 0.26);
         c = mix(c * lit * 1.15, haze * smoothstep(-0.1, 0.3, dot(normalize(vN), uSun)), limb * 0.55);
-        gl_FragColor = vec4(c, 1.0);
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * 1.3, 1.0);   // authored in display colours; the pipeline is linear
       }`,
   }));
   scene.add(planet);
@@ -62,7 +62,7 @@ export function createOrbitScene(sunDir) {
       void main(){ float n = fbm(vP * 9.0 + vec3(uT * 0.002, 0.0, 0.0)) * 0.7 + fbm(vP * 60.0) * 0.3;
         float a = smoothstep(0.5, 0.75, n) * 0.55;
         float lit = smoothstep(-0.1, 0.3, dot(normalize(vN), uSun));
-        gl_FragColor = vec4(vec3(1.0, 0.93, 0.85) * (0.3 + 0.7 * lit), a * (0.25 + 0.75 * lit)); }`,
+        gl_FragColor = vec4(pow(vec3(1.0, 0.93, 0.85) * (0.3 + 0.7 * lit), vec3(2.2)), a * (0.25 + 0.75 * lit)); }`,
   }));
   scene.add(cloud);
 
@@ -77,7 +77,7 @@ export function createOrbitScene(sunDir) {
         float lit = smoothstep(-0.2, 0.4, dot(normalize(vN), uSun));
         // dusty orange haze over the disc, a thin blue line right at the limb (as in Mars sunset photos)
         vec3 c = mix(vec3(1.0, 0.55, 0.25) * 0.9, vec3(1.0, 0.85, 0.7) * 1.2, smoothstep(0.85, 0.98, 1.0 - d));   // an orange glow, white-hot at the very limb
-        gl_FragColor = vec4(c * rim * lit * 1.1, 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * rim * lit * 2.6, 1.0); }`,   // the limb crosses the bloom threshold
   }));
   scene.add(atmo);
 

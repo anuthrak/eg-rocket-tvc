@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as L from './landing-sim.js';
 import { createOrbitScene, R_MARS } from './landing-orbit.js';
+import { blendLooks, easeLook, newLook, createPost, createFlare, QUALITY, Q_ORDER } from './landing-look.js';
 
 const $ = id => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -17,6 +18,15 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, k) => a + (b - a) * k;
 const sstep = (a, b, x) => { const s = clamp((x - a) / (b - a), 0, 1); return s * s * (3 - 2 * s); };
 const rnd = (a, b) => a + Math.random() * (b - a);
+// Phase → look (landing-look.js): [from, to, how far] blended by the phase's own progress. Tune here.
+//   orbit, deorbit: space · entry: C → B as it descends · cut into the cloud deck: B (hazy) ·
+//   belly flop and flip: B → A as it descends · TVC landing and touchdown: A · crash: C
+const PHASE_LOOKS = {
+  orbit: () => ['space'], deorbit: () => ['space'],
+  entry: u => u < 0.55 ? ['space', 'C', u / 0.55] : ['C', 'B', (u - 0.55) / 0.45],
+  belly: h => ['B', 'A', clamp((7000 - h) / 5000, 0, 1)],
+  flip: () => ['B', 'A', 0.85], tvc: () => ['A'], landed: () => ['A'], crashed: () => ['C', 'A', 0.35],
+};
 const GUST_SCALE = 0.85;   // of demo-sim's gust: with the TVC on, one gust peaks under ~21° (200 random runs, never past the 25° abort)
 
 export async function initLanding(step) {
@@ -27,7 +37,7 @@ export async function initLanding(step) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.AgXToneMapping;      // applied by the OutputPass (landing-look.js); keeps the oranges from clipping yellow
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -39,29 +49,31 @@ export async function initLanding(step) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.enabled = false; controls.maxPolarAngle = 88 * DEG;
 
-  // Afternoon sun through dusty air: warm key light, a butterscotch sky fill
-  const SUN = new THREE.Vector3(-0.55, 0.52, -0.65).normalize();   // ~31° up
+  // Afternoon sun through dusty air: a low sun for long shadows; colour and strength come from the active look
+  const SUN = new THREE.Vector3(-0.6, 0.36, -0.71).normalize();    // ~21° up
   const sun = new THREE.DirectionalLight(0xffe4c2, 3.6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, near: 1, far: 1200 });
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.8;
   scene.add(sun, sun.target);
-  scene.add(new THREE.HemisphereLight(0xe8b08a, 0x2a140a, 0.5));
+  const hemi = new THREE.HemisphereLight(0xe8b08a, 0x2a140a, 0.5); scene.add(hemi);
 
-  // Sky dome: butterscotch at the horizon, dusty pink-brown overhead, a pale glow round the sun
+  // Sky dome: zenith → mid → horizon glow from the active look, a sun halo, a dust band just above the horizon
+  const skyU = { uSun: { value: SUN }, uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uHor: { value: new THREE.Color() },
+    uSunCol: { value: new THREE.Color() }, uDust: { value: 0.3 } };
   {
     const sky = new THREE.Mesh(new THREE.SphereGeometry(150000, 48, 24), new THREE.ShaderMaterial({
-      side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { uSun: { value: SUN } },
+      side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyU,
       vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); vec4 p = projectionMatrix*modelViewMatrix*vec4(position,1.0); gl_Position = p.xyww; }`,
-      fragmentShader: `uniform vec3 uSun; varying vec3 vD;
-        void main(){ float h = clamp(vD.y, -0.2, 1.0);
-          vec3 hor = vec3(0.90,0.64,0.46), mid = vec3(0.74,0.45,0.30), top = vec3(0.36,0.20,0.15);
-          vec3 c = mix(hor, mid, smoothstep(0.0, 0.3, h)); c = mix(c, top, smoothstep(0.3, 0.95, h));
-          float s = max(dot(normalize(vD), normalize(uSun)), 0.0);
-          c += vec3(0.95,0.88,0.78) * pow(s, 64.0) * 0.9 + vec3(0.55,0.62,0.72) * pow(s, 8.0) * 0.22;   // Mars sunsets go blue round the sun
-          c = mix(c, vec3(0.55,0.40,0.30), smoothstep(0.0, -0.2, h));
+      fragmentShader: `uniform vec3 uSun, uZen, uMid, uHor, uSunCol; uniform float uDust; varying vec3 vD;
+        void main(){ vec3 d = normalize(vD); float h = clamp(d.y, -0.3, 1.0);
+          vec3 c = mix(uHor, uMid, smoothstep(0.0, 0.22, h));
+          c = mix(c, uZen, smoothstep(0.18, 0.85, h));
+          float s = max(dot(d, normalize(uSun)), 0.0);
+          c += uSunCol * (pow(s, 900.0) * 30.0 + pow(s, 60.0) * 0.6 + pow(s, 6.0) * 0.12);     // disc (blooms), halo, wide glow
+          c = mix(c, uHor * 1.08, uDust * exp(-abs(h - 0.03) * 22.0));                          // dust band hugging the horizon
+          c = mix(c, uHor * 0.8, smoothstep(0.0, -0.25, h));
           gl_FragColor = vec4(c, 1.0); }`,
     }));
     sky.renderOrder = -1; sky.frustumCulled = false;
@@ -115,20 +127,28 @@ export async function initLanding(step) {
     return [h * flat, rimBright * flat, tone];
   }
   const heightAt = (x, z) => terrain(x, z)[0];
+  const groundU = { uGShadow: { value: new THREE.Color() }, uGMid: { value: new THREE.Color() }, uGLit: { value: new THREE.Color() },
+    uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() } };
   {
     const N = 480, geo = new THREE.PlaneGeometry(2, 2, N, N); geo.rotateX(-Math.PI / 2);
     const P = geo.attributes.position, uv = geo.attributes.uv, col = new Float32Array(P.count * 3);
     const warp = u => Math.sign(u) * (160 * Math.abs(u) + 1400 * u * u + 108000 * Math.abs(u) ** 6);   // 0.7 m at the pad … 110 km out
+    const tones = new Float32Array(P.count);
     for (let i = 0; i < P.count; i++) {
       const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone] = terrain(x, z);
       P.setXYZ(i, x, h, z);
-      const k = 0.08 * fbm(x / 120 + 9, z / 120) + 0.12 * rim + 0.06 * fbm(x / 1800, z / 1800) + tone;
-      const kk = k * 1.5;   // deeper, more saturated oranges with more contrast (after the reference photos)
-      col.set([clamp(0.70 + kk, 0.3, 0.95), clamp(0.31 + kk * 0.6, 0.12, 0.55), clamp(0.14 + kk * 0.35, 0.05, 0.35)], i * 3);
+      tones[i] = 0.5 + 0.55 * fbm(x / 140 + 9, z / 140) + 0.3 * rim + 0.25 * fbm(x / 1800, z / 1800) + tone * 3;
       uv.setXY(i, x / 16, z / 16);
     }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.computeVertexNormals();
+    // Vertex colour carries palette coordinates, not colours: r = lightness (shadow → mid → lit → highlight),
+    // g = slope (steep = rock), b = distance (fine detail fades into the haze). The shader maps them to the look.
+    const N_ = geo.attributes.normal;
+    for (let i = 0; i < P.count; i++) {
+      const d = Math.hypot(P.getX(i), P.getZ(i));
+      col.set([clamp(tones[i], 0, 1), clamp((1 - N_.getY(i)) * 4, 0, 1), sstep(2000, 30000, d)], i * 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     // Regolith detail: pebbly grey noise tiled every 16 m, as colour and bump (the scale cue up close)
     const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
     const img = g.createImageData(512, 512);
@@ -147,7 +167,23 @@ export async function initLanding(step) {
     }
     const detail = new THREE.CanvasTexture(c); detail.wrapS = detail.wrapT = THREE.RepeatWrapping; detail.anisotropy = 8; detail.colorSpace = THREE.SRGBColorSpace;
     const bump = new THREE.CanvasTexture(c); bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.anisotropy = 8;
-    const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: bump, bumpScale: 2.2, roughness: 1, metalness: 0 }));
+    const gMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: bump, bumpScale: 2.6, roughness: 1, metalness: 0 });
+    gMat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, groundU);
+      sh.fragmentShader = 'uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#ifdef USE_MAP
+            vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+            diffuseColor *= mix(sampledDiffuseColor * 2.2, vec4(1.0), vColor.b);   // detail (averages ~0.45 linear, so x2.2), fading out with distance
+          #endif`)
+        .replace('#include <color_fragment>', `
+          float t = vColor.r, sl = vColor.g;
+          vec3 base = mix(uGShadow, uGMid, smoothstep(0.0, 0.42, t));
+          base = mix(base, uGLit, smoothstep(0.42, 0.82, t));
+          base = mix(base, uGHigh, smoothstep(0.86, 1.0, t) * 0.55);
+          base = mix(base, uGRock, smoothstep(0.2, 0.65, sl) * 0.8);
+          diffuseColor.rgb *= base;`);
+    };
+    const ground = new THREE.Mesh(geo, gMat);
     ground.receiveShadow = true;
     scene.add(ground);
   }
@@ -166,19 +202,45 @@ export async function initLanding(step) {
     g.putImageData(img, 0, 0);
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); t.colorSpace = THREE.SRGBColorSpace;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
+    cloudMeshes.push([m, opacity]);
     m.rotation.x = -Math.PI / 2; m.position.y = alt; m.renderOrder = 2; scene.add(m);
     return t;
   }
+  const cloudMeshes = [];
   const clouds = [cloudLayer(7600, 90000, 0.75, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
-  // Sun glare through the haze
-  const glare = (() => {
-    const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
-    const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-    gr.addColorStop(0, 'rgba(255,250,235,1)'); gr.addColorStop(0.06, 'rgba(255,240,215,.9)'); gr.addColorStop(0.25, 'rgba(255,215,170,.25)'); gr.addColorStop(1, 'rgba(255,200,150,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
-    sp.scale.setScalar(26000); scene.add(sp); return sp;
-  })();
+  // Sun lens flare (landing-look.js), parked far along the sun direction each frame
+  const flare = createFlare(); scene.add(flare.lf);
+
+  // Rocks: a few noise-displaced low-poly shapes, instanced. Dense near the pad and the landing views, none on the pad.
+  const rocks = [];
+  {
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, flatShading: true });
+    rockMat.onBeforeCompile = sh => { Object.assign(sh.uniforms, { uGRock: groundU.uGRock, uGMid: groundU.uGMid });
+      sh.fragmentShader = 'uniform vec3 uGRock, uGMid;\n' + sh.fragmentShader.replace('#include <color_fragment>', 'diffuseColor.rgb *= mix(uGRock, uGMid, 0.35) * 1.1;'); };
+    let seed = 3; const r01 = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const MAX = 4200;
+    for (let v = 0; v < 3; v++) {
+      const g = new THREE.IcosahedronGeometry(1, 1), P = g.attributes.position;
+      for (let i = 0; i < P.count; i++) {
+        const x = P.getX(i), y = P.getY(i), z = P.getZ(i), k = 0.7 + 0.45 * vnoise(x * 2.1 + v * 7, z * 2.1 + y * 1.7);
+        P.setXYZ(i, x * k, y * k * 0.6, z * k);
+      }
+      g.computeVertexNormals();
+      const m = new THREE.InstancedMesh(g, rockMat, MAX); m.castShadow = m.receiveShadow = true; m.frustumCulled = false;
+      const o = new THREE.Object3D();
+      for (let i = 0; i < MAX; i++) {
+        const a = r01() * Math.PI * 2, d = L.PAD_R + 12 + Math.pow(r01(), 1.8) * 1400;
+        const x = Math.cos(a) * d, z = Math.sin(a) * d, big = r01() < 0.04;
+        const sz = big ? 2.5 + r01() * 4 : 0.25 + Math.pow(r01(), 2.2) * 2.2;
+        o.position.set(x, heightAt(x, z) - sz * 0.25, z);
+        o.rotation.set(r01() * 0.6, r01() * 6.28, r01() * 0.6);
+        o.scale.set(sz * (0.8 + r01() * 0.6), sz * (0.6 + r01() * 0.6), sz * (0.8 + r01() * 0.6));
+        o.updateMatrix(); m.setMatrixAt(i, o.matrix);
+      }
+      scene.add(m); rocks.push(m);
+    }
+  }
+  const setRockDensity = k => rocks.forEach(m => { m.count = Math.round(4200 * k); });
 
   // Landing pad: a painted disc, edge lights
   const PAD = new THREE.Group(); scene.add(PAD);
@@ -214,12 +276,19 @@ export async function initLanding(step) {
   const tvc = new THREE.Group(); tvc.position.y = 0.4; airframe.add(tvc);                // the centre engines' gimbal
   // Reflections for the steel: a small environment in the sky's colours
   const pmrem = new THREE.PMREMGenerator(renderer);
-  { const env = new THREE.Scene();
-    env.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide,
-      vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-      fragmentShader: `varying vec3 vD; void main(){ float h = vD.y; vec3 c = mix(vec3(0.5,0.3,0.18), vec3(0.92,0.7,0.52), smoothstep(-0.3, 0.05, h));
-        c = mix(c, vec3(0.52,0.36,0.27), smoothstep(0.2, 0.9, h)); gl_FragColor = vec4(c * 1.2, 1.0); }` })));
-    scene.environment = pmrem.fromScene(env, 0.04).texture; }
+  const envU = { uZen: { value: new THREE.Color(0x3f5a86) }, uHor: { value: new THREE.Color(0xd9a084) }, uGnd: { value: new THREE.Color(0x8f4222) } };
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, uniforms: envU,
+    vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `uniform vec3 uZen, uHor, uGnd; varying vec3 vD; void main(){ float h = vD.y;
+      vec3 c = mix(uGnd * 0.7, uHor, smoothstep(-0.25, 0.02, h)); c = mix(c, uZen, smoothstep(0.1, 0.8, h)); gl_FragColor = vec4(c * 1.3, 1.0); }` })));
+  let envRT = null; const envScenes = [scene];
+  function updateEnv() {   // reflections in the steel follow the active look's sky
+    const rt = pmrem.fromScene(envScene, 0.04);
+    for (const sc of envScenes) sc.environment = rt.texture;
+    envRT?.dispose(); envRT = rt;
+  }
+  updateEnv();
   // Panel lines on the steel: rings every ~1.8 m, a few stringers, brushed streaks
   function steelTex() {
     const c = document.createElement('canvas'); c.width = 256; c.height = 1024; const g = c.getContext('2d');
@@ -321,7 +390,7 @@ export async function initLanding(step) {
           float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.5);
           float diamonds = 0.82 + 0.18 * sin(vY * 40.0 - uT * 30.0);
           float fl = 0.88 + 0.12 * sin(uT * 53.0 + vY * 31.0);
-          gl_FragColor = vec4(uColor * along * edge * uK * fl * diamonds, 1.0); }`,
+          gl_FragColor = vec4(uColor * along * edge * uK * fl * diamonds * 3.0, 1.0); }`,   // above the bloom threshold
     });
   }
   const plumeGeo = new THREE.ConeGeometry(1, 1, 32, 1, true); plumeGeo.rotateX(Math.PI); plumeGeo.translate(0, -0.5, 0);
@@ -348,10 +417,10 @@ export async function initLanding(step) {
     const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       uniforms: { uScale: { value: 500 } },
       vertexShader: `uniform float uScale; attribute vec3 aColor; attribute float aSize; attribute float aAlpha; varying vec3 vC; varying float vA;
-        void main(){ vC = aColor; vA = aAlpha; vec4 mv = modelViewMatrix*vec4(position,1.0);
+        void main(){ vC = pow(aColor, vec3(2.2)); vA = aAlpha; vec4 mv = modelViewMatrix*vec4(position,1.0);
           gl_PointSize = min(aSize*uScale/max(-mv.z,0.01), 700.0); gl_Position = projectionMatrix*mv; }`,
       fragmentShader: additive
-        ? `varying vec3 vC; varying float vA; void main(){ float r = length(gl_PointCoord-0.5)*2.0; if (r>1.0) discard; gl_FragColor = vec4(vC*vA*pow(1.0-r,1.6), 1.0); }`
+        ? `varying vec3 vC; varying float vA; void main(){ float r = length(gl_PointCoord-0.5)*2.0; if (r>1.0) discard; gl_FragColor = vec4(vC*vA*pow(1.0-r,1.6)*2.6, 1.0); }`
         : `varying vec3 vC; varying float vA; void main(){ float r = length(gl_PointCoord-0.5)*2.0; if (r>1.0) discard; gl_FragColor = vec4(vC, vA*pow(1.0-r,1.4)); }` });
     const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; target.add(pts);
     let next = 0;
@@ -388,8 +457,56 @@ export async function initLanding(step) {
   const orbit = createOrbitScene(SUN);
   const shipScene = new THREE.Scene();
   { const l = new THREE.DirectionalLight(0xfff1e0, 3.4); l.position.copy(SUN).multiplyScalar(100); shipScene.add(l);
-    shipScene.add(new THREE.HemisphereLight(0x9aa6c8, 0x7a4426, 0.45)); shipScene.environment = scene.environment; }
+    shipScene.add(new THREE.HemisphereLight(0x9aa6c8, 0x7a4426, 0.45)); envScenes.push(shipScene); shipScene.environment = scene.environment; }
   const glow = createPoints(1200, true, shipScene);       // plasma streaks
+  // Post-processing (bloom, tone mapping, grade) and the look
+  const post = createPost(renderer, scene, orbit.scene, orbit.camera, shipScene, camera);
+  const orbitFlare = createFlare(); orbit.scene.add(orbitFlare.lf);
+  const look = newLook('space'), lookTarget = newLook('space');
+  let qName = 'high';
+  try { const q = localStorage.getItem('tvc-landing-quality'); if (QUALITY[q]) qName = q; } catch {}
+  let envTimer = 0, lookOverride = null;
+  function lookFor() {
+    if (lookOverride) return [lookOverride];
+    if (state === 'orbit' || state === 'deorbit') return PHASE_LOOKS[state]();
+    if (state === 'entry') return PHASE_LOOKS.entry(ent.u);
+    if (state === 'flight') { const s = flight.s; return s.phase === 'belly' ? PHASE_LOOKS.belly(s.h) : PHASE_LOOKS[s.phase](); }
+    if (state === 'falling' || state === 'crashed' || endState === 'crashed') return PHASE_LOOKS.crashed();
+    return PHASE_LOOKS.landed();
+  }
+  function applyLook(dt) {
+    const [a, b, k] = lookFor();
+    blendLooks(lookTarget, a, b ?? a, clamp(k ?? 0, 0, 1));
+    easeLook(look, lookTarget, 1 - Math.exp(-dt / 0.7));
+    skyU.uZen.value.copy(look.zen); skyU.uMid.value.copy(look.mid); skyU.uHor.value.copy(look.hor);
+    skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust;
+    scene.fog.color.copy(look.hor); scene.fog.density = look.fog;
+    sun.color.copy(look.sun); sun.intensity = look.sunI;
+    hemi.color.copy(look.hemiSky); hemi.groundColor.copy(look.hemiGnd); hemi.intensity = look.hemiI;
+    groundU.uGShadow.value.copy(look.gShadow); groundU.uGMid.value.copy(look.gMid); groundU.uGLit.value.copy(look.gLit);
+    groundU.uGHigh.value.copy(look.gHigh); groundU.uGRock.value.copy(look.gRock);
+    cloudMeshes.forEach(([m, o], i) => { m.material.opacity = o * (i === 0 ? look.clouds : look.clouds * 1.6); });
+    const q = QUALITY[qName];
+    post.apply(look, q, simClock);
+    post.grade.uniforms.uFade.value = fadeAmt; post.grade.uniforms.uFlash.value = flashAmt;
+    post.grade.uniforms.uFadeCol.value.copy(look.hor).lerp(new THREE.Color(1, 0.96, 0.92), 0.6);
+    flashAmt *= Math.exp(-dt * 5);
+    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 1.4);
+    // Reflections: rebuild the environment now and then while the look is changing
+    envTimer -= dt;
+    const cd = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
+    if (envTimer <= 0 && !inOrbit() && cd(envU.uZen.value, look.zen) + cd(envU.uHor.value, look.hor) > 0.004) {
+      envU.uZen.value.copy(look.zen); envU.uHor.value.copy(look.hor); envU.uGnd.value.copy(look.gMid); updateEnv(); envTimer = 0.5;
+    }
+  }
+  function setQuality(name) {
+    qName = name; const q = QUALITY[name];
+    try { localStorage.setItem('tvc-landing-quality', name); } catch {}
+    setRockDensity(q.rocks);
+    if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+    $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
+    resize();
+  }
   // Plasma: a glowing sheath over the heat shield and a wake trailing off the ship
   const plasmaMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -400,7 +517,7 @@ export async function initLanding(step) {
       void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
         float n = 0.65 + 0.35 * sin(vP.y * 0.9 - uT * 22.0 + sin(vP.x * 1.3 + uT * 9.0) * 2.0);
         vec3 c = mix(vec3(1.0, 0.42, 0.16), vec3(0.85, 0.35, 1.0), f);
-        gl_FragColor = vec4(c * uI * (0.35 + 1.6 * pow(f, 1.4)) * n, 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * (0.35 + 1.6 * pow(f, 1.4)) * n * 2.5, 1.0); }`,
   });
   const plasma = new THREE.Mesh(shield.geometry, plasmaMat); plasma.scale.set(1.14, 1.01, 1.14); plasma.visible = false; airframe.add(plasma);
   // Bow shock: a glowing envelope just off the belly and nose, drawn as a thin bright rim (fresnel), strongest on the
@@ -417,7 +534,7 @@ export async function initLanding(step) {
         float fl = 0.85 + 0.15 * sin(uT * 37.0 + vL.y * 9.0);
         vec3 c = mix(vec3(0.62, 0.42, 1.0), vec3(1.0, 0.55, 0.75), lead);
         c = mix(c, vec3(1.0, 0.95, 0.92), smoothstep(0.55, 1.0, rim) * lead);
-        gl_FragColor = vec4(c * uI * (rim * 2.4 + halo) * lead * fl, 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * (rim * 2.4 + halo) * lead * fl * 3.0, 1.0); }`,
   });
   const shock = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), shockMat);
   shock.scale.set(8.2, 31, 8.6); shock.position.set(2.4, 2.5, 0); shock.visible = false; ship.add(shock);
@@ -431,7 +548,7 @@ export async function initLanding(step) {
       void main(){ float along = pow(1.0 - vY, 1.5); float edge = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 4.0);
         float streak = 0.55 + 0.45 * sin(vUv.x * 120.0 + vY * 9.0 - uT * 6.0);
         vec3 c = mix(vec3(1.0, 0.75, 0.85), vec3(0.55, 0.4, 1.0), vY);
-        gl_FragColor = vec4(c * uI * along * (0.06 + 1.8 * edge) * streak, 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.06 + 1.8 * edge) * streak * 2.2, 1.0); }`,
   });
   const wake = new THREE.Mesh(wakeGeo, wakeMat); wake.visible = false; shipScene.add(wake);
 
@@ -523,10 +640,8 @@ export async function initLanding(step) {
     const list = $('lndFeed'); list.prepend(li);
     while (list.childElementCount > 5) list.lastElementChild.remove();
   }
-  function flashScreen(strength = 1) {
-    const f = $('lndFlash'); f.style.transition = 'none'; f.style.opacity = String(0.85 * strength);
-    requestAnimationFrame(() => { f.style.transition = 'opacity .5s ease-out'; f.style.opacity = '0'; });
-  }
+  let flashAmt = 0, fadeAmt = 0;
+  function flashScreen(strength = 1) { flashAmt = Math.max(flashAmt, 0.85 * strength); }
   function doGust() {
     if (state !== 'flight' || flight.s.phase !== 'tvc' || paused) return;
     if (source === 'sim') { att.gust(rnd(0, 360), GUST_SCALE); callout('GUST'); }
@@ -544,7 +659,7 @@ export async function initLanding(step) {
     fall.ang = fall.rate = 0;
     ship.visible = true; debris.forEach(d => { d.m.visible = false; }); fire.clear(); dust.clear(); glow.clear();
     shipScene.add(ship); ship.position.set(0, 0, 0);
-    $('lndResult').hidden = true; $('lndFeed').textContent = ''; $('lndReplay').hidden = true; $('lndFade').style.opacity = '0';
+    $('lndResult').hidden = true; $('lndFeed').textContent = ''; $('lndReplay').hidden = true; fadeAmt = 0;
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
     setLegs(0);
     refresh();
@@ -872,6 +987,7 @@ export async function initLanding(step) {
       if (sh > 0.001 && !paused) camera.position.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.5));
       return;
     }
+    if (camMode === 'still') return;
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
     const name = shot(), sp = ship.position;
     if (name === 'pad' || name === 'replay') {
@@ -1024,8 +1140,10 @@ export async function initLanding(step) {
   function resize() {
     const w = view.clientWidth, h = view.clientHeight;
     if (w < 2 || h < 2) return;
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    const pr = Math.min(devicePixelRatio, QUALITY[qName].pr);
+    renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
+    post.setSize(w, h, pr);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     orbit.resize(w / h, camera.fov);
     const sc = h * renderer.getPixelRatio() / (2 * Math.tan(camera.fov * DEG / 2));
@@ -1043,15 +1161,12 @@ export async function initLanding(step) {
     if (inOrbit()) {
       if (!paused) orbitStep(dt); else orbitStep(0);
       cameraStep(dt);
-      $('lndFade').style.opacity = String(ent.fade);
+      fadeAmt = ent.fade;
       orbit.set(ent.h / 1000, phi, camera.position, camera.quaternion, simClock);
-      if (!(warmed && window.tvcCovered?.())) {
-        renderer.autoClear = false; renderer.clear();
-        renderer.render(orbit.scene, orbit.camera);
-        renderer.clearDepth();
-        renderer.render(shipScene, camera);
-        renderer.autoClear = true; warmed = true;
-      }
+      orbitFlare.lf.position.copy(SUN).multiplyScalar(4e5);
+      applyLook(dt);
+      post.setMode(true);
+      if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
     } else {
       acc += sdt;
       while (acc >= L.DT) { acc -= L.DT; simStep(); }
@@ -1060,20 +1175,46 @@ export async function initLanding(step) {
       else { placeShip(); setPlume(state === 'falling' || state === 'tipping' ? 0 : curThr(), simClock); }
       if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < 0.6)) record();
       if (!paused) effects(sdt);
-      if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); $('lndFade').style.opacity = String(fadeOut / 1.4); }
+      if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 1.4; } else fadeAmt = 0;
       padLights.forEach((m, i) => { m.visible = Math.floor(simClock * 2 + i / 3) % 2 === 0 || state === 'landed'; });
       const lp = ship.position, throwD = Math.max(lp.y, 0) / SUN.y;
       sun.target.position.copy(lp).addScaledVector(SUN, -throwD); sun.position.copy(sun.target.position).addScaledVector(SUN, throwD + 120);
       if (Math.abs(sun.shadow.camera.far - (throwD + 300)) > 30) { sun.shadow.camera.far = throwD + 300; sun.shadow.camera.updateProjectionMatrix(); }
       cameraStep(dt);
-      glare.position.copy(camera.position).addScaledVector(SUN, 60000);
-      if (!(warmed && window.tvcCovered?.())) { renderer.render(scene, camera); warmed = true; }
+      flare.lf.position.copy(camera.position).addScaledVector(SUN, 60000);
+      applyLook(dt);
+      post.setMode(false);
+      if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
     }
     if (now - lastHud > 60) { lastHud = now; hud(); }
+    // Frame rate: shown with ?debug; drop a quality level if it stays under 40 fps for 3 s
+    fpsN++; fpsT += dt;
+    if (fpsT >= 1) {
+      const fps = fpsN / fpsT; fpsN = 0; fpsT = 0;
+      if (DEBUG) $('lndFps').textContent = fps.toFixed(0) + ' fps · ' + QUALITY[qName].label;
+      slow = fps < 40 ? slow + 1 : 0;
+      if (slow >= 3 && qName !== 'low' && !DEBUG) { slow = 0; setQuality(Q_ORDER[Q_ORDER.indexOf(qName) + 1]); callout('QUALITY LOWERED · ' + QUALITY[qName].label.toUpperCase(), 1800); }
+    }
+  }
+  let fpsN = 0, fpsT = 0, slow = 0;
+  const DEBUG = /[?&]debug/.test(location.search);
+  if (DEBUG) {
+    $('lndFps').hidden = false;
+    // Stills for comparing looks: __lnd.still('A') shows the ground scene from a low camera toward the horizon
+    window.__lnd = {
+      still(name, x = -160, y = 5, z = -170, tx = 1800, ty = 120, tz = 2300) {
+        lookOverride = name; state = 'landed'; endState = 'landed'; scene.add(ship); ship.visible = false;
+        camMode = 'still'; controls.enabled = false; camera.position.set(x, heightAt(x, z) + y, z); camera.lookAt(tx, ty, tz);
+        Object.assign(look, blendLooks({}, name, name, 0)); refresh();
+      },
+      look(name) { lookOverride = name; },
+    };
   }
 
   try { const s = localStorage.getItem('tvc-landing-src'); if (s === 'rig' || s === 'sim') source = s; } catch {}
   setSource(source);
+  setQuality(qName);
+  $('lndQual').onclick = () => setQuality(Q_ORDER[(Q_ORDER.indexOf(qName) + 1) % Q_ORDER.length]);
   camera.position.copy(camOff);
   resize();
   requestAnimationFrame(frame);
