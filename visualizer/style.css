@@ -839,8 +839,6 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-center { text-align: center; min-width: 0; padding-bottom: 4px; }
 .lnd-phase { font: 600 clamp(18px, 2.2vw, 28px)/1.15 var(--cond); letter-spacing: .2em; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lnd-phase.warn { color: var(--warn); }
-.lnd-prog { height: 2px; margin: 10px clamp(0px, 3vw, 40px) 0; background: rgba(255,255,255,.2); }
-.lnd-prog i { display: block; height: 100%; width: 0; background: #fff; }
 .lnd-loopnote { min-height: 16px; margin-top: 6px; font: 600 11px var(--cond); letter-spacing: .2em; text-transform: uppercase; color: var(--amber); }
 .lnd-att { display: flex; gap: 14px; align-items: flex-end; justify-content: flex-end; }
 .lnd-att svg { width: clamp(110px, 11vw, 150px); height: auto; flex: none; overflow: visible; }
@@ -893,3 +891,9 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
   .lnd-legend, .lnd-small > div:last-child { display: none; }
   .lnd-kv { flex-direction: column; gap: 1px; }
 }
+.lnd-chips { display: flex; justify-content: center; gap: 4px; margin: 10px 0 0; flex-wrap: wrap; }
+.lnd-chips span { padding: 3px 9px; border: 1px solid rgba(255,255,255,.18); border-radius: 4px; font: 600 10px var(--cond);
+  letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.45); white-space: nowrap; }
+.lnd-chips span.done { color: rgba(255,255,255,.75); border-color: rgba(62,207,110,.5); }
+.lnd-chips span.on { color: #000; background: #fff; border-color: #fff; }
+@media (max-width: 760px) { .lnd-chips span { padding: 2px 5px; font-size: 9px; letter-spacing: .08em; } }
