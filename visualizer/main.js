@@ -3,6 +3,7 @@
 import { initBench } from './bench.js';
 import { initMission } from './mission.js';
 import { initTests } from './tests.js';
+import { initLanding } from './landing.js';
 
 export const VERSION = '2.12.0';   // bump with CHANGELOG.md; see README → Releasing
 
@@ -58,6 +59,7 @@ $('mbCollapse').onclick = () => {
 if (matchMedia('(max-width: 760px), (max-height: 520px)').matches) $('mbCollapse').onclick();
 
 const mission = await initMission(step);
+await initLanding(step);
 
 // ---------- Intro after the loading screen ----------
 // Mission: the camera flies in from space while the HUD boots in around it. Bench: just the HUD boot.
@@ -83,6 +85,8 @@ document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
     if (!quick) mission.flyIn(1.8);
     bootHUD([['header'], ['.m-strip .ms-tile'], ['.m-controls'], ['#mPY'], ['#minimap'], ['.m-events'], ['#evList li', quick ? 4 : 12],
              ['#miniBench'], ['.m-gauges'], ['.m-center'], ['.tl-ev', quick ? 6 : 25], ['.m-gimbal']], quick ? 0 : 450, g);
+  } else if (document.body.dataset.tab === 'landing') {
+    bootHUD([['header'], ['.lnd-controls'], ['.lnd-source'], ['.lnd-alt'], ['.lnd-center'], ['.lnd-att']], quick ? 0 : 120, g);
   } else if (document.body.dataset.tab === 'tests') {
     bootHUD([['header'], ['.t-rail > *'], ['.t-strip'], ['#testsHome, .cal:not([hidden])'], ['.t-viz .t-tile']], quick ? 0 : 120, g);
   } else {
@@ -91,10 +95,10 @@ document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
 });
 
 $('appVersion').textContent = 'v' + VERSION;
-// Mission is the home page; Bench or Tests only if that's where the viewer last was
+// Mission is the home page; Landing, Bench or Tests only if that's where the viewer last was
 let savedTab = null;
 try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
-setTab(savedTab === 'bench' || savedTab === 'tests' ? savedTab : 'mission');
+setTab(['bench', 'tests', 'landing'].includes(savedTab) ? savedTab : 'mission');
 // Footer loader previews (temporary): Fuel / Arc
 document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');

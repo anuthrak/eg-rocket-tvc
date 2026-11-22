@@ -544,6 +544,10 @@ export function initBench() {
     lastLineT = now;
     sampleTimes.push(now);
     history.push({ t: now, tiltX: target.tiltX, tiltY: target.tiltY });
+    // For the Landing tab: tilt (zeroed, deg) and nozzle angles (deg, from the servo angles; null without servo data)
+    const sv = servoMode.checked;
+    document.dispatchEvent(new CustomEvent('tvc:sample', { detail: { tiltX: target.tiltX, tiltY: target.tiltY,
+      gx: sv ? target.pitch * rig.xd / rig.spg : null, gy: sv ? target.yaw * rig.yd / rig.spgy : null, demo: !!demoTimer } }));
     while (history.length && now - history[0].t > 10000) history.shift();
   }
 
