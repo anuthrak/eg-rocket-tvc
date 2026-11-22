@@ -7,7 +7,8 @@
 //   aim       gimbal set to the chosen angle along that direction, so thrust pushes the rocket back toward upright
 //             (gimbal +X answers a lean toward +X). Baseline: noise of the lean and of the body rate.
 //   ramp      throttle rises slowly (START_PCT → max at the chosen %/s). Every IMU sample (50 Hz) gives
-//             "moved" = how far the rocket has come off its rest, toward upright.
+//             "moved" = how far the rocket has turned off its rest, toward upright, from the gyro (rate along the
+//             lean, bias taken at rest, integrated): the accelerometer tilt is shaken by a few degrees once the motor runs.
 //   lift-off  moved > max(MOVE_DEG, 5 × noise) for 5 samples in a row (100 ms): the motor is cut at once from this
 //             page and the gimbal centred, so it settles back onto the stop.
 //   starts    the throttle where it really started to move, back-dated from lift-off by a curve fit (onset()).
@@ -225,7 +226,12 @@ export function initVector({ send, link }) {
     const c = cur, now = performance.now();
     const s = { t: now, ph: c.ph, want, act: fwAct, gx: gim.x, gy: gim.y, tx, ty, rx, ry, m: null };
     if (c.u) {
-      s.m = c.s0 - (tx * c.u.x + ty * c.u.y);      // positive = off the stop, toward upright
+      // Turned along the lean from the gyro (bias removed); positive = off the stop, toward upright
+      const r = (rx - c.bias.x) * c.u.x + (ry - c.bias.y) * c.u.y;
+      if (c.lastT) c.ang += r * Math.min(0.1, (now - c.lastT) / 1000);
+      c.lastT = now;
+      s.ang = c.ang;
+      s.m = c.ang0 - c.ang;
       moved = s.m;
     }
     c.samples.push(s);
@@ -272,7 +278,7 @@ export function initVector({ send, link }) {
   const label = t => { stepLabel = t; render(); };
 
   async function trial(ang, rep) {
-    const c = { ph: 'rest', samples: [], u: null, s0: 0, thresh: MOVE_DEG, hits: 0, brk: null, first: null, wake: null };
+    const c = { ph: 'rest', samples: [], u: null, ang: 0, ang0: 0, lastT: 0, bias: { x: 0, y: 0 }, thresh: MOVE_DEG, hits: 0, brk: null, first: null, wake: null };
     cur = c; moved = null;
     const tag = `${ang.deg}° · ${rep + 1}/${work.reps}`;
     // Rest: re-take the Nano's rest attitude (motor at 0), gimbal centred
@@ -287,6 +293,7 @@ export function initVector({ send, link }) {
     const r = { x: mean(rs.map(s => s.tx)), y: mean(rs.map(s => s.ty)) }, rl = Math.hypot(r.x, r.y);
     if (rl < REST_MIN) throw new Error(`The rocket is resting only ${rl.toFixed(1)}° from upright, so there is no stop to lift it off. Let it lean onto a stop (or add a little weight to one side), then start again.`);
     c.u = { x: r.x / rl, y: r.y / rl }; c.restDeg = rl; c.restDir = Math.atan2(r.y, r.x) * 180 / Math.PI;
+    c.bias = { x: mean(rs.map(s => s.rx)), y: mean(rs.map(s => s.ry)) };   // gyro offset while it rests (motor off)
     // Aim: gimbal along the lean, so thrust pushes it back toward upright; then measure the noise
     label(`${tag} · gimbal ${ang.deg}° against the lean`);
     c.ph = 'aim';
@@ -295,10 +302,10 @@ export function initVector({ send, link }) {
     c.ph = 'base';
     await wait(BASE_MS);
     const bs = c.samples.filter(s => s.ph === 'base');
-    const lin = bs.map(s => s.tx * c.u.x + s.ty * c.u.y);
-    c.s0 = mean(lin); c.noise = sd(lin);
+    const angs = bs.map(s => s.ang ?? 0);
+    c.ang0 = mean(angs); c.noise = sd(angs);
     c.thresh = Math.max(MOVE_DEG, 5 * c.noise);
-    for (const s of bs) s.m = c.s0 - (s.tx * c.u.x + s.ty * c.u.y);
+    for (const s of bs) s.m = c.ang0 - (s.ang ?? 0);
     // Ramp until it lifts off (sampleIn cuts the motor) or the top is reached and held
     c.ph = 'ramp';
     const t0 = performance.now(), span = (work.max - START_PCT) / work.ramp * 1000;
