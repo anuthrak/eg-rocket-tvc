@@ -84,16 +84,26 @@ const GradeShader = {
     uTintHi: { value: new THREE.Vector3(1, 1, 1) }, uVig: { value: 0.3 }, uGrain: { value: 0.03 }, uTime: { value: 0 },
     uChroma: { value: 0 }, uFade: { value: 0 }, uFadeCol: { value: new THREE.Color(1, 0.95, 0.9) }, uFlash: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
+    uShA: { value: new THREE.Vector2() }, uShB: { value: new THREE.Vector2() }, uShW: { value: 0 }, uShK: { value: 0 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: `uniform sampler2D tDiffuse; uniform float uContrast, uSat, uVig, uGrain, uTime, uChroma, uFade, uFlash;
     uniform vec3 uTintLo, uTintHi, uFadeCol; uniform vec2 uRes; varying vec2 vUv;
+    uniform vec2 uShA, uShB; uniform float uShW, uShK;
     float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main(){
-      vec3 c;
-      if (uChroma > 0.0) { vec2 d = (vUv - 0.5) * uChroma * length(vUv - 0.5);
-        c = vec3(texture2D(tDiffuse, vUv + d).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - d).b); }
-      else c = texture2D(tDiffuse, vUv).rgb;
+      vec3 c; vec2 uv = vUv;
+      if (uShK > 0.0) {   // heat shimmer: a soft cone along the exhaust (A nozzle → B down the plume), scrolling ripples
+        vec2 asp = vec2(uRes.x / uRes.y, 1.0), ab = (uShB - uShA) * asp, p = (vUv - uShA) * asp;
+        float t = clamp(dot(p, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0), dd = length(p - ab * t);
+        float m = (1.0 - smoothstep(0.0, uShW * (0.6 + 1.4 * t), dd)) * (1.0 - 0.6 * t) * uShK;
+        vec2 px = vUv * uRes;
+        vec2 n = vec2(sin(px.y * 0.09 - uTime * 23.0 + 2.0 * sin(px.x * 0.05 + uTime * 3.0)), cos(px.x * 0.08 + uTime * 19.0 + 2.0 * sin(px.y * 0.04 - uTime * 2.0)));
+        uv += n * m * 3.5 / uRes.y;
+      }
+      if (uChroma > 0.0) { vec2 d = (uv - 0.5) * uChroma * length(uv - 0.5);
+        c = vec3(texture2D(tDiffuse, uv + d).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - d).b); }
+      else c = texture2D(tDiffuse, uv).rgb;
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSat);
       c = (c - 0.5) * uContrast + 0.5;
@@ -109,9 +119,9 @@ const GradeShader = {
 
 // Quality levels
 export const QUALITY = {
-  high:   { label: 'High',   bloom: true,  grain: true,  shadow: 2048, rocks: 1.0,  pr: 2 },
-  medium: { label: 'Medium', bloom: true,  grain: false, shadow: 1024, rocks: 0.55, pr: 1.5 },
-  low:    { label: 'Low',    bloom: false, grain: false, shadow: 1024, rocks: 0.25, pr: 1 },
+  high:   { label: 'High',   bloom: true,  grain: true,  shadow: 2048, rocks: 1.0,  pr: 2,   shimmer: true },
+  medium: { label: 'Medium', bloom: true,  grain: false, shadow: 1024, rocks: 0.55, pr: 1.5, shimmer: true },
+  low:    { label: 'Low',    bloom: false, grain: false, shadow: 1024, rocks: 0.25, pr: 1,   shimmer: false },
 };
 export const Q_ORDER = ['high', 'medium', 'low'];
 

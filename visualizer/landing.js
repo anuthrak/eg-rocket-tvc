@@ -442,28 +442,6 @@ export async function initLanding(step) {
   const FOOT_R = R + LEG * Math.sin(36 * DEG);
   const setLegs = k => legs.forEach(p => { p.visible = k > 0.001; p.rotation.z = lerp(176, 36, k) * DEG; });
 
-  // Plume: methalox blue-white, wider in the thin air; a light that washes the ground
-  function plumeMat(color, k) {
-    return new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-      uniforms: { uColor: { value: new THREE.Color(color) }, uK: { value: k }, uT: { value: 0 } },
-      vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV;
-        void main(){ vY = position.y; vec4 mv = modelViewMatrix*vec4(position,1.0);
-          vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: `uniform vec3 uColor; uniform float uK; uniform float uT; varying float vY; varying vec3 vN; varying vec3 vV;
-        void main(){ float along = pow(clamp(1.0 + vY, 0.0, 1.0), 2.0);
-          float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.5);
-          float diamonds = 0.82 + 0.18 * sin(vY * 40.0 - uT * 30.0);
-          float fl = 0.88 + 0.12 * sin(uT * 53.0 + vY * 31.0);
-          gl_FragColor = vec4(uColor * along * edge * uK * fl * diamonds * 3.0, 1.0); }`,   // above the bloom threshold
-    });
-  }
-  const plumeGeo = new THREE.ConeGeometry(1, 1, 32, 1, true); plumeGeo.rotateX(Math.PI); plumeGeo.translate(0, -0.5, 0);
-  const plume = new THREE.Group(); plume.position.y = -BELL; tvc.add(plume);
-  const plumeOuter = new THREE.Mesh(plumeGeo, plumeMat(0x6a8cff, 0.85));
-  const plumeInner = new THREE.Mesh(plumeGeo, plumeMat(0xf0f4ff, 1.3));
-  plume.add(plumeOuter, plumeInner);
-  const engineLight = new THREE.PointLight(0xaac4ff, 0, 220, 1.6); engineLight.position.y = -6; plume.add(engineLight);
   // Engine fire (RVacs), cinematic: a long bright core per engine (white-hot at the nozzle → blue-violet → faint pink),
   // glowing fire particles streaming along it (fireFx), a flare at each nozzle; startup stutters and over-expands, the
   // shutdown collapses back into the nozzle with a sputter.
@@ -513,13 +491,117 @@ export async function initLanding(step) {
     });
     engLight.intensity = (k[0] + k[1] + k[2]) / 3 * 180 * (1 + 0.15 * Math.sin(t * 53));
   }
-  function setPlume(thr, t, f = 0) {   // f: startup roughness 0..1 (over-expanded, stuttering)
-    plume.visible = thr > 0.01;
-    const st = 1 + f * 0.35 * Math.sin(t * 97), len = (18 + 42 * thr) * st, r = (3.2 + 5 * thr) * (1 + 0.6 * f);
-    plumeOuter.scale.set(r, len, r); plumeInner.scale.set(r * 0.42, len * 0.55, r * 0.42);
-    plumeOuter.material.uniforms.uT.value = plumeInner.material.uniforms.uT.value = t;
-    engineLight.intensity = thr > 0.01 ? 7000 * (0.4 + thr) : 0;
+  // ---------- Landing plumes (section 7): one per centre engine ----------
+  // Methalox, same family as the deorbit fire: a short white-hot core with Mach diamonds (discrete nodes fading down the
+  // jet), and a wide, soft, under-expanded outer plume (Mars air is thin all the way down). Below ~60 m the jet meets
+  // the ground: it shortens, spreads into a hot disc, and the dust it lights tints the plume orange.
+  const lPlumeMat = core => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uK: { value: 0 }, uT: { value: 0 }, uDia: { value: 0 }, uWarm: { value: 0 }, uFl: { value: 0 }, uSeed: { value: 0 } },
+    vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main(){ vY = position.y; vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uK, uT, uDia, uWarm, uFl, uSeed; varying float vY; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main(){ float a = clamp(1.0 + vY, 0.0, 1.0);                     // 1 at the nozzle, 0 at the tip
+        float edge = pow(abs(dot(normalize(vN), normalize(vV))), ${core ? '1.3' : '2.2'});
+        float ang = atan(vP.z, vP.x);
+        float fl = 1.0 + uFl * 0.5 * sin(uT * 89.0 + uSeed) + 0.05 * sin(uT * 53.0 + vY * 13.0 + uSeed);
+        ${core ? `
+        float x = (1.0 - a) * 5.0;                                            // diamond nodes along the core
+        float fx = fract(x + 0.5) - 0.5, nd = exp(-fx * fx * 70.0) * exp(-x * 0.45) * smoothstep(0.35, 0.8, x);
+        vec3 c = mix(vec3(1.0, 0.5, 0.8), vec3(0.5, 0.5, 1.0), smoothstep(0.0, 0.5, a));
+        c = mix(c, vec3(1.0, 0.97, 0.95), smoothstep(0.55, 0.95, a));
+        float I = pow(a, 5.0) * 2.4 + pow(a, 1.3) * 0.5 + nd * uDia * 1.6;
+        c = mix(c, vec3(1.0, 0.6, 0.3), uWarm * (1.0 - a) * 0.6);` : `
+        float turb = 0.75 + 0.25 * sin(vY * 9.0 - uT * 14.0 + ang * 3.0 + uSeed) * sin(vY * 4.0 + uT * 6.0 - ang * 2.0);
+        vec3 c = mix(vec3(0.42, 0.5, 1.0), vec3(0.75, 0.55, 1.0), 1.0 - a);
+        c = mix(c, vec3(1.0, 0.55, 0.25), uWarm * (1.0 - 0.5 * a));
+        float I = (pow(a, 2.2) * 0.5 + 0.08) * turb;`}
+        gl_FragColor = vec4(c * I * edge * uK * fl, 1.0); }`,
+  });
+  const lCoreGeo = new THREE.CylinderGeometry(0.62, 1.05, 1, 24, 1, true); lCoreGeo.translate(0, -0.5, 0);
+  const lOuterGeo = new THREE.CylinderGeometry(0.72, 4.2, 1, 28, 1, true); lOuterGeo.translate(0, -0.5, 0);
+  const BELL_AZ = [90, 210, 330].map(a => a * DEG);
+  const ENG = cbells.map((e, i) => {
+    const g = new THREE.Group(); g.position.y = -BELL; g.visible = false; e.add(g);
+    const core = new THREE.Mesh(lCoreGeo, lPlumeMat(true)), outer = new THREE.Mesh(lOuterGeo, lPlumeMat(false));
+    core.material.uniforms.uSeed.value = outer.material.uniforms.uSeed.value = i * 2.1;
+    g.add(outer, core);
+    return { e, g, core, outer, lvl: 0, gx: 0, gz: 0, tau: [0.03, 0.045, 0.06][i] };
+  });
+  // Lights: a short cool light under the nozzles (skirt, bells, aft flaps; not the whole hull) and a warm pool where the
+  // exhaust meets the ground, which also lights the ship from below as it gets close
+  const nozLight = new THREE.PointLight(0xb8c8ff, 0, 45, 2); nozLight.position.y = -BELL - 3; tvc.add(nozLight);
+  const poolLight = new THREE.PointLight(0xffa060, 0, 170, 2); scene.add(poolLight);
+  const poolTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,245,235,1)'); gr.addColorStop(0.18, 'rgba(255,200,150,0.75)');
+    gr.addColorStop(0.5, 'rgba(255,120,50,0.25)'); gr.addColorStop(1, 'rgba(255,90,30,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: poolTex, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, fog: false }));
+  pool.visible = false; scene.add(pool);
+  const _px = new THREE.Vector3(), _pd = new THREE.Vector3();
+  const plumeFx = { on: false, exit: new THREE.Vector3(), dir: new THREE.Vector3(0, -1, 0), len: 0, w: 0, k: 0 };   // for the shimmer
+  let plT = 0, outT = 0, engOut = false, engT = 9;
+  // thr: the sim's throttle (fraction of three engines) · ft: time into the flip (relight stagger; 99 = all lit)
+  function setPlume(thr, t, ft = 99) {
+    const dt = clamp(t - plT, 0, 0.1); plT = t;
+    // Engine-out: below ~35% throttle for 0.5 s the two outer centre engines shut down one after the other; back over 50% they relight
+    outT = thr > 0.01 && thr < 0.35 ? outT + dt : 0; engT += dt;
+    if (!engOut && outT > 0.5) { engOut = true; engT = 0; }
+    if (engOut && (thr > 0.5 || thr < 0.01)) { engOut = false; engT = 0; }
+    let nOn = 0;
+    ENG.forEach((E, i) => {
+      const want = i === 0 || !engOut ? 1 : engT > (i === 2 ? 0.15 : 0) ? 0 : 1;
+      E.lvl += (want - E.lvl) * (1 - Math.exp(-dt * (want ? 10 : 14)));
+      const ig = ft >= 99 ? 1 : sstep(IGN[i], IGN[i] + 0.18, ft);
+      const dying = !want && E.lvl > 0.04 ? stutter(engT * 1.7, i + 5) : 1;
+      E.k = thr > 0.01 ? E.lvl * ig * dying : 0; nOn += E.k;
+      E.f = Math.max(ft < 99 ? ignRough(ft) : 0, want && E.lvl < 0.9 ? 0.7 : 0);   // rough at a (re)light
+    });
+    const te = nOn > 0.01 ? clamp(thr * 3 / Math.max(nOn, 1), 0, 1) : 0;          // each lit engine's own throttle
+    // Height of the exits and where the averaged exhaust meets the ground
+    tvc.updateWorldMatrix(true, false);
+    _pd.set(0, -1, 0).transformDirection(tvc.matrixWorld); _px.set(0, -BELL, 0).applyMatrix4(tvc.matrixWorld);
+    const gH = heightAt(_px.x, _px.z), dG = _pd.y < -0.2 ? (_px.y - gH) / -_pd.y : 1e9, h = _px.y - gH;
+    const hiK = sstep(60, 300, h), warm = 1 - sstep(8, 150, h);
+    let maxLen = 0;
+    ENG.forEach((E, i) => {
+      const k = E.k; E.g.visible = k > 0.01;
+      // Per-engine gimbal: each bell lags the shared command a little, plus a tiny jitter and a slow roll trim (tangential)
+      E.gx += (tvc.rotation.x - E.gx) * (1 - Math.exp(-dt / E.tau)); E.gz += (tvc.rotation.z - E.gz) * (1 - Math.exp(-dt / E.tau));
+      const jit = 0.3 * DEG, roll = 0.5 * DEG * Math.sin(t * 0.9 + 1.3) * (thr > 0.01 ? 1 : 0);
+      E.e.rotation.set(E.gx - tvc.rotation.x + jit * Math.sin(t * 7.3 + i * 2) + Math.cos(BELL_AZ[i]) * roll, 0,
+        E.gz - tvc.rotation.z + jit * Math.sin(t * 6.1 + i * 3) + Math.sin(BELL_AZ[i]) * roll);
+      const fl = cFlares[i];
+      if (!E.g.visible) { if (!(ft < 99 && ft - IGN[i] > 0 && ft - IGN[i] < 1.5)) fl.visible = false; return; }
+      const st = 1 + E.f * 0.35 * Math.sin(t * 97 + i);
+      let lc = (5 + 9 * te) * st * (0.9 + 0.2 * hiK), lo = (20 + 34 * te) * (0.8 + 0.35 * hiK) * st;
+      const wc = (1 + 0.25 * te) * (1 + 0.5 * E.f), wo = (0.85 + 0.45 * te) * (0.85 + 0.3 * hiK) * (1 + 0.4 * E.f);
+      if (dG < lo) { lo = Math.max(dG + 2, 3); lc = Math.min(lc, Math.max(dG + 1, 2)); }   // ground effect: the jet is stopped
+      E.core.scale.set(wc, lc, wc); E.outer.scale.set(wo * (dG < 40 ? 1 + (1 - dG / 40) * 0.8 : 1), lo, wo * (dG < 40 ? 1 + (1 - dG / 40) * 0.8 : 1));
+      for (const m of [E.core, E.outer]) { const u = m.material.uniforms; u.uT.value = t; u.uFl.value = E.f; u.uWarm.value = warm;
+        u.uK.value = k * (m === E.core ? 1.15 + 0.25 * (1 - hiK) : 0.8 + 0.5 * te); u.uDia.value = te * (0.5 + 0.5 * (1 - hiK)); }
+      // Nozzle flare: a hard flash at each flip relight, then a steady glow with the engine
+      const d = ft - IGN[i], flash = ft < 99 && d > 0 ? Math.exp(-d * 5) : 0;
+      fl.visible = true; fl.material.opacity = Math.min(1, 0.3 * k * (0.5 + te) + flash); fl.scale.setScalar(2.5 + 2 * te * k + 14 * flash + Math.random() * 0.8);
+      maxLen = Math.max(maxLen, lo);
+    });
+    const P = nOn > 0.01 && ship.visible;
+    nozLight.intensity = P ? 60 * nOn * (0.4 + te) * (1 + 0.08 * Math.sin(t * 53)) : 0;
+    // Ground pool: where the exhaust lands, bigger and brighter as it closes in
+    const near = P && dG < 180 ? 1 - dG / 180 : 0;
+    pool.visible = poolLight.intensity > 0 || near > 0;
+    if (near > 0) {
+      const gx = _px.x + _pd.x * dG, gz = _px.z + _pd.z * dG;
+      pool.position.set(gx, heightAt(gx, gz) + 0.25, gz); pool.scale.setScalar(10 + 46 * near * (0.6 + 0.4 * te));
+      pool.material.opacity = Math.min(0.9, near * near * (0.4 + 0.6 * te) * nOn / 2);
+      poolLight.position.set(gx, heightAt(gx, gz) + 10, gz);
+      poolLight.intensity = 900 * near * near * (0.3 + 0.7 * te) * (nOn / 3) * (1 + 0.1 * Math.sin(t * 41));
+    } else { poolLight.intensity = 0; pool.visible = false; }
+    Object.assign(plumeFx, { on: P, len: maxLen, w: 2 + 2.5 * te, k: P ? Math.min(1, nOn / 2) * (0.5 + 0.5 * te) : 0 });
+    plumeFx.exit.copy(_px); plumeFx.dir.copy(_pd);
   }
+
 
   // ---------- Particles: one tinted system per blend mode ----------
   function createPoints(N, additive, target) {
@@ -1260,10 +1342,8 @@ export async function initLanding(step) {
       for (const f of flaps) f.pivot.rotation.y = f.side * ((f.fwd ? 0.3 + 0.35 * s.flap : 0.3 - 0.35 * s.flap) + 0.5 * f.side * roll + 0.03 * Math.sin(s.t * 17 + f.side * 3 + (f.fwd ? 1 : 0)));
     }
     else setFlaps(foldFlap(ft, 0.35), foldFlap(ft, 0));
-    if (state === 'flight') cbells.forEach((e, i) => {   // relight flares: a hard flash per engine, settling to a steady glow
-      const d = ft - IGN[i], f = cFlares[i];
-      f.visible = d > 0 && d < 3;
-      if (f.visible) { const k = Math.exp(-d * 5); f.material.opacity = Math.min(1, 0.35 * (1 - sstep(1.5, 3, d)) + k); f.scale.setScalar(3 + 14 * k + Math.random() * 1.5); }
+    if (state === 'flight') cbells.forEach((e, i) => {   // relight kicks (the flares are drawn in setPlume)
+      const d = ft - IGN[i];
       if (d > 0 && !calls['ig' + i]) {
         calls['ig' + i] = true; shake = Math.max(shake, 0.5 + 0.25 * i);
         if (i === 0) { flashScreen(0.25); flash.position.copy(ship.position); flash.intensity = 2e5; }
@@ -1499,6 +1579,21 @@ export async function initLanding(step) {
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
 
+  // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
+  const _sA = new THREE.Vector3(), _sB = new THREE.Vector3();
+  function shimmer() {
+    const u = post.grade.uniforms;
+    u.uShK.value = 0;
+    if (!QUALITY[qName].shimmer || !plumeFx.on || paused) return;
+    _sA.copy(plumeFx.exit).addScaledVector(plumeFx.dir, 2); _sB.copy(plumeFx.exit).addScaledVector(plumeFx.dir, plumeFx.len * 0.7);
+    const dist = camera.position.distanceTo(_sA);
+    _sA.project(camera); _sB.project(camera);
+    if (_sA.z > 1 || _sB.z > 1) return;
+    u.uShA.value.set(_sA.x * 0.5 + 0.5, _sA.y * 0.5 + 0.5); u.uShB.value.set(_sB.x * 0.5 + 0.5, _sB.y * 0.5 + 0.5);
+    u.uShW.value = plumeFx.w / (2 * dist * Math.tan(camera.fov * DEG / 2));
+    u.uShK.value = plumeFx.k;
+  }
+
   // ---------- HUD ----------
   const sgn = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
   const R_PER_DEG = 40 / 25;   // dial: 25° at r = 40
@@ -1591,7 +1686,7 @@ export async function initLanding(step) {
         life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
     } else rcsSide = 0;
     // Dust blown off the ground where the exhaust (along the nozzle, so it follows the gimbal) meets it
-    if (plume.visible && ship.visible) {
+    if (plumeFx.on) {
       tvc.updateWorldMatrix(true, false);
       _nz.set(0, -1, 0).transformDirection(tvc.matrixWorld);            // exhaust direction
       const exit = _ex.set(0, -BELL, 0).applyMatrix4(tvc.matrixWorld);
@@ -1662,7 +1757,7 @@ export async function initLanding(step) {
       while (acc >= L.DT) { acc -= L.DT; simStep(); }
       if (!paused) fallStep(sdt);
       if (state === 'replay' && !paused) playReplay(dt);
-      else { placeShip(); setPlume(state === 'falling' || state === 'tipping' ? 0 : curThr(), simClock, state === 'flight' ? ignRough(flipT()) : 0); }
+      else { placeShip(); setPlume(state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr : 0, simClock, state === 'flight' ? flipT() : 99); }
       if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < 0.6)) record();
       if (!paused) effects(sdt);
       if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 0.8; } else fadeAmt = 0;
@@ -1673,6 +1768,7 @@ export async function initLanding(step) {
       cameraStep(dt);
       flare.lf.position.copy(camera.position).addScaledVector(SUN, 60000);
       applyLook(dt);
+      shimmer();
       post.setMode(false);
       if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
     }
@@ -1700,6 +1796,10 @@ export async function initLanding(step) {
       look(name) { lookOverride = name; },
       entry(u) { window.__entU = u; },
       ground() { cutToGround(); },
+      at(h = 1000) {   // jump the flight to h m above the ground in the TVC landing
+        this.flip(0); const s = flight.s;
+        for (let n = 0; n < 1e5 && state === 'flight' && !(s.phase === 'tvc' && s.h - groundUnder() <= h); n++) simStep();
+      },
       flip(at = 0.4) {   // jump the flight to `at` s into the flip (from the orbit idle or the cloud deck)
         if (state !== 'flight') { if (state === 'orbit') goBtn.click(); cutToGround(); }
         const s = flight.s; for (let n = 0; n < 1e5 && s.phase !== 'tvc' && !(s.phase === 'flip' && s.t - s.tPh >= at); n++) simStep();
