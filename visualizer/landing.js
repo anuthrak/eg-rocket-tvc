@@ -414,7 +414,8 @@ export async function initLanding(step) {
     const p = new THREE.Mesh(new THREE.CylinderGeometry(r0 * 0.8, r0, 0.8, 16), M.dark); p.position.y = 0.3;
     g.add(b, p); return g;
   }
-  for (let i = 0; i < 3; i++) { const a = (90 + 120 * i) * DEG, e = bell(0.42, 0.7, BELL); e.position.set(Math.cos(a) * 1.0, 0, Math.sin(a) * 1.0); tvc.add(e); }
+  const cbells = [];
+  for (let i = 0; i < 3; i++) { const a = (90 + 120 * i) * DEG, e = bell(0.42, 0.7, BELL); e.position.set(Math.cos(a) * 1.0, 0, Math.sin(a) * 1.0); tvc.add(e); cbells.push(e); }
   // Vacuum engines (the deorbit burn): their bells glow orange as they heat and cool after shutdown
   const rvacMat = new THREE.MeshStandardMaterial({ color: 0x55575e, metalness: 0.9, roughness: 0.3, side: THREE.DoubleSide, emissive: new THREE.Color(1, 0.32, 0.08), emissiveIntensity: 0 });
   const rvacs = [];
@@ -495,6 +496,11 @@ export async function initLanding(step) {
     return { g, outer, inner, flare };
   });
   const engLight = new THREE.PointLight(0xc8b8ff, 0, 45, 1.4); engLight.position.y = -4; airframe.add(engLight);
+  // Centre engines' relight flares (the flip): one per bell, a hard flash at each engine's ignition
+  const cFlares = cbells.map(e => {
+    const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: nozzleTex, color: 0xdfe6ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+    f.position.y = -BELL - 0.4; f.visible = false; e.add(f); return f;
+  });
   // k[i]: each engine's level 0..1, fl[i]: startup roughness 0..1
   function setVac(k, fl, t) {
     vacCores.forEach((c, i) => {
@@ -507,9 +513,9 @@ export async function initLanding(step) {
     });
     engLight.intensity = (k[0] + k[1] + k[2]) / 3 * 180 * (1 + 0.15 * Math.sin(t * 53));
   }
-  function setPlume(thr, t) {
+  function setPlume(thr, t, f = 0) {   // f: startup roughness 0..1 (over-expanded, stuttering)
     plume.visible = thr > 0.01;
-    const len = 18 + 42 * thr, r = 3.2 + 5 * thr;
+    const st = 1 + f * 0.35 * Math.sin(t * 97), len = (18 + 42 * thr) * st, r = (3.2 + 5 * thr) * (1 + 0.6 * f);
     plumeOuter.scale.set(r, len, r); plumeInner.scale.set(r * 0.42, len * 0.55, r * 0.42);
     plumeOuter.material.uniforms.uT.value = plumeInner.material.uniforms.uT.value = t;
     engineLight.intensity = thr > 0.01 ? 7000 * (0.4 + thr) : 0;
@@ -921,7 +927,7 @@ export async function initLanding(step) {
       if (s.phase === 'flip' && rig && rigLive()) { trim.x += rig.tiltX; trim.y += rig.tiltY; trimN++; }
     }
     flight.step(d);
-    if (wasPhase === 'belly' && s.phase === 'flip') { callout('FLIP', 1800); flashScreen(0.6); flash.intensity = 2e5; shake = 1.2; }
+    if (wasPhase === 'belly' && s.phase === 'flip') shake = 0.5;   // the RCS kick; the relight flashes come per engine (flipFx)
     if (wasPhase === 'flip' && s.phase === 'tvc') handover();
     if (s.h < L.LEGS_AT) { legK = clamp(legK + L.DT / 2.2, 0, 1); once('legs', 'LEGS DEPLOYED', 1400); }
     if (s.h <= groundUnder()) touchdown(s.tilt);
@@ -1227,12 +1233,25 @@ export async function initLanding(step) {
   const _q = new THREE.Quaternion(), _pv = new THREE.Vector3(), _up = new THREE.Vector3(), _nz = new THREE.Vector3();
   const CG_H = () => TAIL + FOOT * legK;   // CG above the ground when upright on its feet
   const VIS_GIMBAL = 1.6;                  // the TVC source's nozzle swing is drawn this much bigger, so it reads on screen
+  // Flip: the centre engines relight one after another (s after the flip starts), rough for a moment, then steady
+  const IGN = [0.25, 0.42, 0.56];
+  const flipT = () => { const s = flight.s; return s.phase === 'flip' ? s.t - s.tPh : s.phase === 'tvc' ? 99 : -1; };
+  const ignK = ft => IGN.reduce((a, t0) => a + sstep(t0, t0 + 0.18, ft), 0) / 3;
+  const ignRough = ft => Math.max(0, 1 - Math.abs(ft - 0.6) / 0.5);
+  // Flaps fold in the flip: aft first, then forward, each snapping shut with a small overshoot
+  function foldFlap(ft, d) {
+    const u = ft - d, base = lerp(0.3, -0.2, sstep(0, 0.8, u));
+    return u > 0.8 ? base - 0.09 * Math.sin((u - 0.8) * 14) * Math.exp(-(u - 0.8) * 4) : base;
+  }
   function placeShip() {
     if (state !== 'flight' && !(state === 'landed' && !replay)) return;
     const s = flight.s, tx = s.cmd.x + dev.tiltX, ty = s.cmd.y + dev.tiltY, ax = L.axisFromTilt(tx, ty);
     ship.rotation.set(Math.atan2(ax.z, ax.y), 0, Math.atan2(-ax.x, Math.hypot(ax.y, ax.z)));
     ship.position.set(s.x + ax.x * CG_H(), s.h + ax.y * CG_H(), s.z + ax.z * CG_H());
-    const gx = s.gA.x + dev.gx * VIS_GIMBAL, gy = s.gA.y + dev.gy * VIS_GIMBAL;
+    const ft = flipT();
+    // The autopilot's swing drawn up to ~1.9× in the flip so it reads (sim stays at ±8°), easing back after the handover
+    const gb = s.phase === 'flip' ? 1 + 0.9 * sstep(0, 0.4, ft) : s.phase === 'tvc' ? 1 + 0.9 * (1 - sstep(0, 1.2, s.t - s.tPh)) : 1;
+    const gx = clamp(s.gA.x * gb, -16, 16) + dev.gx * VIS_GIMBAL, gy = clamp(s.gA.y * gb, -16, 16) + dev.gy * VIS_GIMBAL;
     tvc.rotation.set(gx * DEG, 0, -gy * DEG);
     if (s.phase === 'belly') {   // flaps steer: pitch trim from the sim, a roll fight against wobble and gusts, micro-corrections
       const wob = (2.2 * Math.sin(s.t * 1.7) + 1.1 * Math.sin(s.t * 3.9 + 1.3) + 4 * bGust.k * bGust.d) * DEG;
@@ -1240,7 +1259,16 @@ export async function initLanding(step) {
       const roll = -(0.22 * Math.sin(s.t * 1.7 + 0.6) + 0.1 * Math.sin(s.t * 3.9 + 2.1) + 0.6 * bGust.k * bGust.d);
       for (const f of flaps) f.pivot.rotation.y = f.side * ((f.fwd ? 0.3 + 0.35 * s.flap : 0.3 - 0.35 * s.flap) + 0.5 * f.side * roll + 0.03 * Math.sin(s.t * 17 + f.side * 3 + (f.fwd ? 1 : 0)));
     }
-    else { const k = s.phase === 'flip' ? sstep(0, 3, s.t - s.tPh) : 1; setFlaps(lerp(0.3, -0.2, k), lerp(0.3, -0.2, k)); }
+    else setFlaps(foldFlap(ft, 0.35), foldFlap(ft, 0));
+    if (state === 'flight') cbells.forEach((e, i) => {   // relight flares: a hard flash per engine, settling to a steady glow
+      const d = ft - IGN[i], f = cFlares[i];
+      f.visible = d > 0 && d < 3;
+      if (f.visible) { const k = Math.exp(-d * 5); f.material.opacity = Math.min(1, 0.35 * (1 - sstep(1.5, 3, d)) + k); f.scale.setScalar(3 + 14 * k + Math.random() * 1.5); }
+      if (d > 0 && !calls['ig' + i]) {
+        calls['ig' + i] = true; shake = Math.max(shake, 0.5 + 0.25 * i);
+        if (i === 0) { flashScreen(0.25); flash.position.copy(ship.position); flash.intensity = 2e5; }
+      }
+    });
     setLegs(sstep(0, 1, legK));
   }
   function lowestPoint() {
@@ -1281,12 +1309,12 @@ export async function initLanding(step) {
     setPlume(b.thr, simClock);
     if (replay.t >= replay.end) endReplay();
   }
-  const curThr = () => state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr : 0;
+  const curThr = () => state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr * ignK(flipT()) : 0;
 
   // ---------- Camera ----------
   // Ground scene: follows the ship rigidly (it moves at 300+ m/s) and smooths only the offset; a change of shot cuts.
   const camOff = new THREE.Vector3(-105, 42, -118), lookOff = new THREE.Vector3(), _co = new THREE.Vector3(), _lo = new THREE.Vector3();
-  let shake = 0, orbitA = 0, shotName = '', padCam = false;
+  let shake = 0, orbitA = 0, shotName = '', padCam = false, rcsSide = 0;
   const PAD_CAM = new THREE.Vector3(-82, 6, -98), REPLAY_CAM = new THREE.Vector3(70, 5, 62);
   function shot() {
     if (camMode !== 'auto') return camMode;
@@ -1298,7 +1326,7 @@ export async function initLanding(step) {
         if (tBreak === null) return 'close';
         return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.2 ? 'flaps' : s.t < tBreak + 9.4 ? 'top' : 'side';
       }
-      if (s.phase === 'flip') return 'flip';
+      if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
       return s.h > 70 ? 'chase' : 'pad';
     }
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
@@ -1313,7 +1341,11 @@ export async function initLanding(step) {
       case 'close': _co.set(-19, 3.5, -15); _lo.set(3, -2, 0); break;            // riding along by the aft flap
       case 'flaps': _co.set(-34, 12, -30); _lo.set(-12, -2, 0); break;                 // close on the aft flaps working
       case 'high': _co.set(-70, 120, -160); _lo.set(0, -40, 0); break;                 // pull back: the ground coming up
-      case 'flip': _co.set(-40, 10, -150); _lo.set(0, 0, 0); break;
+      case 'flip': {   // long-lens side profile drifting round; the aim follows the nose as it swings up
+        const k = sstep(0, 2.5, flipT());
+        _co.set(-30 - 30 * k, 4 + 10 * k, -170); _lo.copy(_up.set(0, 1, 0).applyQuaternion(ship.quaternion)).multiplyScalar(4); break;
+      }
+      case 'flipLow': _co.set(-80, -18, -70); _lo.set(0, -6, 0); break;   // low aft, looking up past the exhaust at the gimballing bells
       default: {   // chase: from above, the pad below; lower as it nears the ground
         const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + 0.5 * Math.sin(orbitA), el = lerp(16, 50, k) * DEG, R = lerp(110, 170, k);
         _co.set(R * Math.cos(el) * Math.cos(az), R * Math.sin(el), R * Math.cos(el) * Math.sin(az));
@@ -1448,13 +1480,14 @@ export async function initLanding(step) {
       padCam = true;
     } else {
       camGoal(name);
-      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'close' || name === 'top' || name === 'side' || shotName === 'flaps' || shotName === 'track');
+      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'flipLow' || name === 'close' || name === 'top' || name === 'side' || shotName === 'flaps' || shotName === 'track');
       if (padCam || cut) { camOff.copy(cut ? _co : camera.position.clone().sub(sp)); lookOff.copy(_lo); padCam = false; }
       camOff.lerp(_co, 1 - Math.exp(-dt * 1.2)); lookOff.lerp(_lo, 1 - Math.exp(-dt * 2));
       camera.position.copy(sp).add(camOff);
       const gmin = heightAt(camera.position.x, camera.position.z) + 3;
       if (camera.position.y < gmin) camera.position.y = gmin;
       camera.lookAt(_pv.copy(sp).add(lookOff));
+      if (name === 'flip' && !paused) camera.rotateZ(-3 * DEG * flight.s.rcs);   // the operator leans with the swing
     }
     shotName = name;
     const s = flight.s;
@@ -1463,7 +1496,7 @@ export async function initLanding(step) {
     const sh = (paused ? 0 : shake) + buffet + (name === 'close' && !paused ? 0.5 + 0.7 * inDeck + (Math.random() < 0.04 ? 1.6 : 0) : 0);
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) shake *= Math.exp(-dt * 2.5);
-    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : 40;
+    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : 40;
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
 
@@ -1502,7 +1535,7 @@ export async function initLanding(step) {
       : state === 'orbit' ? 'MARS ORBIT · 200 KM'
       : state === 'deorbit' ? 'DEORBIT BURN'
       : state === 'entry' ? (blackout ? 'PLASMA BLACKOUT' : ent.I > 0.15 ? 'ENTRY · PLASMA' : 'ATMOSPHERIC ENTRY')
-      : state === 'flight' ? (s.phase === 'belly' ? (flipEta(s) < 3.2 ? 'FLIP IN ' + Math.ceil(flipEta(s)) : flipEta(s) < 5.5 ? 'BELLY FLOP · ENGINE CHILL' : 'BELLY FLOP') : s.phase === 'flip' ? 'FLIP' : s.h > 20 ? (source === 'rig' ? 'TVC LANDING · RIG' : 'TVC LANDING') : 'FINAL METRES')
+      : state === 'flight' ? (s.phase === 'belly' ? (flipEta(s) < 3.2 ? 'FLIP IN ' + Math.ceil(flipEta(s)) : flipEta(s) < 5.5 ? 'BELLY FLOP · ENGINE CHILL' : 'BELLY FLOP') : s.phase === 'flip' ? `FLIP · GIMBAL ${Math.round(Math.max(Math.abs(tvc.rotation.x), Math.abs(tvc.rotation.z)) / DEG)}°` : s.h > 20 ? (source === 'rig' ? 'TVC LANDING · RIG' : 'TVC LANDING') : 'FINAL METRES')
       : state === 'falling' ? 'LOSS OF CONTROL' : state === 'tipping' ? 'TIPPING OVER'
       : state === 'replay' ? 'REPLAY'
       : outcome?.title ?? '';
@@ -1550,11 +1583,14 @@ export async function initLanding(step) {
           vx: 0, vy: 0, vz: 0, life: rnd(0.5, 1.1), s0: 0.6, s1: 1.4, a: 0.35, drag: 0, rgb: STREAK });
       }
     }
-    if (state === 'flight' && flight.s.rcs && Math.random() < 0.7) {   // flip: nose RCS puffs
+    if (state === 'flight' && flight.s.rcs) {   // flip: nose RCS jets; a big burst to start the swing and to stop it
       const s = flight.s, nose = _pv.copy(sp).addScaledVector(_up, NOSE * 0.8), side = Math.sign(s.rcs);
-      for (let i = 0; i < 3; i++) dust.emit({ x: nose.x, y: nose.y, z: nose.z + rnd(-3, 3), vx: -_up.y * 30 * side + s.vx, vy: _up.x * 30 * side + s.vh, vz: rnd(-4, 4),
-        life: rnd(0.3, 0.7), s0: 1.5, s1: 6, a: 0.7, drag: 3, rgb: [1, 1, 1] });
-    }
+      const burst = side !== rcsSide; rcsSide = side;
+      if (burst) shake = Math.max(shake, 0.4);
+      const n = burst ? 16 : Math.random() < 0.85 ? Math.round(2 + 4 * Math.abs(s.rcs)) : 0, v = burst ? 70 : 50;
+      for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y, z: nose.z + rnd(-3, 3), vx: -_up.y * v * side * rnd(0.6, 1) + s.vx, vy: _up.x * v * side * rnd(0.6, 1) + s.vh, vz: rnd(-6, 6),
+        life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
+    } else rcsSide = 0;
     // Dust blown off the ground where the exhaust (along the nozzle, so it follows the gimbal) meets it
     if (plume.visible && ship.visible) {
       tvc.updateWorldMatrix(true, false);
@@ -1627,7 +1663,7 @@ export async function initLanding(step) {
       while (acc >= L.DT) { acc -= L.DT; simStep(); }
       if (!paused) fallStep(sdt);
       if (state === 'replay' && !paused) playReplay(dt);
-      else { placeShip(); setPlume(state === 'falling' || state === 'tipping' ? 0 : curThr(), simClock); }
+      else { placeShip(); setPlume(state === 'falling' || state === 'tipping' ? 0 : curThr(), simClock, state === 'flight' ? ignRough(flipT()) : 0); }
       if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < 0.6)) record();
       if (!paused) effects(sdt);
       if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 0.8; } else fadeAmt = 0;
@@ -1665,6 +1701,10 @@ export async function initLanding(step) {
       look(name) { lookOverride = name; },
       entry(u) { window.__entU = u; },
       ground() { cutToGround(); },
+      flip(at = 0.4) {   // jump the flight to `at` s into the flip (from the orbit idle or the cloud deck)
+        if (state !== 'flight') { if (state === 'orbit') goBtn.click(); cutToGround(); }
+        const s = flight.s; for (let n = 0; n < 1e5 && s.phase !== 'tvc' && !(s.phase === 'flip' && s.t - s.tPh >= at); n++) simStep();
+      },
       shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
     };
   }

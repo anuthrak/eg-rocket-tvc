@@ -18,7 +18,7 @@ CHANGELOG "Unreleased" lists every step. Read this file first in a new session.
   `entryHV`/`qRaw`, `tileT`, heat panel `heatPanel()`); cameras `cameraStep` (`ENT_CAM`, `shot()`, `camGoal`, `track`
   long-lens operator `trk`, `glint`); `cloudFx` (vapour trail, streamers, belly speed motes, chill-down, `bGust`);
   `placeShip` (flap steering + wobble in belly); `reset()` (full reset for Fly again); `__lnd` debug API (`?debug`):
-  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`.
+  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`, `flip(t)`.
 - `landing-orbit.js`: orbit planet (craters, canyon, caps for late southern spring: `POLE_TILT`, `SPIN`), clouds, atmosphere,
   stars, sun burst.
 - `landing-look.js`: looks A/B/C/space (palette now matches the orbit planet), grade shader, bloom, quality, flare.
@@ -31,13 +31,12 @@ with chill-down and "Flip in 3·2·1" → flip → TVC landing → touchdown/cra
 
 ## Done (sections)
 Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (+ nose-up 70° AoA, smooth warp) ·
-4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset.
+4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no).
 
 ## Next
-1. Flip: make it violent and readable (RVac/centre relight, flaps fold, big gimbal, camera).
-2. TVC landing plume: visible engine fire that points with the gimbal; dust kicked up near the ground.
-3. Landing legs deploy, touchdown dust storm, crash.
-4. Optional polish left out to save tokens: heat shimmer, uneven tile glow, entry grade, focus-hunt blur, ship shadow on
+1. TVC landing plume: visible engine fire that points with the gimbal; dust kicked up near the ground.
+2. Landing legs deploy, touchdown dust storm, crash.
+3. Optional polish left out to save tokens: heat shimmer, uneven tile glow, entry grade, focus-hunt blur, ship shadow on
    clouds/ground, flap-angle HUD graphic, mesa/canyon banding, canyon ground haze, cloud shadows.
 
 ## Known issues
@@ -47,6 +46,5 @@ Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (
   with TVC on).
 
 ## Testing (headless)
-(Scripts lived in the previous session's container and may need recreating.) `/home/claude/srv.sh [speed]` serves a sped-up copy; `shotfast.py '[["wait",ms],["eval",js],["shot",name],...]'` with
-`Q='?debug'`. Headless runs at ~3–30 fps, so flight-time screenshots need long waits; use `__lnd.ground()` to skip to the
+Recreate per session: `npm i three@0.160.0` in /tmp/nm, then a Playwright script (google-chrome + swiftshader) that routes the jsdelivr three URLs to /tmp/nm and serves visualizer/ from disk; wait for `window.__lnd` + ~15 s for the loader, then `[["eval",js],["wait",ms],["shot",name]]` steps with `?debug`. Headless runs at ~3–30 fps, so flight-time screenshots need long waits; use `__lnd.ground()` to skip to the
 cloud deck.
