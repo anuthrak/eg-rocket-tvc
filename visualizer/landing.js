@@ -566,7 +566,7 @@ export async function initLanding(step) {
   // grazing angles (long crater shadows), the sun sits ~24° above the limb in forward shots with the arc brightest under
   // it, and the ship is mostly backlit. During the entry it eases to the ground scene's sun, so the cut matches.
   const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
-  const SUN_AZ = [-40, -130], SUN_EL = [3.5, 17];
+  const SUN_AZ = [-40, -130], SUN_EL = [5, 17];
   const ORB_SUN = sph(SUN_AZ[0], SUN_EL[0]);
   let sunK = -1, envSunK = -1;
   const SUNRISE = /[?&]sunrise/.test(location.search), SUNRISE_DIR = sph(-40, -17.5);
@@ -639,7 +639,7 @@ export async function initLanding(step) {
     if (state === 'orbit' && dipAmt > 0.001) { post.grade.uniforms.uFade.value = dipAmt; post.grade.uniforms.uFadeCol.value.setRGB(0, 0, 0); }
     else post.grade.uniforms.uFadeCol.value.copy(look.hor).lerp(new THREE.Color(1, 0.96, 0.92), 0.6);
     flashAmt *= Math.exp(-dt * 5);
-    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 0.15 * orbit.sunVisible);
+    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 0.2 * orbit.sunVisible);
     // Reflections: rebuild the environment now and then while the look is changing
     envTimer -= dt;
     const cd = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
