@@ -211,23 +211,37 @@ export async function initLanding(step) {
   // ragged base. The flat layer at 6.55 km is the overcast ceiling seen from below after the breakout.
   const DECK = { base: 6600, top: 8100 };
   const wispTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
-    for (let i = 0; i < 14; i++) { const x = 64 + rnd(-26, 26), y = 64 + rnd(-26, 26), r = rnd(18, 44);
-      const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    for (let i = 0; i < 22; i++) { const x = 64 + rnd(-30, 30), y = 64 + rnd(-26, 26), r = rnd(18, 44);
+      const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = gr; g.fillRect(0, 0, 128, 128); }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
   const wisps = [];
-  function buildWisps(n, cx, cz) {
+  // Cumulus clusters with clear sky between: one dense cluster round the ship's path (it exits near the base edge),
+  // six more scattered round it. Inside the main one, packed layers of small wisps and a few big wall puffs.
+  function puff(x, y, z, size, k, op) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, transparent: true, depthWrite: false, rotation: rnd(0, 6.28),
+      color: new THREE.Color().setRGB(lerp(0.58, 1, k), lerp(0.5, 0.95, k), lerp(0.46, 0.9, k)), opacity: op }));
+    m.position.set(x, y, z); m.scale.setScalar(size); m.renderOrder = 3; scene.add(m); wisps.push(m);
+  }
+  function buildWisps(q, cx, cz) {
     wisps.forEach(w => scene.remove(w)); wisps.length = 0;
-    for (let i = 0; i < n; i++) {
-      const y = rnd(DECK.base - 60, DECK.top), k = (y - DECK.base) / (DECK.top - DECK.base);
-      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, transparent: true, depthWrite: false, rotation: rnd(0, 6.28),
-        color: new THREE.Color().setRGB(lerp(0.55, 1, k), lerp(0.45, 0.93, k), lerp(0.4, 0.86, k)), opacity: lerp(0.35, 0.8, Math.min(1, k * 3)) }));
-      const near = i % 3 === 0;   // a third close to the path so they rush past the camera
-      m.position.set(cx + rnd(-1, 1) * (near ? 90 : 700), y, cz + rnd(-1, 1) * (near ? 90 : 700));
-      m.scale.setScalar(near ? rnd(40, 110) : rnd(120, 320)); m.renderOrder = 3; scene.add(m); wisps.push(m);
+    const H = DECK.top - DECK.base, mx = cx + 260, mz = cz + 160;   // main cluster centre: the path runs near its edge
+    for (let i = 0; i < 260 * q; i++) {   // wisps packed round the path, every depth
+      const y = rnd(DECK.base + 40, DECK.top), r = rnd(12, 160), a = rnd(0, 6.28), k = (y - DECK.base) / H;
+      puff(cx + r * Math.cos(a), y, cz + r * Math.sin(a), rnd(30, 140), 0.45 + 0.55 * k, rnd(0.6, 0.95));
+    }
+    for (let i = 0; i < 10; i++) puff(cx + rnd(-40, 40), rnd(DECK.base + 200, DECK.top - 100), cz + rnd(-40, 40), rnd(160, 260), 0.8, 0.9);   // wall puffs
+    for (let i = 0; i < 230 * q; i++) {   // the main cluster's body: rounded, lit top, flatter shaded base
+      const u = Math.random(), y = DECK.base + H * Math.pow(u, 0.7), w = 650 * Math.sqrt(1 - 0.6 * u) * Math.sqrt(Math.random()), a = rnd(0, 6.28);
+      puff(mx + w * Math.cos(a), y, mz + w * Math.sin(a), rnd(180, 420), 0.4 + 0.6 * u, 0.85);
+    }
+    for (let c = 0; c < 6; c++) {   // other clusters, sky between
+      const a0 = c / 6 * 6.28 + rnd(-0.3, 0.3), d = rnd(2600, 6500), ox = cx + d * Math.cos(a0), oz = cz + d * Math.sin(a0), sc = rnd(0.6, 1.2);
+      for (let i = 0; i < 55 * q; i++) { const u = Math.random(), w = 520 * sc * Math.sqrt(Math.random()), a = rnd(0, 6.28);
+        puff(ox + w * Math.cos(a), DECK.base + H * sc * Math.pow(u, 0.7), oz + w * Math.sin(a), rnd(220, 480) * sc, 0.4 + 0.6 * u, 0.85); }
     }
   }
-  const clouds = [cloudLayer(6550, 90000, 0.75, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
+  const clouds = [cloudLayer(6550, 90000, 0.0, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
   // Sun lens flare (landing-look.js), parked far along the sun direction each frame
   const flare = createFlare(); scene.add(flare.lf);
 
@@ -838,7 +852,7 @@ export async function initLanding(step) {
     plasma.visible = false; wake.visible = false; shock.visible = false; M.tiles.emissiveIntensity = 0; glow.clear();
     ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; burnEl.hidden = true; heatPanel(false);
     fadeOut = 0.8; tBreak = null; trk = null;
-    buildWisps({ high: 240, medium: 150, low: 70 }[qName] ?? 240, flight.s.x ?? 0, flight.s.z ?? 0);
+    buildWisps({ high: 1, medium: 0.6, low: 0.3 }[qName] ?? 1, flight.s.x ?? 0, flight.s.z ?? 0);
     once('belly', 'BELLY FLOP · <b>INSIDE THE CLOUD DECK</b>', 2200);
     refresh();
   }
@@ -1297,8 +1311,25 @@ export async function initLanding(step) {
     dipAmt = Math.max(sstep(SHOT_T - 0.5, SHOT_T, idleT), 1 - sstep(0, 0.6, idleT));
   }
   let dipAmt = 0, tBreak = null, trk = null;
+  // From far away the ship is a small bright point: sunlit steel and leftover heat
+  const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, color: 0xffd8b0, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  glint.visible = false; scene.add(glint);
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
   const ENT_CAM = [[V3(-50, -4, -62), null, V3(0, -8, 0)], [V3(128, -66, -58), V3(108, -58, -82), V3(2, -6, 0)], [V3(-4, 12, 74), V3(-24, 7, 62), V3(-16, 2, 0)]];
+  function cloudFx(dt) {   // vapour trail and torn streamers through the deck
+    const s = flight.s;
+    if (state === 'flight' && s.phase === 'belly' && (tBreak === null || s.t < tBreak + 6) && !paused) {   // vapour trail
+      const sp2 = ship.position;
+      const n = Math.min(40, Math.ceil(dt * 300)); for (let i = 0; i < n; i++) { const f = i / n;
+        dust.emit({ x: sp2.x - s.vx * dt * f, y: sp2.y - s.vh * dt * f + 6, z: sp2.z - s.vz * dt * f, vx: rnd(-1, 1), vy: rnd(-1, 1), vz: rnd(-1, 1),
+          life: 9, s0: 9, s1: 60, a: 0.75, drag: 0.5, rgb: [0.97, 0.95, 0.93] }); }
+    }
+    if (tBreak !== null && state === 'flight' && s.phase === 'belly' && s.t < tBreak + 2.5 && !paused) {   // torn streamers off the flaps
+      if (s.h < DECK.base) once('base', 'CLOUD BASE · <b>6.6 KM</b>', 2000);
+      for (const i of [1, 2, 3, 4]) { const a = ship.localToWorld(_pv.copy(ribbons[i].a));
+        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-4, 4), vy: -s.vh * 0.85 + rnd(-10, 10), vz: rnd(-4, 4), life: rnd(0.6, 1.4), s0: 6, s1: 30, a: 0.35, drag: 0.6, rgb: [0.95, 0.9, 0.86] }); }
+    }
+  }
   function cameraStep(dt) {
     orbitA += dt * (state === 'orbit' ? 0.12 : 0.04);
     if (inOrbit()) {   // orbit pass: the camera moves round the ship at the origin
@@ -1331,11 +1362,13 @@ export async function initLanding(step) {
       return;
     }
     if (camMode === 'still') return;
+    if (state === 'flight') cloudFx(dt);
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
     const name = shot(), sp = ship.position;
+    glint.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
       if (shotName !== 'track') {
-        trk = { p: sp.clone().add(_co.set(-1900, -2100, -1300)), a: sp.clone().add(_lo.set(40, -170, 25)), v: new THREE.Vector3(), t: 0 };
+        trk = { p: sp.clone().add(_co.set(-5200, -4600, -3400)), a: sp.clone().add(_lo.set(60, -260, 30)), v: new THREE.Vector3(), t: 0 };
         if (camera.position.y < 0) camera.position.y = 0;
       }
       trk.t += dt;
@@ -1346,9 +1379,10 @@ export async function initLanding(step) {
         trk.a.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(1.6));       // hand jitter
         if (Math.random() < 0.02) trk.v.add(_lo.set(rnd(-1, 1), rnd(-1, 1), 0).multiplyScalar(25));   // a bump
       }
-      camera.position.copy(trk.p); camera.lookAt(trk.a);
+      camera.position.copy(trk.p); camera.lookAt(_pv.copy(trk.a).add(_lo.set(70, -45, 0)));   // ship off-centre, the cloud in the corner
+      glint.visible = true; glint.position.copy(sp); glint.scale.setScalar(0.07 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2));
       camera.rotateZ(0.6 * DEG * Math.sin(trk.t * 1.3));
-      const fov = lerp(7, 3.2, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
+      const fov = lerp(9, 6, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
       shotName = name; padCam = true; return;
     }
@@ -1372,11 +1406,6 @@ export async function initLanding(step) {
     }
     shotName = name;
     const s = flight.s;
-    if (tBreak !== null && state === 'flight' && s.phase === 'belly' && s.t < tBreak + 2.5 && !paused) {   // torn streamers off the flaps
-      if (s.h < DECK.base) once('base', 'CLOUD BASE · <b>6.6 KM</b>', 2000);
-      for (const i of [1, 2, 3, 4]) { const a = ship.localToWorld(_pv.copy(ribbons[i].a));
-        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-4, 4), vy: -s.vh * 0.85 + rnd(-10, 10), vz: rnd(-4, 4), life: rnd(0.6, 1.4), s0: 6, s1: 30, a: 0.35, drag: 0.6, rgb: [0.95, 0.9, 0.86] }); }
-    }
     const buffet = paused ? 0 : state === 'flight' ? (s.phase === 'belly' ? clamp(s.q / 1100, 0, 1) * 0.5 : s.phase === 'flip' ? 0.8 : 0.35 * sstep(40, 0, s.h)) : 0;
     const inDeck = s.h > DECK.base - 40 && s.h < DECK.top ? 1 : 0;
     const sh = (paused ? 0 : shake) + buffet + (name === 'close' && !paused ? 0.5 + 0.7 * inDeck + (Math.random() < 0.04 ? 1.6 : 0) : 0);
