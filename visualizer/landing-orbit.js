@@ -4,7 +4,7 @@
 // is drawn in a second pass by landing.js at metre scale, with the same camera orientation.
 //
 // Procedural throughout (no texture files):
-//   planet      albedo (dusty highlands, dark basaltic plains, bright dust, polar cap off the ground track), crater fields
+//   planet      albedo (dusty highlands, dark basaltic plains, bright dust, polar caps for late southern spring), crater fields
 //               at four scales (Worley cells: bowl, raised rim, bright ejecta), a canyon system, fine grit; relief shading
 //               from screen-space derivatives of the height, exaggerated so the terminator shows long crater shadows;
 //               detail fades with pixel footprint so it holds from 200 km without shimmering
@@ -89,13 +89,21 @@ const PLANET_FS = /* glsl */`
     c = mix(c, dust, clamp(ej, 0.0, 1.0) * 0.35);
     c *= 0.82 + 0.36 * grit;
     c = mix(c, shadowC, cd * cmask * 0.5);
-    float cap = smoothstep(0.88, 0.92, abs(p.z) + 0.03 * grit);
-    c = mix(c, vec3(0.95, 0.93, 0.9), cap);
+    // Polar caps for late southern spring (Ls ~245, sun ~18 deg south; local +z = north pole). South: the seasonal frost
+    // has retreated to ~80S, patchy, round the bright residual cap (~86S). North: polar night above ~72N; a thin,
+    // dusty seasonal frost from ~62N, mostly in the dark, under a faint polar hood (the haze is added after lighting)
+    float lat = p.z, frostN = fbmf(p * 22.0 + 7.0, foot);
+    float sCap = smoothstep(0.975, 0.99, -lat + 0.012 * (frostN - 0.5)) * smoothstep(0.3, 0.55, frostN + smoothstep(0.995, 0.998, -lat));
+    sCap = max(sCap, smoothstep(0.996, 0.9985, -lat + 0.002 * grit));
+    c = mix(c, vec3(0.95, 0.93, 0.9), sCap);
+    float nCap = smoothstep(0.87, 0.92, lat + 0.03 * (frostN - 0.5)) * smoothstep(0.25, 0.6, frostN + smoothstep(0.92, 0.97, lat));
+    c = mix(c, vec3(0.78, 0.76, 0.74), nCap * 0.7);
     // Light: a narrow red terminator band, a near-black night side with a faint cool ambient
     float mu = dot(N, uSun), d = max(dot(n, uSun), 0.0);
     float day = smoothstep(-0.04, 0.12, mu);
     vec3 term = mix(vec3(1.0, 0.42, 0.22), vec3(1.0), smoothstep(0.0, 0.25, mu));
     vec3 col = c * (d * 1.3 * term * day + 0.035 * vec3(0.55, 0.62, 0.8));
+    col += vec3(0.55, 0.6, 0.68) * smoothstep(0.8, 0.95, lat) * (0.06 * day + 0.006);   // north polar hood
     // Aerial perspective toward the limb
     vec3 V = normalize(cameraPosition - vW);
     float limb = pow(1.0 - max(dot(N, V), 0.0), 4.0);
@@ -229,9 +237,13 @@ export function createOrbitScene(sunDir) {
   scene.add(atmo);
 
   const group = [planet, cloud, atmo];
+  // Season: late southern spring. The planet's north pole (local +z) is tilted so the low orbit sun sits ~18 deg south of
+  // Mars' equator (the most Mars' 25.2 deg obliquity allows is 25.2); that puts the ship's ground track at ~54N, over the
+  // northern plains, still flying along world +X. The pole stays put while the planet turns under the ship about it.
+  const POLE_TILT = -53.7 * Math.PI / 180, SPIN = 1 / Math.cos(-POLE_TILT);   // spin rate: ground track is a 54N circle
   // The canyon: centred a little ahead of the ship's starting point, running roughly along the ground track
   {
-    for (const m of group) m.rotation.set(0.35, 0, 0);
+    for (const m of group) m.rotation.set(POLE_TILT, 0, 0);
     planet.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(planet.matrixWorld).invert().setPosition(0, 0, 0);
     const ahead = 6 * Math.PI / 180;
@@ -250,7 +262,7 @@ export function createOrbitScene(sunDir) {
     // offset from the ship (metres) and orientation, so both passes line up
     set(h, phi, camOffM, quat, t) {
       C.set(0, -(R_MARS + h), 0);
-      for (const m of group) { m.position.copy(C); m.rotation.set(0.35, 0, phi); }
+      for (const m of group) { m.position.copy(C); m.rotation.set(POLE_TILT, 0, phi * SPIN); }
       cloud.material.uniforms.uT.value = t;
       atmoU.uInside.value = h < 150 ? 1 : 0;
       camera.position.copy(camOffM).multiplyScalar(0.001);
