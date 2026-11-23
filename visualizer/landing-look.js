@@ -17,17 +17,17 @@ import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 const preset = o => o;
 export const LOOKS = {
   A: preset({
-    zen: '#3f5a86', mid: '#959aaa', hor: '#d9a084', dust: 0.25,
-    sun: '#fff0dc', sunI: 4.2, hemiSky: '#9aa8c4', hemiGnd: '#7a3418', hemiI: 0.8, fog: 1.0e-5, exposure: 1.6, clouds: 0.12,
-    gShadow: '#5e2a1b', gMid: '#8f4222', gLit: '#c0653a', gHigh: '#d2b4a4', gRock: '#4a2418',
-    contrast: 1.08, sat: 1.12, tintLo: [0.94, 0.96, 1.06], tintHi: [1.05, 1.0, 0.93], vig: 0.32, grain: 0.03,
+    zen: '#4a2a24', mid: '#a0603e', hor: '#d79a6a', dust: 0.2,
+    sun: '#fff0dc', sunI: 4.4, hemiSky: '#b08070', hemiGnd: '#5a2410', hemiI: 0.45, fog: 0.6e-5, exposure: 1.2, clouds: 0.12,
+    gShadow: '#2a0f06', gMid: '#7a2e10', gLit: '#b8521e', gHigh: '#dca066', gRock: '#1e0d07',
+    contrast: 1.2, sat: 1.2, tintLo: [0.94, 0.96, 1.06], tintHi: [1.05, 1.0, 0.93], vig: 0.32, grain: 0.03,
     bloom: [0.55, 0.45, 1.25], flare: 0.6,
   }),
   B: preset({
-    zen: '#c9772d', mid: '#e5a046', hor: '#de9a5c', dust: 0.6,
-    sun: '#ffdcaa', sunI: 3.2, hemiSky: '#e8a050', hemiGnd: '#5a2008', hemiI: 0.9, fog: 2.2e-5, exposure: 1.45, clouds: 0.55,
-    gShadow: '#7a210e', gMid: '#b5401a', gLit: '#cf5a28', gHigh: '#e9ac54', gRock: '#4e1a0c',
-    contrast: 1.06, sat: 1.15, tintLo: [1.04, 0.95, 0.92], tintHi: [1.04, 1.0, 0.9], vig: 0.38, grain: 0.035,
+    zen: '#5e2c16', mid: '#b0642c', hor: '#d28a50', dust: 0.4,
+    sun: '#ffdcaa', sunI: 3.8, hemiSky: '#c88050', hemiGnd: '#4a1806', hemiI: 0.55, fog: 1.0e-5, exposure: 1.15, clouds: 0.55,
+    gShadow: '#2e0f05', gMid: '#82300f', gLit: '#bc561e', gHigh: '#e0a058', gRock: '#200d06',
+    contrast: 1.18, sat: 1.2, tintLo: [1.04, 0.95, 0.92], tintHi: [1.04, 1.0, 0.9], vig: 0.38, grain: 0.035,
     bloom: [0.65, 0.55, 1.2], flare: 0.45,
   }),
   C: preset({

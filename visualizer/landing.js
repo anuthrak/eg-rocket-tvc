@@ -50,7 +50,7 @@ export async function initLanding(step) {
   controls.enableDamping = true; controls.enabled = false; controls.maxPolarAngle = 88 * DEG;
 
   // Afternoon sun through dusty air: a low sun for long shadows; colour and strength come from the active look
-  const SUN = new THREE.Vector3(-0.6, 0.36, -0.71).normalize();    // ~21° up
+  const SUN = new THREE.Vector3(-0.6, 0.28, -0.71).normalize();    // ~17° up: long shadows
   const sun = new THREE.DirectionalLight(0xffe4c2, 3.6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -71,6 +71,7 @@ export async function initLanding(step) {
           vec3 c = mix(uHor, uMid, smoothstep(0.0, 0.22, h));
           c = mix(c, uZen, smoothstep(0.18, 0.85, h));
           float s = max(dot(d, normalize(uSun)), 0.0);
+          c = mix(c, vec3(0.32, 0.5, 0.85) * (0.6 + 0.6 * h), pow(s, 14.0) * 0.6);                // Mars: dust scatters blue round the sun
           c += uSunCol * (pow(s, 900.0) * 30.0 + pow(s, 60.0) * 0.6 + pow(s, 6.0) * 0.12);     // disc (blooms), halo, wide glow
           c = mix(c, uHor * 1.08, uDust * exp(-abs(h - 0.03) * 22.0));                          // dust band hugging the horizon
           c = mix(c, uHor * 0.8, smoothstep(0.0, -0.25, h));
@@ -170,7 +171,12 @@ export async function initLanding(step) {
     const gMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: bump, bumpScale: 2.6, roughness: 1, metalness: 0 });
     gMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, groundU);
-      sh.fragmentShader = 'uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock;\n' + sh.fragmentShader
+      sh.vertexShader = 'varying vec3 vGW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz;');
+      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock; varying vec3 vGW;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(gh(i), gh(i + vec2(1, 0)), f.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), f.x), f.y); }
+        float gf(vec2 p){ return 0.5 * gn(p) + 0.25 * gn(p * 2.03) + 0.125 * gn(p * 4.1) + 0.125 * gn(p * 8.3); }\n` + sh.fragmentShader
         .replace('#include <map_fragment>', `#ifdef USE_MAP
             vec4 sampledDiffuseColor = texture2D(map, vMapUv);
             diffuseColor *= mix(sampledDiffuseColor * 2.2, vec4(1.0), vColor.b);   // detail (averages ~0.45 linear, so x2.2), fading out with distance
@@ -181,6 +187,16 @@ export async function initLanding(step) {
           base = mix(base, uGLit, smoothstep(0.42, 0.82, t));
           base = mix(base, uGHigh, smoothstep(0.86, 1.0, t) * 0.55);
           base = mix(base, uGRock, smoothstep(0.2, 0.65, sl) * 0.8);
+          // Bold shapes that read from altitude: dark basalt dune fields with crest/lee stripes, bright dust and
+          // wind streaks, kept off the landing site
+          vec2 w = vGW.xz;
+          float away = smoothstep(1200.0, 3500.0, length(w));
+          float field = smoothstep(0.52, 0.66, gf(w / 9000.0 + 3.0)) * away;
+          float crest = 0.5 + 0.5 * sin(dot(w, vec2(0.8, 0.6)) / 70.0 + 6.0 * gf(w / 900.0));
+          base = mix(base, uGRock * mix(0.55, 1.6, crest), field * 0.85);
+          float streak = smoothstep(0.55, 0.8, gf(vec2(w.x * 0.8 + w.y * 0.6, (w.y * 0.8 - w.x * 0.6) * 4.0) / 5000.0));
+          base = mix(base, uGHigh * 0.9, streak * (1.0 - field) * 0.4 * away);
+          base *= 0.8 + 0.4 * gf(w / 2500.0 + 7.0);   // broad tone variation
           diffuseColor.rgb *= base;`);
     };
     const ground = new THREE.Mesh(geo, gMat);
@@ -542,7 +558,7 @@ export async function initLanding(step) {
   // grazing angles (long crater shadows), the sun sits ~24° above the limb in forward shots with the arc brightest under
   // it, and the ship is mostly backlit. During the entry it eases to the ground scene's sun, so the cut matches.
   const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
-  const SUN_AZ = [-40, -128], SUN_EL = [5, 21];
+  const SUN_AZ = [-40, -130], SUN_EL = [5, 17];
   const ORB_SUN = sph(SUN_AZ[0], SUN_EL[0]);
   let sunK = -1, envSunK = -1;
   const SUNRISE = /[?&]sunrise/.test(location.search), SUNRISE_DIR = sph(-40, -17.5);
@@ -596,13 +612,14 @@ export async function initLanding(step) {
     if (state === 'falling' || state === 'crashed' || endState === 'crashed') return PHASE_LOOKS.crashed();
     return PHASE_LOOKS.landed();
   }
+  const _fogCool = new THREE.Color(0.62, 0.55, 0.55);
   function applyLook(dt) {
     const [a, b, k] = lookFor();
     blendLooks(lookTarget, a, b ?? a, clamp(k ?? 0, 0, 1));
     easeLook(look, lookTarget, 1 - Math.exp(-dt / 0.7));
     skyU.uZen.value.copy(look.zen); skyU.uMid.value.copy(look.mid); skyU.uHor.value.copy(look.hor);
     skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust;
-    scene.fog.color.copy(look.hor); scene.fog.density = look.fog;
+    scene.fog.color.copy(look.hor).lerp(_fogCool, 0.25); scene.fog.density = look.fog * lerp(1, 0.4, sstep(300, 7000, camera.position.y));   // crisper from height
     sun.color.copy(look.sun); sun.intensity = look.sunI;
     hemi.color.copy(look.hemiSky); hemi.groundColor.copy(look.hemiGnd); hemi.intensity = look.hemiI;
     groundU.uGShadow.value.copy(look.gShadow); groundU.uGMid.value.copy(look.gMid); groundU.uGLit.value.copy(look.gLit);
