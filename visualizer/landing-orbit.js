@@ -116,9 +116,10 @@ const ATMO_FS = /* glsl */`
       alt = 0.0; od = 0.18 / max(-dot(d, nrm), 0.05) * 0.12; }
     float lit = smoothstep(-0.25, 0.35, dot(nrm, uSun));
     float fwd = pow(max(dot(d, uSun), 0.0), 10.0);
-    vec3 glow = vec3(1.0, 0.5, 0.22) * od * (lit * 1.1 + fwd * 0.5);
+    vec3 glow = vec3(1.0, 0.5, 0.22) * od * (lit * 1.0 + fwd * 1.8);
+    float fwd2 = pow(max(dot(d, uSun), 0.0), 40.0);
     float rim = exp(-alt / (uH * 0.18)) * step(uR, b);                                      // the thin bright line
-    glow += vec3(1.0, 0.88, 0.8) * rim * lit * 0.9 + vec3(0.45, 0.6, 1.0) * rim * lit * 0.25;
+    glow += vec3(1.0, 0.9, 0.82) * rim * (lit * 0.8 + fwd2 * 2.5) + vec3(0.45, 0.6, 1.0) * rim * lit * 0.2;   // white-hot line, hottest under the sun
     gl_FragColor = vec4(pow(glow, vec3(2.2)) * 1.7, 1.0);
   }`;
 
@@ -190,7 +191,7 @@ export function createOrbitScene(sunDir) {
 
   // Sun: a star-burst sprite, faded by how much of the disc clears the limb (set each frame)
   const burst = new THREE.Sprite(new THREE.SpriteMaterial({ map: starburstTex(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: 0xffffff }));
-  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.045); scene.add(burst);
+  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.05); scene.add(burst);
 
   // Planet
   const planetU = { uSun: { value: sun }, uCanyonC: { value: new THREE.Vector3(1, 0, 0) }, uCanyonA: { value: new THREE.Vector3(0, 0, 1) },
@@ -238,10 +239,12 @@ export function createOrbitScene(sunDir) {
     planetU.uCanyonA.value.set(Math.cos(ahead), -Math.sin(ahead), 0.25).normalize().applyMatrix4(inv).normalize();
   }
   const _o = new THREE.Vector3();
-  let sunVis = 1;
+  let sunVis = 1, burstDir = null;
   return {
     scene, camera,
     get sunVisible() { return sunVis; },
+    // Cinematic cheat (?sunrise): draw the sun disc and glare here instead of at the real sun (null = real)
+    setBurstDir(v) { burstDir = v; },
     setQuality(oct, pr) { planetU.uOct.value = oct; scene.userData.starMat.uniforms.uPR.value = pr; },
     // h: ship altitude (km); phi: how far the planet has turned under the ship (rad); camOffM / quat: the ship camera's
     // offset from the ship (metres) and orientation, so both passes line up
@@ -254,10 +257,10 @@ export function createOrbitScene(sunDir) {
       camera.quaternion.copy(quat);
       const near = Math.max(0.05, h * 0.25);
       if (Math.abs(camera.near - near) / near > 0.2) { camera.near = near; camera.updateProjectionMatrix(); }
-      burst.position.copy(sun).multiplyScalar(7e5);
+      burst.position.copy(burstDir ?? sun).multiplyScalar(7e5);
       // How much of the sun clears the planet (+ a soft margin through the atmosphere)
       _o.copy(camera.position).sub(C);
-      const tc = -_o.dot(sun), b = tc > 0 ? _o.addScaledVector(sun, tc).length() : 1e9;
+      const sd = burstDir ?? sun, tc = -_o.dot(sd), b = tc > 0 ? _o.addScaledVector(sd, tc).length() : 1e9;
       sunVis = THREE.MathUtils.smoothstep(b, R_MARS - 5, R_MARS + 45);
       burst.material.opacity = sunVis;
       burst.visible = sunVis > 0.003;

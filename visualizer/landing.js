@@ -405,9 +405,9 @@ export async function initLanding(step) {
   const plumeInner = new THREE.Mesh(plumeGeo, plumeMat(0xf0f4ff, 1.3));
   plume.add(plumeOuter, plumeInner);
   const engineLight = new THREE.PointLight(0xaac4ff, 0, 220, 1.6); engineLight.position.y = -6; plume.add(engineLight);
-  // Vacuum plumes (RVacs): in vacuum there is no air to light up, so mostly the hot nozzle shows. Per engine a short,
-  // narrow, bright core at the nozzle exit (falls off along its length), plus a faint bluish haze of soft particles in a
-  // ~35° cone (emitted in deorbitFx). Startup: a flicker and an over-bright flash; shutdown: the core pinches out.
+  // Engine fire (RVacs), cinematic: a long bright core per engine (white-hot at the nozzle → blue-violet → faint pink),
+  // glowing fire particles streaming along it (fireFx), a flare at each nozzle; startup stutters and over-expands, the
+  // shutdown collapses back into the nozzle with a sputter.
   const coreMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
     uniforms: { uK: { value: 0 }, uT: { value: 0 }, uFl: { value: 0 } },
@@ -415,24 +415,39 @@ export async function initLanding(step) {
       void main(){ vY = position.y; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `uniform float uK, uT, uFl; varying float vY; varying vec3 vN; varying vec3 vV;
       void main(){ float a = clamp(1.0 + vY, 0.0, 1.0);                       // 1 at the nozzle, 0 at the tip
-        float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.6);
-        float fl = 1.0 + uFl * (0.5 * sin(uT * 83.0) + 0.3 * sin(uT * 41.0 + vY * 9.0));
-        vec3 c = mix(vec3(0.45, 0.6, 1.0), vec3(1.0, 0.97, 0.94), pow(a, 3.0));
-        gl_FragColor = vec4(c * (pow(a, 6.0) * 3.0 + pow(a, 2.0) * 0.25) * edge * uK * fl, 1.0); }`,
+        float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.2);
+        float rip = 0.85 + 0.15 * sin(vY * 30.0 - uT * 60.0);
+        float fl = 1.0 + uFl * (0.6 * sin(uT * 83.0) + 0.4 * sin(uT * 41.0 + vY * 9.0));
+        vec3 c = mix(vec3(1.0, 0.45, 0.75), vec3(0.45, 0.45, 1.0), smoothstep(0.0, 0.55, a));   // pink tail → blue-violet
+        c = mix(c, vec3(1.0, 0.97, 0.95), smoothstep(0.6, 0.95, a));                            // white-hot at the nozzle
+        float I = pow(a, 6.0) * 2.2 + pow(a, 1.4) * 0.55;
+        gl_FragColor = vec4(c * I * edge * uK * fl * rip, 1.0); }`,
   });
-  const coreGeo = new THREE.CylinderGeometry(0.85, 2.4, 1, 24, 1, true); coreGeo.translate(0, -0.5, 0);
-  const vacCores = rvacs.map(e => { const m = new THREE.Mesh(coreGeo, coreMat.clone()); m.position.y = -3.4; m.visible = false; e.add(m); return m; });
-  const engLight = new THREE.PointLight(0xbcd0ff, 0, 40, 1.5); engLight.position.y = -4; airframe.add(engLight);
-  const vacLvl = [0, 0, 0], vacFl = [0, 0, 0];
-  // k[i]: each engine's level 0..1, fl[i]: startup flicker 0..1
+  const coreGeo = new THREE.CylinderGeometry(0.95, 3.2, 1, 28, 1, true); coreGeo.translate(0, -0.5, 0);
+  const innerGeo = new THREE.CylinderGeometry(0.6, 1.2, 1, 20, 1, true); innerGeo.translate(0, -0.5, 0);
+  const nozzleTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(220,210,255,0.8)');
+    gr.addColorStop(0.5, 'rgba(150,120,255,0.18)'); gr.addColorStop(1, 'rgba(120,80,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const vacCores = rvacs.map(e => {
+    const g = new THREE.Group(); g.position.y = -3.4; g.visible = false; e.add(g);
+    const outer = new THREE.Mesh(coreGeo, coreMat.clone()), inner = new THREE.Mesh(innerGeo, coreMat.clone());
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({ map: nozzleTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    flare.position.y = -0.6; g.add(outer, inner, flare);
+    return { g, outer, inner, flare };
+  });
+  const engLight = new THREE.PointLight(0xc8b8ff, 0, 45, 1.4); engLight.position.y = -4; airframe.add(engLight);
+  // k[i]: each engine's level 0..1, fl[i]: startup roughness 0..1
   function setVac(k, fl, t) {
-    vacCores.forEach((m, i) => {
-      const v = k[i]; vacLvl[i] = v; vacFl[i] = fl[i] ?? 0; m.visible = v > 0.01;
-      const flick = 1 + vacFl[i] * 0.35 * Math.sin(t * 97 + i * 2);
-      m.scale.set(0.6 + 0.4 * v, 7 * v * flick, 0.6 + 0.4 * v);
-      const u = m.material.uniforms; u.uK.value = v * (1 + 1.2 * vacFl[i]); u.uT.value = t + i; u.uFl.value = vacFl[i];
+    vacCores.forEach((c, i) => {
+      const v = k[i], f = fl[i] ?? 0; c.g.visible = v > 0.01;
+      const flick = 1 + f * 0.4 * Math.sin(t * 97 + i * 2) + 0.04 * Math.sin(t * 61 + i);
+      const len = 30 * v * flick * (1 + 0.5 * f), wide = (0.75 + 0.25 * v) * (1 + 0.7 * f);   // startup: over-expanded
+      c.outer.scale.set(wide, len, wide); c.inner.scale.set(wide, len * 0.45, wide);
+      for (const m of [c.outer, c.inner]) { const u = m.material.uniforms; u.uK.value = v * (m === c.inner ? 1.3 : 0.8) * (1 + 0.6 * f); u.uT.value = t + i; u.uFl.value = f; }
+      c.flare.scale.setScalar(4 + 5 * v * flick); c.flare.material.opacity = Math.min(1, v * 0.8 * flick);
     });
-    engLight.intensity = (k[0] + k[1] + k[2]) / 3 * 120;
+    engLight.intensity = (k[0] + k[1] + k[2]) / 3 * 180 * (1 + 0.15 * Math.sin(t * 53));
   }
   function setPlume(thr, t) {
     plume.visible = thr > 0.01;
@@ -489,12 +504,14 @@ export async function initLanding(step) {
 
   // ---------- Orbit and entry: the planet pass (landing-orbit.js) + the ship pass at metre scale ----------
   await step?.(0.92, 'Parking in Mars orbit');
-  // In orbit the sun is on the day side: 25° up, off to the side of the ground track, so the ground below is lit with
-  // long shadows and the limb-glow arc is on its sunlit side ahead. During the entry it eases to the ground scene's sun.
+  // In orbit the sun is low ahead (5° above the ground under the ship, near the direction of travel): the ground is lit at
+  // grazing angles (long crater shadows), the sun sits ~24° above the limb in forward shots with the arc brightest under
+  // it, and the ship is mostly backlit. During the entry it eases to the ground scene's sun, so the cut matches.
   const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
-  const SUN_AZ = [-100, -128], SUN_EL = [25, 21];
+  const SUN_AZ = [-40, -128], SUN_EL = [5, 21];
   const ORB_SUN = sph(SUN_AZ[0], SUN_EL[0]);
   let sunK = -1, envSunK = -1;
+  const SUNRISE = /[?&]sunrise/.test(location.search), SUNRISE_DIR = sph(-40, -17.5);
   function orbitSun(k) {
     k = clamp(k, 0, 1); if (Math.abs(k - sunK) < 1e-4) return; sunK = k;
     ORB_SUN.copy(sph(lerp(SUN_AZ[0], SUN_AZ[1], k), lerp(SUN_EL[0], SUN_EL[1], k)));
@@ -506,8 +523,8 @@ export async function initLanding(step) {
   let rebuildOrbitEnv;
   // Ship lighting in orbit: hard sun key, warm bounce up from the planet, a cool rim from the limb, near-black ambient
   // The real sun is the key; a faint fill from the camera side (~12%) so the shadow side isn't dead black
-  const shipKey = new THREE.DirectionalLight(0xffe8d0, 0.55); shipKey.position.copy(sph(150, 25)).multiplyScalar(100);
-  const shipSun = new THREE.DirectionalLight(0xfff4e8, 4.6); shipSun.position.copy(ORB_SUN).multiplyScalar(100); shipScene.add(shipSun);
+  const shipKey = new THREE.DirectionalLight(0xffe8d0, 0.6); shipKey.position.copy(sph(150, 25)).multiplyScalar(100);
+  const shipSun = new THREE.DirectionalLight(0xfff4e8, 3.2); shipSun.position.copy(ORB_SUN).multiplyScalar(100); shipScene.add(shipSun);
   const shipBounce = new THREE.DirectionalLight(0xff7a3a, 0.75); shipBounce.position.set(0.3, -1, 0.1).multiplyScalar(100);   // the lit ground below
   const shipRim = new THREE.DirectionalLight(0x9bb4ff, 0.8); shipRim.position.set(-0.6, 0.15, 0.8).multiplyScalar(100);
   shipScene.add(shipKey, shipBounce, shipRim, new THREE.AmbientLight(0x1a1c24, 0.25));
@@ -521,7 +538,7 @@ export async function initLanding(step) {
         vec3 ground = vec3(0.55, 0.2, 0.07) * (0.6 + 0.6 * smoothstep(-0.5, 0.8, dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSun.x, 0.0, uSun.z))))) * max(uSun.y * 2.4, 0.15);
         vec3 c = d.y < lim ? ground : vec3(0.0);
         c += vec3(1.0, 0.55, 0.25) * exp(-abs(d.y - lim) * 40.0) * 0.8;
-        c += vec3(1.0, 0.96, 0.9) * pow(max(dot(d, normalize(uSun)), 0.0), 400.0) * 12.0;
+        c += vec3(1.0, 0.96, 0.9) * pow(max(dot(d, normalize(uSun)), 0.0), 400.0) * 3.0;
         gl_FragColor = vec4(c, 1.0); }` })));
     let rt = null;
     rebuildOrbitEnv = () => { const n = pmrem.fromScene(env, 0); shipScene.environment = n.texture; rt?.dispose(); rt = n; };
@@ -563,7 +580,7 @@ export async function initLanding(step) {
     if (state === 'orbit' && dipAmt > 0.001) { post.grade.uniforms.uFade.value = dipAmt; post.grade.uniforms.uFadeCol.value.setRGB(0, 0, 0); }
     else post.grade.uniforms.uFadeCol.value.copy(look.hor).lerp(new THREE.Color(1, 0.96, 0.92), 0.6);
     flashAmt *= Math.exp(-dt * 5);
-    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 0.25 * orbit.sunVisible);
+    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 0.2 * orbit.sunVisible);
     // Reflections: rebuild the environment now and then while the look is changing
     envTimer -= dt;
     const cd = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
@@ -973,23 +990,26 @@ export async function initLanding(step) {
     const after = Math.max(0, t - t1); return e + (u >= 1 ? 0.012 * Math.sin(after * 7) * Math.exp(-after * 2.5) : 0); };
   function deorbitPitch(t) { return 88 + 180 * slew(t, ...DEO.flip1) - 184 * slew(t, ...DEO.flip2); }
   const IGN_GAP = 0.1;
-  const vacLevel = t => [0, 1, 2].map(i => { const t0 = DEO.ign + i * IGN_GAP;
-    return t < t0 ? 0 : t < DEO.off ? Math.min(1, (t - t0) / 0.35) * 0.85 : Math.max(0, 1 - (t - DEO.off) / 0.2) * 0.85; });
-  // Exhaust haze: soft bluish particles from each nozzle exit in a ~35° cone; at shutdown a slow white puff
-  const _hx = new THREE.Vector3(), _hd = new THREE.Vector3(), _ha = new THREE.Vector3();
+  const stutter = (x, seed) => (Math.sin(x * 47 + seed * 3.1) > -0.2 ? 1 : 0.15);
+  const vacLevel = t => [0, 1, 2].map(i => { const t0 = DEO.ign + i * IGN_GAP, to = DEO.off + i * 0.05;
+    if (t < t0) return 0;
+    if (t < to) { const st = t - t0; return (st < 0.3 ? stutter(st, i) * (0.5 + st / 0.6) : Math.min(1, 0.5 + st)) * 0.9; }
+    const sd = t - to; return sd > 0.25 ? 0 : (1 - sd / 0.25) * stutter(sd * 1.7, i + 5) * 0.9; });
+  // Fire particles: fast, glowing, short-lived, streaming along each plume in a ~17° cone; at shutdown a last faint puff
+  const _hx = new THREE.Vector3(), _hd = new THREE.Vector3();
   function hazeFx(dt, k, puff) {
     rvacs.forEach((e, i) => {
       if (k[i] < 0.02 && !puff) return;
       e.updateWorldMatrix(true, false);
-      _hx.set(0, -3.4, 0).applyMatrix4(e.matrixWorld);
-      _ha.set(0, -1, 0).transformDirection(e.matrixWorld);
-      const n = puff ? 6 : Math.round(rnd(0, 1) + k[i] * 120 * dt * 3);
+      _hx.set(0, -3.6, 0).applyMatrix4(e.matrixWorld);
+      const n = puff ? 5 : Math.round(rnd(0, 1) + k[i] * 260 * dt);
       for (let j = 0; j < n; j++) {
-        const th = Math.acos(1 - Math.random() * (1 - Math.cos(35 * DEG))), ph = rnd(0, Math.PI * 2);
+        const cone = puff ? 50 : 17, th = Math.acos(1 - Math.random() * (1 - Math.cos(cone * DEG))), ph = rnd(0, Math.PI * 2);
         _hd.set(Math.sin(th) * Math.cos(ph), -Math.cos(th), Math.sin(th) * Math.sin(ph)).transformDirection(e.matrixWorld);
-        const sp = puff ? rnd(6, 14) : rnd(60, 110), w = 1 - th / (35 * DEG);
-        haze.emit({ x: _hx.x, y: _hx.y, z: _hx.z, vx: _hd.x * sp, vy: _hd.y * sp, vz: _hd.z * sp, life: puff ? rnd(1.2, 2.2) : rnd(0.35, 0.6),
-          s0: puff ? 1.5 : 1.0, s1: puff ? rnd(9, 14) : rnd(7, 12), a: puff ? 0.1 : 0.05 + 0.08 * w, drag: 0, rgb: puff ? [0.9, 0.92, 1] : [0.55, 0.7, 1] });
+        const sp = puff ? rnd(5, 12) : rnd(180, 260), hot = Math.random();
+        haze.emit({ x: _hx.x, y: _hx.y, z: _hx.z, vx: _hd.x * sp, vy: _hd.y * sp, vz: _hd.z * sp, life: puff ? rnd(0.8, 1.4) : rnd(0.06, 0.14),
+          s0: puff ? 1.2 : 1.4, s1: puff ? rnd(6, 9) : rnd(2.5, 4.5), a: puff ? 0.12 : 0.12 + 0.16 * hot, drag: 0,
+          rgb: puff ? [0.75, 0.6, 1] : hot > 0.6 ? [1, 0.95, 1] : hot > 0.25 ? [0.7, 0.6, 1] : [1, 0.55, 0.8] });
       }
     });
   }
@@ -1016,8 +1036,8 @@ export async function initLanding(step) {
     // Engines
     const k = vacLevel(t), fl = [0, 1, 2].map(i => { const t0 = DEO.ign + i * IGN_GAP; return t > t0 && t < t0 + 0.3 ? 1 - (t - t0) / 0.3 : 0; });
     setVac(k, fl, simClock);
-    if (t > DEO.ign && !calls.ign) { calls.ign = true; flashScreen(0.08); shake = 0.5; callout('IGNITION', 1200); }
-    hazeFx(dt, k, t > DEO.off && t < DEO.off + 0.25);
+    if (t > DEO.ign && !calls.ign) { calls.ign = true; flashScreen(0.12); shake = 0.6; callout('IGNITION', 1200); }
+    hazeFx(dt, k, t > DEO.off + 0.25 && t < DEO.off + 0.45);
     if (t > DEO.ign) rvacMat.emissiveIntensity = t < DEO.off ? Math.min(1.6, rvacMat.emissiveIntensity + dt * 0.5) : rvacMat.emissiveIntensity * Math.exp(-dt * 0.6);
     // Small gimbal corrections on the centre engines while burning
     const burning = t > DEO.burn[0] && t < DEO.off;
@@ -1046,7 +1066,7 @@ export async function initLanding(step) {
     const t = et, asp = camera.aspect, far = Math.max(1, 1.5 / Math.max(asp, 0.4));
     if (t <= dt + 1e-6 || deoShot === '') { deoStartPos.copy(camera.position); deoStartLook.copy(orbLook); deoShot = 'go'; }
     const u = t / L.ENTRY.deorbit;
-    const viewAz = lerp(-72, -46, u), viewEl = lerp(-17, -21, u);
+    const viewAz = lerp(-74, -50, u), viewEl = lerp(-9, -12, u);
     const zoom = 1 - 0.15 * sstep(DEO.ign - 0.6, DEO.ign + 0.6, t) * (1 - sstep(DEO.off + 0.3, DEO.flip2[0] + 0.6, t));
     const d = 108 * zoom * far;
     _pv.copy(sph(viewAz, viewEl)).multiplyScalar(-d).add(_co.set(0, 4, 0));        // camera: back along the view, a little up
@@ -1148,9 +1168,9 @@ export async function initLanding(step) {
   // Idle in orbit: composed shots, each a slow drift, cut through a short dip to black
   //   [ship azimuth, ship elevation (deg, from the camera), view azimuth, view elevation, distance from → to (m), roll (deg)]
   const IDLE = [
-    { ship: [-30, -18], view: [-44, -24], d: [125, 108], roll: [1.5, -0.5] },     // hero 3/4: ship lit, the limb arc above it
-    { ship: [-40, -21], view: [-44, -24], d: [520, 470], roll: [0, 0.6] },        // wide: the ship small against the lit curve
-    { ship: [-28, -17], view: [-46, -23], d: [112, 98], roll: [-0.8, 0.4] },
+    { ship: [-26, -13], view: [-38, -9], d: [125, 108], roll: [1.5, -0.5] },      // hero: toward the sun, the arc and glare, the ship rim-lit
+    { ship: [-34, -15], view: [-38, -10], d: [520, 470], roll: [0, 0.6] },        // wide: the ship small, sun and arc in frame
+    { ship: [-24, -12], view: [-40, -9], d: [112, 98], roll: [-0.8, 0.4] },
     { ship: [12, -14], view: [-6, -20], d: [105, 94], roll: [2, 0] },               // low: along the belly, lit ground below
   ];
   const SHOT_T = 11;
@@ -1370,7 +1390,10 @@ export async function initLanding(step) {
       cameraStep(dt);
       fadeAmt = ent.fade;
       orbit.set(ent.h / 1000, phi, camera.position, camera.quaternion, simClock);
-      orbitFlare.lf.position.copy(ORB_SUN).multiplyScalar(6e5);
+      // ?sunrise: in the hero idle shots, put the sun disc and glare right on the limb (a film cheat; the light stays real)
+      const cheat = SUNRISE && state === 'orbit' && idleI !== 1 && idleI !== 3;
+      orbit.setBurstDir(cheat ? SUNRISE_DIR : null);
+      orbitFlare.lf.position.copy(cheat ? SUNRISE_DIR : ORB_SUN).multiplyScalar(6e5);
       applyLook(dt);
       post.setMode(true);
       if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
