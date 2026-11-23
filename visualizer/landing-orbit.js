@@ -124,7 +124,7 @@ const ATMO_FS = /* glsl */`
       alt = 0.0; od = 0.18 / max(-dot(d, nrm), 0.05) * 0.12; }
     float lit = smoothstep(-0.25, 0.35, dot(nrm, uSun));
     float fwd = pow(max(dot(d, uSun), 0.0), 10.0);
-    vec3 glow = vec3(1.0, 0.5, 0.22) * od * (lit * 1.0 + fwd * 1.8);
+    vec3 glow = vec3(1.0, 0.5, 0.22) * od * (lit * 1.0 + fwd * 1.8) * 0.85;   // broad haze; the rim line below stays full
     float fwd2 = pow(max(dot(d, uSun), 0.0), 40.0);
     float rim = exp(-alt / (uH * 0.18)) * step(uR, b);                                      // the thin bright line
     glow += vec3(1.0, 0.9, 0.82) * rim * (lit * 0.8 + fwd2 * 2.5) + vec3(0.45, 0.6, 1.0) * rim * lit * 0.2;   // white-hot line, hottest under the sun

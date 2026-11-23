@@ -588,9 +588,9 @@ export async function initLanding(step) {
   // Ship lighting in orbit: hard sun key, warm bounce up from the planet, a cool rim from the limb, near-black ambient
   // The real sun is the key; a faint fill from the camera side (~12%) so the shadow side isn't dead black
   const shipKey = new THREE.DirectionalLight(0xffe8d0, 0.6); shipKey.position.copy(sph(150, 25)).multiplyScalar(100);
-  const shipSun = new THREE.DirectionalLight(0xfff4e8, 3.2); shipSun.position.copy(ORB_SUN).multiplyScalar(100); shipScene.add(shipSun);
-  const shipBounce = new THREE.DirectionalLight(0xff7a3a, 0.75); shipBounce.position.set(0.3, -1, 0.1).multiplyScalar(100);   // the lit ground below
-  const shipRim = new THREE.DirectionalLight(0x9bb4ff, 0.8); shipRim.position.set(-0.6, 0.15, 0.8).multiplyScalar(100);
+  const shipSun = new THREE.DirectionalLight(0xfff4e8, 3.6); shipSun.position.copy(ORB_SUN).multiplyScalar(100); shipScene.add(shipSun);
+  const shipBounce = new THREE.DirectionalLight(0xff7a3a, 0.5); shipBounce.position.set(0.3, -1, 0.1).multiplyScalar(100);   // the lit ground below
+  const shipRim = new THREE.DirectionalLight(0x9bb4ff, 1.0); shipRim.position.set(-0.6, 0.15, 0.8).multiplyScalar(100);
   shipScene.add(shipKey, shipBounce, shipRim, new THREE.AmbientLight(0x1a1c24, 0.25));
   // Its reflections: black space, the bright orange planet below with the limb band, the sun
   {
@@ -1358,7 +1358,6 @@ export async function initLanding(step) {
   const IDLE = [
     { ship: [-26, -13], view: [-38, -9], d: [125, 108], roll: [1.5, -0.5] },      // hero: toward the sun, the arc and glare, the ship rim-lit
     { ship: [-34, -15], view: [-38, -10], d: [520, 470], roll: [0, 0.6] },        // wide: the ship small, sun and arc in frame
-    { ship: [-24, -12], view: [-40, -9], d: [112, 98], roll: [-0.8, 0.4] },
     { ship: [12, -14], view: [-6, -20], d: [105, 94], roll: [2, 0] },               // low: along the belly, lit ground below
   ];
   const SHOT_T = 11;
@@ -1652,7 +1651,7 @@ export async function initLanding(step) {
       fadeAmt = ent.fade;
       orbit.set(ent.h / 1000, phi, camera.position, camera.quaternion, simClock);
       // ?sunrise: in the hero idle shots, put the sun disc and glare right on the limb (a film cheat; the light stays real)
-      const cheat = SUNRISE && state === 'orbit' && idleI !== 1 && idleI !== 3;
+      const cheat = SUNRISE && state === 'orbit' && idleI !== 1 && idleI !== 2;
       orbit.setBurstDir(cheat ? SUNRISE_DIR : null);
       orbitFlare.lf.position.copy(cheat ? SUNRISE_DIR : ORB_SUN).multiplyScalar(6e5);
       applyLook(dt);

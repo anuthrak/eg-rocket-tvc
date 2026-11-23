@@ -42,7 +42,7 @@ export const LOOKS = {
     sun: '#fff4e6', sunI: 3.4, hemiSky: '#8a96b8', hemiGnd: '#6a3018', hemiI: 0.4, fog: 0, exposure: 1.05, clouds: 0.7,
     gShadow: '#4f1f08', gMid: '#773816', gLit: '#a5541f', gHigh: '#c6733c', gRock: '#2e1204',
     contrast: 1.16, sat: 1.15, tintLo: [0.9, 1.0, 1.06], tintHi: [1.06, 1.0, 0.92], vig: 0.5, grain: 0.025,
-    bloom: [0.85, 0.55, 1.25], flare: 1.0,
+    bloom: [0.65, 0.55, 1.25], flare: 0.8,
   }),
 };
 const COLOR_KEYS = ['zen', 'mid', 'hor', 'sun', 'hemiSky', 'hemiGnd', 'gShadow', 'gMid', 'gLit', 'gHigh', 'gRock'];
