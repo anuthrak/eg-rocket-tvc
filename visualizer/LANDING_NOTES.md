@@ -18,7 +18,7 @@ CHANGELOG "Unreleased" lists every step. Read this file first in a new session.
   `entryHV`/`qRaw`, `tileT`, heat panel `heatPanel()`); cameras `cameraStep` (`ENT_CAM`, `shot()`, `camGoal`, `track`
   long-lens operator `trk`, `glint`); `cloudFx` (vapour trail, streamers, belly speed motes, chill-down, `bGust`);
   `placeShip` (flap steering + wobble in belly); `reset()` (full reset for Fly again); `__lnd` debug API (`?debug`):
-  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`, `flip(t)`, `at(h)`. Plumes: `ENG`, `setPlume(thr,t,ft)`, `plumeFx`, `nozLight`/`poolLight`/`pool`, shimmer uniforms `uSh*` in the grade pass.
+  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`, `flip(t)`, `at(h)`. Plumes: `ENG`, `setPlume(thr,t,ft)`, `plumeFx`, `nozLight`/`poolLight`/`pool`, shimmer uniforms `uSh*` in the grade pass. Section 8: `setStrip`/`cue` (prompt strip), `gimArrow`/`tiltArrow`/`ghosts`/`cueRing`, `insScene` rendered after the composer with a scissor (`renderInset`), `showTag`. `callout()` still shows only `sys`; rig prompts go through the strip.
 - `landing-orbit.js`: orbit planet (craters, canyon, caps for late southern spring: `POLE_TILT`, `SPIN`), clouds, atmosphere,
   stars, sun burst.
 - `landing-look.js`: looks A/B/C/space (palette now matches the orbit planet), grade shader, bloom, quality, flare.
@@ -31,11 +31,11 @@ with chill-down and "Flip in 3·2·1" → flip → TVC landing → touchdown/cra
 
 ## Done (sections)
 Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (+ nose-up 70° AoA, smooth warp) ·
-4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer).
+4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer) · 8 rig link (prompt strip, ship arrows, Your-rocket CAD inset, push cues, recovery tag).
 
 ## Next
-1. Section 8: TVC readability (gimbal arrows, rig inset, clear push cause/effect).
-2. Landing legs deploy, touchdown dust storm, crash (9–11).
+1. Landing legs deploy (9), touchdown (10), crash (11).
+2. Untested on the real rig / Demo mode feed: section 8 checked in Simulated only.
 3. Optional polish left out to save tokens: heat shimmer, uneven tile glow, entry grade, focus-hunt blur, ship shadow on
    clouds/ground, flap-angle HUD graphic, mesa/canyon banding, canyon ground haze, cloud shadows.
 

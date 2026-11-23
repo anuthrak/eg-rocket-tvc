@@ -765,6 +765,9 @@
     </div>
 
     <div id="lndCallout" class="callout"></div>
+    <div class="lnd-inset" id="lndInset" hidden><div class="lnd-inset-l" id="lndInsetL">YOUR ROCKET</div>
+      <div class="lnd-inset-k"><span class="p">Tilt <b id="lndInsT">0.0°</b></span><span class="y">Nozzle <b id="lndInsG">0.0°</b></span></div></div>
+    <div class="lnd-tag" id="lndTag" hidden></div>
     <div class="lnd-burn" id="lndBurn" hidden><div class="ms-label">Deorbit burn · RVac ×3</div><div class="lnd-burn-row"><span>Δv <b id="lndDv">0.0</b> m/s</span><span>Periapsis <b id="lndPe">200</b> km</span></div></div>
     <div class="lnd-replay" id="lndReplay" hidden>REPLAY · ½ SPEED</div>
     <div class="lnd-paused">PAUSED</div>
@@ -784,6 +787,7 @@
       <div class="lnd-center">
         <div class="mission-name">MARS LANDING · TVC IN THE LOOP</div>
         <div id="lndPhase" class="lnd-phase">READY</div>
+        <div id="lndPrompt" class="lnd-prompt"></div>
         <div class="lnd-chips" id="lndChips"><span>Orbit</span><span>Entry</span><span>Belly flop</span><span>Flip</span><span>TVC landing</span><span>Touchdown</span></div>
         <div class="lnd-warp" id="lndWarp" hidden>×30 time warp</div>
         <div class="lnd-loopnote" id="lndLoopNote"></div>
@@ -796,6 +800,7 @@
           <line class="gm-axis" x1="-46" y1="0" x2="46" y2="0"/><line class="gm-axis" x1="0" y1="-46" x2="0" y2="46"/>
           <polyline id="lndTrail" class="lnd-trail" points=""/>
           <line id="lndTiltVec" class="lnd-tvec" x1="0" y1="0" x2="0" y2="0"/>
+          <line id="lndGimVec" class="lnd-gvec" x1="0" y1="0" x2="0" y2="0"/>
           <circle id="lndGimDot" class="lnd-gdot" r="3.2"/>
           <circle id="lndTiltDot" class="lnd-tdot" r="4.6"/>
         </svg>
