@@ -822,6 +822,7 @@ export async function initLanding(step) {
 
   let calloutTimer = 0;
   function callout(html, ms = 2200, cls = '') {
+    if (!cls.includes('sys')) return;   // cinematic banners removed (distracting); only system notices show
     const c = $('lndCallout'); c.innerHTML = html; c.className = 'callout show ' + cls;
     clearTimeout(calloutTimer); calloutTimer = setTimeout(() => { c.className = 'callout ' + cls; }, ms);
   }
@@ -1222,7 +1223,12 @@ export async function initLanding(step) {
     ship.position.set(s.x + ax.x * CG_H(), s.h + ax.y * CG_H(), s.z + ax.z * CG_H());
     const gx = s.gA.x + dev.gx * VIS_GIMBAL, gy = s.gA.y + dev.gy * VIS_GIMBAL;
     tvc.rotation.set(gx * DEG, 0, -gy * DEG);
-    if (s.phase === 'belly') setFlaps(0.3 + 0.35 * s.flap, 0.3 - 0.35 * s.flap);
+    if (s.phase === 'belly') {   // flaps steer: pitch trim from the sim, a roll fight against wobble and gusts, micro-corrections
+      const wob = (2.2 * Math.sin(s.t * 1.7) + 1.1 * Math.sin(s.t * 3.9 + 1.3) + 4 * bGust.k * bGust.d) * DEG;
+      ship.rotateY(wob); ship.rotateZ(0.6 * wob);
+      const roll = -(0.22 * Math.sin(s.t * 1.7 + 0.6) + 0.1 * Math.sin(s.t * 3.9 + 2.1) + 0.6 * bGust.k * bGust.d);
+      for (const f of flaps) f.pivot.rotation.y = f.side * ((f.fwd ? 0.3 + 0.35 * s.flap : 0.3 - 0.35 * s.flap) + 0.5 * f.side * roll + 0.03 * Math.sin(s.t * 17 + f.side * 3 + (f.fwd ? 1 : 0)));
+    }
     else { const k = s.phase === 'flip' ? sstep(0, 3, s.t - s.tPh) : 1; setFlaps(lerp(0.3, -0.2, k), lerp(0.3, -0.2, k)); }
     setLegs(sstep(0, 1, legK));
   }
@@ -1279,7 +1285,7 @@ export async function initLanding(step) {
       if (s.phase === 'belly') {   // shaky close-up through the deck → long-lens tracking cam as it pierces the base
         if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; }
         if (tBreak === null) return 'close';
-        return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.5 ? 'flaps' : 'high';
+        return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.2 ? 'flaps' : s.t < tBreak + 9.4 ? 'top' : 'side';
       }
       if (s.phase === 'flip') return 'flip';
       return s.h > 70 ? 'chase' : 'pad';
@@ -1291,6 +1297,8 @@ export async function initLanding(step) {
     const h = flight.s.h;
     switch (name) {
       case 'wide': _co.set(-105 + 20 * Math.sin(orbitA), 42, -118); _lo.set(0, -8, 0); break;
+      case 'top': _co.set(-34, 150, -22); _lo.set(0, -260, 0); break;              // above, looking down past it: the ground rushing up
+      case 'side': _co.set(-40, 2, -250); _lo.set(0, -12, 0); break;               // level, long lens, against the horizon
       case 'close': _co.set(-19, 3.5, -15); _lo.set(3, -2, 0); break;            // riding along by the aft flap
       case 'flaps': _co.set(-34, 12, -30); _lo.set(-12, -2, 0); break;                 // close on the aft flaps working
       case 'high': _co.set(-70, 120, -160); _lo.set(0, -40, 0); break;                 // pull back: the ground coming up
@@ -1328,13 +1336,29 @@ export async function initLanding(step) {
     dipAmt = Math.max(sstep(SHOT_T - 0.5, SHOT_T, idleT), 1 - sstep(0, 0.6, idleT));
   }
   let dipAmt = 0, tBreak = null, trk = null;
+  const bGust = { k: 0, d: 1, next: 2 };   // belly-flop gusts: a kick the flaps visibly fight
+  const FLIP_H = (() => { const f = L.createFlight(START.x0); while (f.s.phase === 'belly' && f.s.t < 60) f.step(null); return f.s.h; })();
+  const flipEta = s => s.phase === 'belly' ? Math.max(0, (s.h - FLIP_H) / Math.max(1, -s.vh)) : 99;
   // From far away the ship is a small bright point: sunlit steel and leftover heat
   const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, color: 0xffd8b0, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   glint.visible = false; scene.add(glint);
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
   const ENT_CAM = [[V3(-50, -4, -62), null, V3(0, -8, 0)], [V3(128, -66, -58), V3(108, -58, -82), V3(2, -6, 0)], [V3(-4, 12, 74), V3(-24, 7, 62), V3(-16, 2, 0)]];
-  function cloudFx(dt) {   // vapour trail and torn streamers through the deck
+  function cloudFx(dt) {   // vapour trail and torn streamers through the deck; belly-flop speed cues and chill-down
     const s = flight.s;
+    if (s.phase === 'belly' && tBreak !== null && !paused) {
+      bGust.next -= dt; bGust.k *= Math.exp(-dt * 1.6);
+      if (bGust.next <= 0) { bGust.k = 1; bGust.d = Math.random() < 0.5 ? -1 : 1; bGust.next = rnd(2.2, 3.8); shake = Math.max(shake, 0.6); }
+      const sp = ship.position, n = Math.ceil(dt * 260 * sstep(7000, 3500, s.h) + dt * 60);
+      for (let i = 0; i < n; i++)   // dust/haze motes the ship falls through: they streak up past the camera
+        dust.emit({ x: sp.x + rnd(-70, 70), y: sp.y - rnd(20, 160), z: sp.z + rnd(-70, 70), vx: 0, vy: 0, vz: 0, life: 0.9, s0: 0.6, s1: 1.4, a: 0.3, drag: 0, rgb: [0.9, 0.72, 0.58] });
+      for (const i of [3, 4]) { const a = ship.localToWorld(_pv.copy(ribbons[i].a));   // faint vapour curls off the aft flap tips
+        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-3, 3), vy: rnd(-3, 3), vz: rnd(-3, 3), life: 0.5, s0: 2, s1: 9, a: 0.12, drag: 0, rgb: [0.95, 0.92, 0.9] }); }
+      if (flipEta(s) < 3) for (let i = 0; i < 3; i++) {   // engine chill-down venting from the aft skirt
+        const a = ship.localToWorld(_pv.set(rnd(-R, R) * 0.6, -TAIL + 1.5, rnd(-R, R) * 0.6));
+        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-8, 8), vy: rnd(-5, 5), vz: rnd(-8, 8), life: rnd(0.8, 1.4), s0: 2, s1: 12, a: 0.45, drag: 0.8, rgb: [0.96, 0.96, 0.97] });
+      }
+    }
     if (state === 'flight' && s.phase === 'belly' && (tBreak === null || s.t < tBreak + 6) && !paused) {   // vapour trail
       const sp2 = ship.position;
       const n = Math.min(40, Math.ceil(dt * 300)); for (let i = 0; i < n; i++) { const f = i / n;
@@ -1413,7 +1437,7 @@ export async function initLanding(step) {
       padCam = true;
     } else {
       camGoal(name);
-      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'close' || shotName === 'flaps' || shotName === 'track');
+      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'close' || name === 'top' || name === 'side' || shotName === 'flaps' || shotName === 'track');
       if (padCam || cut) { camOff.copy(cut ? _co : camera.position.clone().sub(sp)); lookOff.copy(_lo); padCam = false; }
       camOff.lerp(_co, 1 - Math.exp(-dt * 1.2)); lookOff.lerp(_lo, 1 - Math.exp(-dt * 2));
       camera.position.copy(sp).add(camOff);
@@ -1428,7 +1452,7 @@ export async function initLanding(step) {
     const sh = (paused ? 0 : shake) + buffet + (name === 'close' && !paused ? 0.5 + 0.7 * inDeck + (Math.random() < 0.04 ? 1.6 : 0) : 0);
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) shake *= Math.exp(-dt * 2.5);
-    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' ? 52 : 40;
+    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : 40;
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
 
@@ -1467,7 +1491,7 @@ export async function initLanding(step) {
       : state === 'orbit' ? 'MARS ORBIT · 200 KM'
       : state === 'deorbit' ? 'DEORBIT BURN'
       : state === 'entry' ? (blackout ? 'PLASMA BLACKOUT' : ent.I > 0.15 ? 'ENTRY · PLASMA' : 'ATMOSPHERIC ENTRY')
-      : state === 'flight' ? (s.phase === 'belly' ? 'BELLY FLOP' : s.phase === 'flip' ? 'FLIP' : s.h > 20 ? (source === 'rig' ? 'TVC LANDING · RIG' : 'TVC LANDING') : 'FINAL METRES')
+      : state === 'flight' ? (s.phase === 'belly' ? (flipEta(s) < 3.2 ? 'FLIP IN ' + Math.ceil(flipEta(s)) : flipEta(s) < 5.5 ? 'BELLY FLOP · ENGINE CHILL' : 'BELLY FLOP') : s.phase === 'flip' ? 'FLIP' : s.h > 20 ? (source === 'rig' ? 'TVC LANDING · RIG' : 'TVC LANDING') : 'FINAL METRES')
       : state === 'falling' ? 'LOSS OF CONTROL' : state === 'tipping' ? 'TIPPING OVER'
       : state === 'replay' ? 'REPLAY'
       : outcome?.title ?? '';
@@ -1613,7 +1637,7 @@ export async function initLanding(step) {
       const fps = fpsN / fpsT; fpsN = 0; fpsT = 0;
       if (DEBUG) $('lndFps').textContent = fps.toFixed(0) + ' fps · ' + QUALITY[qName].label;
       slow = fps < 40 ? slow + 1 : 0;
-      if (slow >= 3 && qName !== 'low' && !DEBUG) { slow = 0; setQuality(Q_ORDER[Q_ORDER.indexOf(qName) + 1]); callout('QUALITY LOWERED · ' + QUALITY[qName].label.toUpperCase(), 1800); }
+      if (slow >= 3 && qName !== 'low' && !DEBUG) { slow = 0; setQuality(Q_ORDER[Q_ORDER.indexOf(qName) + 1]); callout('QUALITY LOWERED · ' + QUALITY[qName].label.toUpperCase(), 1800, 'sys'); }
     }
   }
   let fpsN = 0, fpsT = 0, slow = 0;
