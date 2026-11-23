@@ -597,16 +597,22 @@ export async function initLanding(step) {
     $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
     resize();
   }
+  // Entry heating colour, shared by every plasma layer: h = heating 0..1, k = 1 at the hottest spot. Faint pink-violet
+  // (glowing ionised gas) at low heating → orange → white-yellow at the stagnation zone at peak. Display-space colours.
+  const HEATC = `vec3 heatCol(float h, float k){
+    vec3 c = mix(vec3(0.75, 0.35, 1.0), vec3(1.0, 0.32, 0.55), smoothstep(0.0, 0.25, h));
+    c = mix(c, vec3(1.0, 0.45, 0.12), smoothstep(0.2, 0.55, h));
+    return mix(c, vec3(1.0, 0.86, 0.58), smoothstep(0.6, 0.95, h) * k); }`;
   // Plasma: a glowing sheath over the heat shield and a wake trailing off the ship
   const plasmaMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uI: { value: 0 }, uT: { value: 0 } },
+    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 } },
     vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
       void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uI; uniform float uT; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; varying vec3 vN; varying vec3 vV; varying vec3 vP; ${HEATC}
       void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-        float n = 0.65 + 0.35 * sin(vP.y * 0.9 - uT * 22.0 + sin(vP.x * 1.3 + uT * 9.0) * 2.0);
-        vec3 c = mix(vec3(1.0, 0.42, 0.16), vec3(0.85, 0.35, 1.0), f);
+        float n = 0.6 + 0.4 * sin(vP.y * 0.7 + uT * 25.0 + 2.5 * sin(vP.z * 1.7 - uT * 13.0)) * (0.7 + 0.3 * sin(vP.z * 0.9 + vP.y * 0.3 + uT * 7.0));
+        vec3 c = mix(heatCol(uH, 0.4 + 0.6 * smoothstep(28.0, 46.0, vP.y)), vec3(0.8, 0.4, 1.0), f * 0.5 * (1.0 - uH));
         gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * (0.35 + 1.6 * pow(f, 1.4)) * n * 2.5, 1.0); }`,
   });
   const plasma = new THREE.Mesh(shield.geometry, plasmaMat); plasma.scale.set(1.14, 1.01, 1.14); plasma.visible = false; airframe.add(plasma);
@@ -614,16 +620,16 @@ export async function initLanding(step) {
   // leading side, white-hot at the edge going pink then violet (after the reference renders)
   const shockMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uLead: { value: new THREE.Vector3(0.9, 0.42, 0).normalize() } },
+    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 }, uLead: { value: new THREE.Vector3(0.9, 0.42, 0).normalize() } },
     vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vL;
       void main(){ vL = normal; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uI; uniform float uT; uniform vec3 uLead; varying vec3 vN; varying vec3 vV; varying vec3 vL;
+    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; uniform vec3 uLead; varying vec3 vN; varying vec3 vV; varying vec3 vL; ${HEATC}
       void main(){ float d = abs(dot(normalize(vN), normalize(vV)));
         float rim = pow(1.0 - d, 5.0), halo = pow(1.0 - d, 1.8) * 0.18;
         float lead = smoothstep(-0.35, 0.55, dot(normalize(vL), uLead));
         float fl = 0.85 + 0.15 * sin(uT * 37.0 + vL.y * 9.0);
-        vec3 c = mix(vec3(0.62, 0.42, 1.0), vec3(1.0, 0.55, 0.75), lead);
-        c = mix(c, vec3(1.0, 0.95, 0.92), smoothstep(0.55, 1.0, rim) * lead);
+        vec3 c = mix(vec3(0.62, 0.42, 1.0), heatCol(uH, 0.3), lead);
+        c = mix(c, heatCol(uH, 1.0), smoothstep(0.55, 1.0, rim) * lead);
         gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * (rim * 2.4 + halo) * lead * fl * 3.0, 1.0); }`,
   });
   const shock = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), shockMat);
@@ -631,16 +637,60 @@ export async function initLanding(step) {
   const wakeGeo = new THREE.CylinderGeometry(0.0, 1.0, 1.0, 32, 1, true); wakeGeo.translate(0, 0.5, 0);
   const wakeMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uI: { value: 0 }, uT: { value: 0 } },
+    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 } },
     vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
       void main(){ vY = position.y; vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uI; uniform float uT; varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv; ${HEATC}
       void main(){ float along = pow(1.0 - vY, 1.5); float edge = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 4.0);
-        float streak = 0.55 + 0.45 * sin(vUv.x * 120.0 + vY * 9.0 - uT * 6.0);
-        vec3 c = mix(vec3(1.0, 0.75, 0.85), vec3(0.55, 0.4, 1.0), vY);
+        float streak = (0.55 + 0.45 * sin(vUv.x * 120.0 + vY * 9.0 - uT * 6.0)) * (0.6 + 0.4 * sin(vUv.x * 19.0 + vY * 23.0 - uT * 4.0));
+        vec3 c = mix(heatCol(uH, 0.6), vec3(0.55, 0.4, 1.0), smoothstep(0.0, 0.7, vY));
         gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.06 + 1.8 * edge) * streak * 2.2, 1.0); }`,
   });
   const wake = new THREE.Mesh(wakeGeo, wakeMat); wake.visible = false; shipScene.add(wake);
+  // Plasma ribbons: ragged sheets peeling off the nose, belly edges and flap tips (ship-local anchors, belly = +x),
+  // streaming back along the flow and cooling white-hot → orange → violet along their length. Camera-facing strips
+  // bent by turbulence in the vertex shader; flicker, split (break-up noise) and length follow the heating.
+  const RIB = [[0.5, 28.5, 0], [0.6, 21, R + 4.2], [0.6, 21, -R - 4.2], [0.6, -12, R + 6.2], [0.6, -12, -R - 6.2],
+    [1.2, 8, R * 0.95], [1.2, 8, -R * 0.95], [1.5, -2, R * 0.9], [1.5, -2, -R * 0.9], [1.0, 14, R * 0.97]];
+  const ribGeo = new THREE.PlaneGeometry(1, 1, 1, 40);
+  const ribBase = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `uniform vec3 uA, uFlow; uniform float uLen, uW, uT, uSeed; varying float vS; varying float vX;
+      void main(){ float s = position.y + 0.5; vS = s; vX = position.x * 2.0;
+        vec3 f = normalize(uFlow), side = normalize(cross(f, vec3(0.0, 0.0, 1.0))), up = vec3(0.0, 0.0, 1.0);
+        vec3 c = uA + f * s * uLen;
+        c += side * (sin(s * 7.0 - uT * 9.0 + uSeed) * 3.0 + sin(s * 17.0 - uT * 23.0 + uSeed * 2.0)) * s;
+        c += up * sin(s * 5.0 - uT * 7.0 + uSeed * 3.0) * 4.0 * s;
+        vec3 w = normalize(cross(f, cameraPosition - c));
+        c += w * position.x * uW * (0.4 + 2.6 * s);
+        gl_Position = projectionMatrix * viewMatrix * vec4(c, 1.0); }`,
+    fragmentShader: `uniform float uI, uH, uT, uSeed; varying float vS; varying float vX; ${HEATC}
+      void main(){ float edge = pow(max(1.0 - abs(vX), 0.0), 1.5);
+        float brk = smoothstep(0.15, 0.6, 0.5 + 0.5 * sin(vS * 23.0 - uT * 31.0 + uSeed * 5.0) * sin(vS * 9.0 - uT * 13.0 + vX * 2.0 + uSeed));
+        float fade = (1.0 - vS) * smoothstep(0.0, 0.04, vS);
+        vec3 c = heatCol(uH * (1.0 - vS * 0.85), 1.0 - vS);
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * edge * mix(0.3, 1.0, brk) * fade * fade * 2.2, 1.0); }`,
+  });
+  const ribbons = RIB.map((a, i) => {
+    const m = new THREE.Mesh(ribGeo, ribBase.clone());
+    m.material.uniforms = { uA: { value: new THREE.Vector3() }, uFlow: { value: new THREE.Vector3(-1, 0, 0) }, uLen: { value: 80 }, uW: { value: 1.6 },
+      uT: { value: 0 }, uSeed: { value: i * 1.7 + 0.3 }, uI: { value: 0 }, uH: { value: 0 } };
+    m.frustumCulled = false; m.visible = false; shipScene.add(m);
+    return { m, a: new THREE.Vector3(...a), k: 0.7 + 0.3 * ((i * 0.618) % 1) };
+  });
+  const RIB_N = { high: 10, medium: 6, low: 3 };
+  // The plasma lights the ship from below: steel sides and flaps catch its orange light at peak
+  const plasmaLight = new THREE.PointLight(0xff8040, 0, 0, 2); plasmaLight.position.set(R + 6, 4, 0); ship.add(plasmaLight);
+  let tileT = 0, entShot = -1;
+  // Entry heating panel (re-uses the deorbit burn panel's slot)
+  const burnEl = $('lndBurn'), burnHTML = burnEl.innerHTML;
+  function heatPanel(on) {
+    burnEl.innerHTML = on ? '<div class="ms-label">Entry heating · belly</div><div class="lnd-burn-row"><span>Heat flux <b id="lndQ">0</b> MW/m²</span><span>Tiles <b id="lndTile">20</b> °C</span></div><div class="lnd-heat"><i id="lndHeatBar"></i></div>' : burnHTML;
+  }
+  // Entry profile: altitude and speed by progress u, heating q ∝ √ρ·v³ (exponential air, 11.1 km scale height), peak = 1
+  const entryHV = u => [12e3 + 188e3 * Math.pow(1 - u, 1.35), 420 + 3030 * (1 - sstep(0.32, 1, u))];
+  const qRaw = (h, v) => Math.sqrt(Math.exp(-h / 11.1e3)) * v ** 3;
+  let Q_MAX = 0; for (let i = 0; i <= 400; i++) Q_MAX = Math.max(Q_MAX, qRaw(...entryHV(i / 400)));
 
   // ---------- State ----------
   // orbit (idle) → deorbit → entry → flight (belly, flip, tvc: landing-sim.js) → landed | crashed, via falling / tipping,
@@ -748,7 +798,8 @@ export async function initLanding(step) {
     et = 0; ent = { h: L.ENTRY.h0, v: L.ENTRY.v0, I: 0, fade: 0, u: 0 };
     fall.ang = fall.rate = 0;
     ship.visible = true; debris.forEach(d => { d.m.visible = false; }); fire.clear(); dust.clear(); glow.clear(); puffs.clear(); haze.clear();
-    orbitSun(0); setVac([0, 0, 0], [], 0); rvacMat.emissiveIntensity = 0; $('lndBurn').hidden = true; deoShot = '';
+    orbitSun(0); setVac([0, 0, 0], [], 0); rvacMat.emissiveIntensity = 0; heatPanel(false); $('lndBurn').hidden = true; deoShot = '';
+    ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; entShot = -1; if (camera.fov !== 40) { camera.fov = 40; resize(); }
     shipScene.add(ship); ship.position.set(0, 0, 0);
     $('lndResult').hidden = true; $('lndFeed').textContent = ''; $('lndReplay').hidden = true; fadeAmt = 0;
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
@@ -765,6 +816,7 @@ export async function initLanding(step) {
     state = 'flight';
     scene.add(ship);
     plasma.visible = false; wake.visible = false; shock.visible = false; M.tiles.emissiveIntensity = 0; glow.clear();
+    ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; burnEl.hidden = true; heatPanel(false);
     fadeOut = 1.4;
     once('belly', 'BELLY FLOP · <b>8 KM</b>', 2200);
     refresh();
@@ -934,21 +986,27 @@ export async function initLanding(step) {
       phi += v / 1000 / (R_MARS + h / 1000) * dt * 4;
       deorbitFx(dt);
       if (et >= E.deorbit) {
-        state = 'entry'; et = 0; setVac([0, 0, 0], [], 0); deoEndPos.copy(camera.position); deoEndLook.copy(deoLook); $('lndBurn').hidden = true; dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }; tvc.rotation.set(0, 0, 0);
+        state = 'entry'; et = 0; setVac([0, 0, 0], [], 0); deoEndPos.copy(camera.position); deoEndLook.copy(deoLook); heatPanel(true); burnEl.hidden = false; entShot = -1; dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }; tvc.rotation.set(0, 0, 0);
         callout('ENTRY INTERFACE · <b>×' + E.warp + ' TIME WARP</b>', 2600);
       }
     } else if (state === 'entry') {
       et += dt;
+      if (window.__entU != null) et = window.__entU * E.entry;
       const u = clamp(et / E.entry, 0, 1);
-      h = E.h1 + (E.h0 - E.h1) * Math.pow(1 - u, 1.7);
-      v = E.v1 + (E.v0 - E.v1) * (1 - sstep(0.25, 1, u));
-      pitch = 84 + 3 * Math.sin(et * 1.7);
+      [h, v] = entryHV(u);
+      const q = qRaw(h, v) / Q_MAX; ent.q = q;
+      pitch = lerp(84, 68, sstep(0, 0.15, u) * (1 - sstep(0.86, 1, u))) + 3 * Math.sin(et * 1.7) + 1.5 * q * Math.sin(et * 5.3) * Math.sin(et * 2.1);   // buffets a little at peak
       phi += v / 1000 / (R_MARS + h / 1000) * dt * E.warp;
-      ent.I = sstep(0.06, 0.3, u) * (1 - sstep(0.6, 0.86, u));
+      ent.I = Math.pow(clamp(q * 1.1, 0, 1), 0.8);
+      tileT += (q - tileT) * (1 - Math.exp(-dt * (q > tileT ? 0.9 : 0.35)));   // thermal lag: heats fast, cools slowly
+      $('lndQ').textContent = (q * 1.15).toFixed(2); $('lndTile').textContent = Math.round(20 + 1580 * tileT).toLocaleString('en-US');
+      $('lndHeatBar').style.width = (q * 100).toFixed(1) + '%';
+      if (h < 80e3) once('lossSig', 'SIGNAL · <b>PLASMA BLACKOUT</b>', 2400);
+      if (h < 40e3) once('aos', 'SIGNAL <b>ACQUIRED</b>', 2000);
       ent.fade = sstep(0.86, 1, u); ent.u = u;
       orbitSun(sstep(0.12, 1, u));
       rvacMat.emissiveIntensity *= Math.exp(-dt * 0.8);
-      if (u > 0.3) once('peak', 'PEAK HEATING · <b>1,600 °C</b> ON THE TILES', 2400);
+      if (u > 0.59) once('peak', 'PEAK HEATING · <b>1,600 °C</b> ON THE TILES', 2400);
       if (u >= 1) { ent.h = h; ent.v = v; cutToGround(); return; }
     }
     ent.h = h; ent.v = v;
@@ -962,20 +1020,37 @@ export async function initLanding(step) {
     // Plasma sheath, wake and streaks
     const I = state === 'entry' ? ent.I : 0;
     plasma.visible = wake.visible = shock.visible = I > 0.01;
-    plasmaMat.uniforms.uI.value = I * 0.8; plasmaMat.uniforms.uT.value = simClock;
-    shockMat.uniforms.uI.value = I * 1.3; shockMat.uniforms.uT.value = simClock;
-    M.tiles.emissive.setRGB(1, 0.28, 0.12); M.tiles.emissiveIntensity = I * 1.4;   // the tiles glow red-hot
-    wakeMat.uniforms.uI.value = I * 0.6; wakeMat.uniforms.uT.value = simClock;
+    const Hq = state === 'entry' ? ent.q ?? 0 : 0;
+    plasmaMat.uniforms.uI.value = I * 0.8 * (1 - 0.5 * Hq); plasmaMat.uniforms.uT.value = simClock; plasmaMat.uniforms.uH.value = Hq;
+    shockMat.uniforms.uI.value = I * 1.3 * (1 - 0.6 * Hq); shockMat.uniforms.uT.value = simClock; shockMat.uniforms.uH.value = Hq;
+    shock.scale.set(8.2, 31, 8.6).multiplyScalar(1.12 - 0.12 * I);   // the shock hugs closer as the heating rises
+    const tt = state === 'entry' ? tileT : 0;                         // tiles: dull red → orange → yellow, with lag
+    M.tiles.emissive.setRGB(1, 0.18 + 0.5 * tt, 0.06 + 0.2 * tt * tt); M.tiles.emissiveIntensity = tt * 1.8;
+    plasmaLight.intensity = I * 420; plasmaLight.color.setRGB(1, 0.4 + 0.35 * Hq, 0.2 + 0.2 * Hq);
+    wakeMat.uniforms.uI.value = I * 0.6; wakeMat.uniforms.uT.value = simClock; wakeMat.uniforms.uH.value = Hq;
     const gam = (4 + 36 * ent.u) * DEG;                       // flight path angle below horizontal
     const flow = new THREE.Vector3(-Math.cos(gam), Math.sin(gam), 0);   // where the air goes, relative to the ship
     wake.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), flow);
     wake.scale.set(8 + 3 * I, 260 + 260 * I, 8 + 3 * I); wake.position.copy(flow).multiplyScalar(-4);
+    const nR = RIB_N[qName] ?? 10;
+    ribbons.forEach((r, i) => {
+      const on = I > 0.03 && i < nR; r.m.visible = on; if (!on) return;
+      const u = r.m.material.uniforms;
+      ship.updateMatrixWorld(); ship.localToWorld(u.uA.value.copy(r.a)); u.uFlow.value.copy(flow);
+      u.uLen.value = (40 + 110 * I) * r.k; u.uT.value = simClock; u.uH.value = Hq;
+      u.uI.value = I * (0.7 + 0.3 * Math.sin(simClock * (11 + i * 3.7) + i)) * (0.75 + 0.25 * Math.sin(simClock * 29 + i * 2.3));
+    });
+    if (Hq > 0.4) for (let i = 0; i < 3; i++) {   // sparks shedding off the flap tips and tile edges at peak
+      const a = ribbons[1 + (Math.random() * 4 | 0)].m.material.uniforms.uA.value;
+      glow.emit({ x: a.x, y: a.y, z: a.z, vx: flow.x * rnd(150, 320) + rnd(-20, 20), vy: flow.y * rnd(150, 320) + rnd(-20, 20), vz: rnd(-30, 30),
+        life: rnd(0.15, 0.45), s0: 0.7, s1: 0.25, a: 1, drag: 0, rgb: [1, 0.85, 0.55] });
+    }
     if (I > 0.05) {
       const n = Math.round(14 * I);
       for (let i = 0; i < n; i++) {
         const along = rnd(-22, 28), side = Math.random() < 0.5 ? -1 : 1;
         const p = new THREE.Vector3(Math.cos(-pitch * DEG) * along, Math.sin(-pitch * DEG) * along - 4, side * rnd(3, 7));
-        glow.emit({ x: p.x, y: p.y, z: p.z, vx: flow.x * 420, vy: flow.y * 420, vz: side * rnd(10, 40), life: rnd(0.12, 0.3), s0: 2.5, s1: 7, a: 0.7 * I, drag: 0, rgb: [1, rnd(0.4, 0.6), rnd(0.5, 0.9)] });
+        glow.emit({ x: p.x, y: p.y, z: p.z, vx: flow.x * 420, vy: flow.y * 420, vz: side * rnd(10, 40), life: rnd(0.12, 0.3), s0: 2.5, s1: 7, a: 0.7 * I, drag: 0, rgb: [1, lerp(0.42, 0.7, Hq) + rnd(-0.05, 0.05), lerp(0.85, 0.35, Hq)] });
       }
     }
     glow.update(dt);
@@ -1191,6 +1266,8 @@ export async function initLanding(step) {
     dipAmt = Math.max(sstep(SHOT_T - 0.5, SHOT_T, idleT), 1 - sstep(0, 0.6, idleT));
   }
   let dipAmt = 0;
+  const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const ENT_CAM = [[V3(-50, -4, -62), null, V3(0, -8, 0)], [V3(128, -66, -58), V3(108, -58, -82), V3(2, -6, 0)], [V3(-4, 12, 74), V3(-24, 7, 62), V3(-16, 2, 0)]];
   function cameraStep(dt) {
     orbitA += dt * (state === 'orbit' ? 0.12 : 0.04);
     if (inOrbit()) {   // orbit pass: the camera moves round the ship at the origin
@@ -1203,11 +1280,19 @@ export async function initLanding(step) {
         return;
       }
       if (state === 'orbit' || state === 'deorbit') off = _co.set(-80, 70, -110);
-      else { const k = sstep(0, 0.6, ent.u); off = _co.copy(deoEndPos).lerp(_lo.set(-46, 22, -64), k); }
+      else if (camMode === 'free') off = null;
+      else {   // entry: A pulls down under the belly as the glow starts · B (peak) low, long lens up at the belly · C the wake
+        const u = ent.u, sh = u < 0.3 ? 0 : u < 0.64 ? 1 : 2, S = ENT_CAM[sh];
+        const k = sh === 0 ? sstep(0, 1, u / 0.3) : sh === 1 ? (u - 0.3) / 0.34 : (u - 0.64) / 0.36;
+        if (sh === 0) { off = _co.copy(deoEndPos).lerp(S[0], k); _ct.copy(deoEndLook).lerp(S[2], k); }
+        else { off = _co.copy(S[0]).lerp(S[1], k); _ct.copy(S[2]); }
+        if (sh !== entShot) { if (entShot >= 0) { camOff.copy(off); orbLook.copy(_ct); } entShot = sh; }
+        const fov = sh === 1 ? 30 : 40; if (camera.fov !== fov) { camera.fov = fov; resize(); }
+      }
       if (camMode === 'free') controls.update(); else {
-        camOff.lerp(off, 1 - Math.exp(-dt * 1.5));
+        camOff.lerp(off, 1 - Math.exp(-dt * (state === 'entry' ? 4 : 1.5)));
         camera.position.copy(camOff);
-        orbLook.lerp(_lo.copy(deoEndLook).lerp(_ct.set(0, -12, 0), sstep(0, 0.6, ent.u)), 1 - Math.exp(-dt * 3));
+        orbLook.lerp(state === 'entry' ? _ct : _lo.copy(deoEndLook), 1 - Math.exp(-dt * 4));
         camera.lookAt(orbLook);
       }
       const sh = state === 'entry' ? ent.I * 0.9 : state === 'deorbit' && et > 0.9 && et < 2.1 ? 0.25 : 0;
@@ -1259,13 +1344,16 @@ export async function initLanding(step) {
   function hud() {
     const s = flight.s, orb = inOrbit();
     const alt = orb ? ent.h : state === 'landed' || state === 'crashed' || state === 'replay' ? 0 : Math.max(0, s.h - groundUnder());
-    $('lndAlt').textContent = alt >= 1000 ? (alt / 1000).toFixed(alt >= 1e5 ? 0 : alt >= 1e4 ? 1 : 2) : alt.toFixed(alt < 10 ? 1 : 0);
+    const blackout = state === 'entry' && ent.h < 80e3 && ent.h > 40e3 && !paused;
+    $('landing').classList.toggle('lnd-blackout', blackout);
+    $('lndAlt').textContent = blackout ? (Math.random() < 0.15 ? '—' : '- -') : alt >= 1000 ? (alt / 1000).toFixed(alt >= 1e5 ? 0 : alt >= 1e4 ? 1 : 2) : alt.toFixed(alt < 10 ? 1 : 0);
     $('lndAltU').textContent = alt >= 1000 ? 'km' : 'm';
     const flying = state === 'flight' || state === 'falling';
     const vs = orb ? (state === 'entry' ? -ent.v * Math.sin((4 + 36 * ent.u) * DEG) : 0) : flying ? s.vh : 0;
     $('lndVs').textContent = vs.toFixed(1);
     const spd = orb ? ent.v : flying ? Math.hypot(s.vx, s.vh, s.vz) : 0;
-    $('lndSpd').textContent = (spd * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (blackout) $('lndVs').textContent = '—';
+    $('lndSpd').textContent = blackout ? '—' : (spd * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 });
     const thr = orb ? (state === 'deorbit' ? vacLevel(et).reduce((x, y) => x + y) / 3 : 0) : curThr();
     $('lndThr').style.width = `${clamp(thr, 0, 1) * 100}%`;
     $('lndThrV').textContent = `${Math.round(clamp(thr, 0, 1) * 100)}%`;
@@ -1276,12 +1364,12 @@ export async function initLanding(step) {
     $('lndPhase').textContent = paused ? 'PAUSED' : lost ? 'SIGNAL LOST'
       : state === 'orbit' ? 'MARS ORBIT · 200 KM'
       : state === 'deorbit' ? 'DEORBIT BURN'
-      : state === 'entry' ? (ent.I > 0.15 ? 'ENTRY · PLASMA' : 'ATMOSPHERIC ENTRY')
+      : state === 'entry' ? (blackout ? 'PLASMA BLACKOUT' : ent.I > 0.15 ? 'ENTRY · PLASMA' : 'ATMOSPHERIC ENTRY')
       : state === 'flight' ? (s.phase === 'belly' ? 'BELLY FLOP' : s.phase === 'flip' ? 'FLIP' : s.h > 20 ? (source === 'rig' ? 'TVC LANDING · RIG' : 'TVC LANDING') : 'FINAL METRES')
       : state === 'falling' ? 'LOSS OF CONTROL' : state === 'tipping' ? 'TIPPING OVER'
       : state === 'replay' ? 'REPLAY'
       : outcome?.title ?? '';
-    $('lndPhase').classList.toggle('warn', lost || state === 'falling' || state === 'tipping' || (endState === 'crashed'));
+    $('lndPhase').classList.toggle('warn', blackout || lost || state === 'falling' || state === 'tipping' || (endState === 'crashed'));
     const ki = PH.indexOf(phaseKey());
     document.querySelectorAll('#lndChips span').forEach((c, i) => { c.classList.toggle('on', i === ki); c.classList.toggle('done', ki > i); });
     // Attitude dial: the TVC's tilt and nozzle (its own, without the autopilot's lean)
@@ -1438,6 +1526,7 @@ export async function initLanding(step) {
         Object.assign(look, blendLooks({}, name, name, 0)); refresh();
       },
       look(name) { lookOverride = name; },
+      entry(u) { window.__entU = u; },
       shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
     };
   }

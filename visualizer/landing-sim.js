@@ -39,7 +39,7 @@ export const TIP_DEG = 15;           // touchdown tilt past which it falls over
 export const LEGS_AT = 700;          // legs deploy below this height
 
 // Scripted orbit → entry sequence (screen seconds). The real entry takes ~6 minutes: shown about 30x faster.
-export const ENTRY = { deorbit: 10.4, entry: 12.0, warp: 30, h0: 200e3, h1: 12e3, v0: 3450, v1: 420, dv: 85 };
+export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3, v0: 3450, v1: 420, dv: 85 };
 
 // ---------- 1 + 2. The flight from the belly flop to touchdown ----------
 // Attitude is a pair of tilts in the Bench convention (tiltY leans toward +x, the direction of travel; tiltX toward
