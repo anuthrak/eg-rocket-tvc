@@ -90,21 +90,23 @@ export async function initLanding(step) {
     return lerp(lerp(a, b, u), lerp(c, d, u), v) * 2 - 1;
   }
   const fbm = (x, y) => { let s = 0, a = 1, f = 1; for (let i = 0; i < 5; i++) { s += a * vnoise(x * f, y * f); a *= 0.5; f *= 2.03; } return s; };
-  const craters = [];
+  const craters = [], mesas = [];
   { let seed = 11; const r01 = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let i = 0; i < 160; i++) {
-      const R = 40 + Math.pow(r01(), 3) * 500, d = 600 + R + Math.pow(r01(), 1.2) * 9000, a = r01() * Math.PI * 2;
-      craters.push([Math.cos(a) * d, Math.sin(a) * d, R]);
+    for (let i = 0; i < 420; i++) {   // power-law sizes 20 m … ~800 m radius; depth 0.35–1 (worn → fresh)
+      const R = 20 + Math.pow(r01(), 4) * 780, d = 400 + R + Math.pow(r01(), 1.1) * 13000, a = r01() * Math.PI * 2;
+      craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 0.35 + 0.65 * r01()]);
     }
+    // A few eroded mesas / scarps near the site: flat lit tops, layered steep edges
+    for (let i = 0; i < 7; i++) { const a = r01() * 6.28, d = 1800 + r01() * 4500; mesas.push([Math.cos(a) * d, Math.sin(a) * d, 300 + r01() * 600, 50 + r01() * 110]); }
     for (let i = 0; i < 160; i++) {   // small ones near the pad, for scale
       const R = 3 + Math.pow(r01(), 2) * 30, d = 70 + R + Math.pow(r01(), 0.8) * 650, a = r01() * Math.PI * 2;
-      craters.push([Math.cos(a) * d, Math.sin(a) * d, R]);
+      craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 1]);
     }
   }
   const ridged = (x, y) => { let s = 0, a = 1, f = 1; for (let i = 0; i < 4; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f)); s += a * n * n; a *= 0.5; f *= 2.1; } return s / 1.875; };
   function terrain(x, z) {
     const dist = Math.hypot(x, z);
-    let h = 28 * fbm(x / 1400, z / 1400) + 5 * fbm(x / 160, z / 160) + 0.6 * fbm(x / 22, z / 22);
+    let h = 20 * fbm(x / 2600, z / 2600) + 1.8 * fbm(x / 420, z / 420) + 0.25 * fbm(x / 22, z / 22);   // smooth plains: broad swells only
     let far = 0, tone = 0;
     if (dist > 4000) {
       // Out to the horizon: ridged mountain ranges, flat-topped mesas, a canyon, and the planet's curve
@@ -116,13 +118,19 @@ export async function initLanding(step) {
       tone = (mtn > 300 ? -0.06 : 0) + (mesa > 260 ? 0.05 : 0) + (canyon < -200 ? -0.08 : 0);
     }
     h += far - dist * dist / (2 * 3389.5e3);
-    h += 1.6 * Math.sin((x * 0.8 + z * 0.6) / 18 + 2 * vnoise(x / 90, z / 90)) * sstep(0.1, 0.6, vnoise(x / 400 + 5, z / 400));   // dune ripples
+    h += 0.5 * Math.sin((x * 0.8 + z * 0.6) / 18 + 2 * vnoise(x / 90, z / 90)) * sstep(0.1, 0.6, vnoise(x / 400 + 5, z / 400));   // dune ripples
     let rimBright = 0;
-    for (const [cx, cz, R] of craters) {
+    for (const [mx, mz, mr, mh] of mesas) {   // eroded mesa: warped outline, flat top, terraced steep edge
+      const dx = x - mx, dz = z - mz; if (Math.abs(dx) > mr * 1.6 || Math.abs(dz) > mr * 1.6) continue;
+      const q = Math.hypot(dx, dz) / mr + 0.35 * fbm(x / 260 + mx, z / 260);
+      const k = sstep(1.05, 0.85, q), terr = Math.floor(k * 4) / 4 * 0.35 + k * 0.65;
+      h += mh * terr; tone += 0.03 * k;
+    }
+    for (const [cx, cz, R, f] of craters) {
       const dx = x - cx, dz = z - cz; if (Math.abs(dx) > R * 1.8 || Math.abs(dz) > R * 1.8) continue;
       const q = Math.hypot(dx, dz) / R;
-      if (q < 1) h -= 0.18 * R * (1 - q * q);
-      const rim = Math.exp(-(((q - 1) / 0.22) ** 2)); h += 0.06 * R * rim; rimBright = Math.max(rimBright, rim);
+      if (q < 1) { h -= 0.18 * f * R * (1 - q * q); tone -= 0.04 * f * sstep(0.9, 0.4, q); }   // darker floors
+      const rim = Math.exp(-(((q - 1) / 0.3) ** 2)); h += 0.06 * f * R * rim; rimBright = Math.max(rimBright, rim * f);
     }
     const flat = sstep(40, 110, dist);                 // the landing zone is graded flat
     return [h * flat, rimBright * flat, tone];
@@ -138,7 +146,7 @@ export async function initLanding(step) {
     for (let i = 0; i < P.count; i++) {
       const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone] = terrain(x, z);
       P.setXYZ(i, x, h, z);
-      tones[i] = 0.5 + 0.55 * fbm(x / 140 + 9, z / 140) + 0.3 * rim + 0.25 * fbm(x / 1800, z / 1800) + tone * 3;
+      tones[i] = 0.55 + 0.12 * fbm(x / 500 + 9, z / 500) + 0.3 * rim + 0.18 * fbm(x / 3000, z / 3000) + tone * 3;   // soft dust mottling
       uv.setXY(i, x / 16, z / 16);
     }
     geo.computeVertexNormals();
@@ -193,9 +201,9 @@ export async function initLanding(step) {
           float away = smoothstep(1200.0, 3500.0, length(w));
           float field = smoothstep(0.52, 0.66, gf(w / 9000.0 + 3.0)) * away;
           float crest = 0.5 + 0.5 * sin(dot(w, vec2(0.8, 0.6)) / 70.0 + 6.0 * gf(w / 900.0));
-          base = mix(base, uGRock * mix(0.55, 1.6, crest), field * 0.85);
+          base = mix(base, uGRock * mix(0.85, 1.3, crest), field * 0.3);
           float streak = smoothstep(0.55, 0.8, gf(vec2(w.x * 0.8 + w.y * 0.6, (w.y * 0.8 - w.x * 0.6) * 4.0) / 5000.0));
-          base = mix(base, uGHigh * 0.9, streak * (1.0 - field) * 0.4 * away);
+          base = mix(base, uGHigh * 0.9, streak * (1.0 - field) * 0.25 * away);
           base *= 0.8 + 0.4 * gf(w / 2500.0 + 7.0);   // broad tone variation
           diffuseColor.rgb *= base;`);
     };
