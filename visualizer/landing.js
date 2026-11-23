@@ -454,10 +454,32 @@ export async function initLanding(step) {
 
   // ---------- Orbit and entry: the planet pass (landing-orbit.js) + the ship pass at metre scale ----------
   await step?.(0.92, 'Parking in Mars orbit');
-  const orbit = createOrbitScene(SUN);
+  // In orbit the sun sits low ahead of the ship, just above the limb: a sunrise over the curve of the planet
+  const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
+  const ORB_SUN = sph(-48, -2);   // low over the limb: grazing light on the ground ahead, the terminator just behind the ship
+  const orbit = createOrbitScene(ORB_SUN);
   const shipScene = new THREE.Scene();
-  { const l = new THREE.DirectionalLight(0xfff1e0, 3.4); l.position.copy(SUN).multiplyScalar(100); shipScene.add(l);
-    shipScene.add(new THREE.HemisphereLight(0x9aa6c8, 0x7a4426, 0.45)); envScenes.push(shipScene); shipScene.environment = scene.environment; }
+  // Ship lighting in orbit: hard sun key, warm bounce up from the planet, a cool rim from the limb, near-black ambient
+  // (a cheat, as in film: the key comes from the camera's side so the hull reads; the real sun gives a hard back rim)
+  const shipKey = new THREE.DirectionalLight(0xffe8d0, 2.2); shipKey.position.copy(sph(160, 32)).multiplyScalar(100);
+  const shipSun = new THREE.DirectionalLight(0xfff4e8, 5.0); shipSun.position.copy(ORB_SUN).multiplyScalar(100); shipScene.add(shipSun);
+  const shipBounce = new THREE.DirectionalLight(0xff7a3a, 0.9); shipBounce.position.set(0.3, -1, 0.1).multiplyScalar(100);
+  const shipRim = new THREE.DirectionalLight(0x9bb4ff, 0.8); shipRim.position.set(-0.6, 0.15, 0.8).multiplyScalar(100);
+  shipScene.add(shipKey, shipBounce, shipRim, new THREE.AmbientLight(0x1a1c24, 0.25));
+  // Its reflections: black space, the bright orange planet below with the limb band, the sun
+  {
+    const env = new THREE.Scene();
+    env.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({ side: THREE.BackSide,
+      uniforms: { uSun: { value: ORB_SUN } },
+      vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+      fragmentShader: `uniform vec3 uSun; varying vec3 vD; void main(){ vec3 d = normalize(vD); float lim = -0.33;
+        vec3 ground = vec3(0.55, 0.2, 0.07) * (0.25 + 1.2 * smoothstep(-0.2, 0.6, dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSun.x, 0.0, uSun.z)))));
+        vec3 c = d.y < lim ? ground : vec3(0.0);
+        c += vec3(1.0, 0.55, 0.25) * exp(-abs(d.y - lim) * 40.0) * 0.8;
+        c += vec3(1.0, 0.96, 0.9) * pow(max(dot(d, normalize(uSun)), 0.0), 400.0) * 12.0;
+        gl_FragColor = vec4(c, 1.0); }` })));
+    shipScene.environment = pmrem.fromScene(env, 0).texture;
+  }
   const glow = createPoints(1200, true, shipScene);       // plasma streaks
   // Post-processing (bloom, tone mapping, grade) and the look
   const post = createPost(renderer, scene, orbit.scene, orbit.camera, shipScene, camera);
@@ -489,9 +511,10 @@ export async function initLanding(step) {
     const q = QUALITY[qName];
     post.apply(look, q, simClock);
     post.grade.uniforms.uFade.value = fadeAmt; post.grade.uniforms.uFlash.value = flashAmt;
-    post.grade.uniforms.uFadeCol.value.copy(look.hor).lerp(new THREE.Color(1, 0.96, 0.92), 0.6);
+    if (state === 'orbit' && dipAmt > 0.001) { post.grade.uniforms.uFade.value = dipAmt; post.grade.uniforms.uFadeCol.value.setRGB(0, 0, 0); }
+    else post.grade.uniforms.uFadeCol.value.copy(look.hor).lerp(new THREE.Color(1, 0.96, 0.92), 0.6);
     flashAmt *= Math.exp(-dt * 5);
-    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 1.4);
+    flare.setStrength(look.flare); orbitFlare.setStrength(look.flare * 0.25 * orbit.sunVisible);
     // Reflections: rebuild the environment now and then while the look is changing
     envTimer -= dt;
     const cd = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
@@ -503,6 +526,7 @@ export async function initLanding(step) {
     qName = name; const q = QUALITY[name];
     try { localStorage.setItem('tvc-landing-quality', name); } catch {}
     setRockDensity(q.rocks);
+    orbit.setQuality(name === 'high' ? 8 : name === 'medium' ? 6 : 5, Math.min(devicePixelRatio, q.pr));
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
     resize();
@@ -666,7 +690,7 @@ export async function initLanding(step) {
   }
   function begin() {
     if (source === 'rig' && !rigLive()) { callout('NO RIG DATA · CONNECT THE ARDUINO', 2600, 'warn'); return; }
-    state = 'deorbit'; et = 0;
+    state = 'deorbit'; et = 0; dipAmt = 0;
     callout('DEORBIT BURN', 2200);
     refresh();
   }
@@ -971,17 +995,44 @@ export async function initLanding(step) {
       }
     }
   }
+  // Idle in orbit: composed shots, each a slow drift, cut through a short dip to black
+  //   [ship azimuth, ship elevation (deg, from the camera), view azimuth, view elevation, distance from → to (m), roll (deg)]
+  const IDLE = [
+    { ship: [-34, -10], view: [-50, -15], d: [135, 112], roll: [1.5, -0.5] },     // hero 3/4: ship right, sunrise on the limb
+    { ship: [-42, -13], view: [-46, -16], d: [520, 470], roll: [0, 0.6] },        // wide: the ship small against the curve
+    { ship: [-34, -10], view: [-52, -16], d: [120, 104], roll: [-0.8, 0.4] },
+    { ship: [22, -4], view: [-4, -17], d: [90, 80], roll: [2, 0] },               // low: along the belly to the horizon
+  ];
+  const SHOT_T = 11;
+  let idleT = 0, idleI = 0, idleHold = false;
+  const orbLook = new THREE.Vector3(0, -22, 0), _sd = new THREE.Vector3(), _vd = new THREE.Vector3();
+  function idleShot(dt) {
+    if (!idleHold) idleT += dt;
+    if (idleT > SHOT_T) { idleT = 0; idleI = (idleI + 1) % IDLE.length; }
+    const S = IDLE[idleI], u = idleT / SHOT_T, asp = camera.aspect;
+    const squeeze = Math.min(1, asp / 1.6), far = Math.max(1, 1.5 / Math.max(asp, 0.4));   // portrait: centre the ship, back off
+    const vAz = S.view[0], sAz = vAz + (S.ship[0] - vAz) * squeeze, sEl = S.view[1] + (S.ship[1] - S.view[1]) * squeeze;
+    _sd.copy(sph(sAz, sEl)); _vd.copy(sph(vAz, S.view[1]));
+    const d = lerp(S.d[0], S.d[1], sstep(0, 1, u)) * far;
+    camera.position.copy(_sd).multiplyScalar(-d);
+    camera.up.set(0, 1, 0); camera.lookAt(_pv.copy(camera.position).addScaledVector(_vd, 1000));
+    camera.rotateZ(lerp(S.roll[0], S.roll[1], u) * DEG);
+    camOff.copy(camera.position); orbLook.copy(camera.position).addScaledVector(_vd, d);
+    dipAmt = Math.max(sstep(SHOT_T - 0.5, SHOT_T, idleT), 1 - sstep(0, 0.6, idleT));
+  }
+  let dipAmt = 0;
   function cameraStep(dt) {
     orbitA += dt * (state === 'orbit' ? 0.12 : 0.04);
     if (inOrbit()) {   // orbit pass: the camera moves round the ship at the origin
       let off;
-      if (state === 'orbit') off = _co.set(Math.cos(orbitA) * -130, 55 + 12 * Math.sin(orbitA * 0.7), Math.sin(orbitA) * -130 - 40);
-      else if (state === 'deorbit') off = _co.set(-80, 70, -110);
+      if (state === 'orbit' && camMode !== 'free') { idleShot(dt); return; }
+      if (state === 'orbit' || state === 'deorbit') off = _co.set(-80, 70, -110);
       else { const u = ent.u; off = _co.set(lerp(-130, -46, sstep(0, 0.6, u)), lerp(80, 22, sstep(0, 0.6, u)), lerp(-150, -64, sstep(0, 0.6, u))); }
       if (camMode === 'free') controls.update(); else {
         camOff.lerp(off, 1 - Math.exp(-dt * 1.5));
         camera.position.copy(camOff);
-        camera.lookAt(0, state === 'orbit' ? -22 : state === 'deorbit' ? -35 : lerp(-45, -12, sstep(0, 0.6, ent.u)), 0);
+        orbLook.lerp(_lo.set(0, state === 'deorbit' ? -35 : lerp(-45, -12, sstep(0, 0.6, ent.u)), 0), 1 - Math.exp(-dt * 1.5));
+        camera.lookAt(orbLook);
       }
       const sh = state === 'entry' ? ent.I * 0.9 : state === 'deorbit' && et > 0.9 && et < 2.1 ? 0.25 : 0;
       if (sh > 0.001 && !paused) camera.position.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.5));
@@ -1163,7 +1214,7 @@ export async function initLanding(step) {
       cameraStep(dt);
       fadeAmt = ent.fade;
       orbit.set(ent.h / 1000, phi, camera.position, camera.quaternion, simClock);
-      orbitFlare.lf.position.copy(SUN).multiplyScalar(4e5);
+      orbitFlare.lf.position.copy(ORB_SUN).multiplyScalar(6e5);
       applyLook(dt);
       post.setMode(true);
       if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
@@ -1208,6 +1259,7 @@ export async function initLanding(step) {
         Object.assign(look, blendLooks({}, name, name, 0)); refresh();
       },
       look(name) { lookOverride = name; },
+      shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
     };
   }
 

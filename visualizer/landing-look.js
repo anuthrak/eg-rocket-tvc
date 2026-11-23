@@ -41,8 +41,8 @@ export const LOOKS = {
     zen: '#000000', mid: '#000000', hor: '#000000', dust: 0,
     sun: '#fff4e6', sunI: 3.4, hemiSky: '#8a96b8', hemiGnd: '#6a3018', hemiI: 0.4, fog: 0, exposure: 1.05, clouds: 0.7,
     gShadow: '#4f1f08', gMid: '#773816', gLit: '#a5541f', gHigh: '#c6733c', gRock: '#2e1204',
-    contrast: 1.14, sat: 1.15, tintLo: [0.95, 0.95, 1.05], tintHi: [1.05, 1.0, 0.94], vig: 0.42, grain: 0.03,
-    bloom: [0.9, 0.7, 1.1], flare: 1.0,
+    contrast: 1.16, sat: 1.15, tintLo: [0.9, 1.0, 1.06], tintHi: [1.06, 1.0, 0.92], vig: 0.5, grain: 0.025,
+    bloom: [0.85, 0.55, 1.25], flare: 1.0,
   }),
 };
 const COLOR_KEYS = ['zen', 'mid', 'hor', 'sun', 'hemiSky', 'hemiGnd', 'gShadow', 'gMid', 'gLit', 'gHigh', 'gRock'];
