@@ -13,7 +13,7 @@
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;   // system "reduce motion": plain fade only
   let t0 = performance.now(), target = 0, shown = 0, doneReq = false, finishing = false, timers = [], ticker = 0;
   let setAt = t0, last = t0;
-  const STAGES = [0.25, 0.3, 0.45, 0.55, 0.65, 0.8, 1];   // checkpoints reported by main.js / mission.js
+  const STAGES = [0.25, 0.3, 0.45, 0.55, 0.65, 0.8, 1];   // checkpoints reported by main.js / landing.js
 
   // Arc milestones, placed along the path
   const base = $('ldArcBase'), LEN = base.getTotalLength();

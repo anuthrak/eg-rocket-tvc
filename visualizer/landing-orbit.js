@@ -143,7 +143,7 @@ export function createOrbitScene(sunDir) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
   const camera = new THREE.PerspectiveCamera(40, 1, 1, 1.2e6);
-  const sun = sunDir.clone().normalize();
+  const sun = sunDir;   // shared: landing.js moves the sun (dawn timeline) and everything here follows
   const C = new THREE.Vector3();
 
   // Milky Way: a faint band of noise along a great circle, behind everything
@@ -190,7 +190,7 @@ export function createOrbitScene(sunDir) {
 
   // Sun: a star-burst sprite, faded by how much of the disc clears the limb (set each frame)
   const burst = new THREE.Sprite(new THREE.SpriteMaterial({ map: starburstTex(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: 0xffffff }));
-  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.16); scene.add(burst);
+  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.1); scene.add(burst);
 
   // Planet
   const planetU = { uSun: { value: sun }, uCanyonC: { value: new THREE.Vector3(1, 0, 0) }, uCanyonA: { value: new THREE.Vector3(0, 0, 1) },
@@ -254,6 +254,7 @@ export function createOrbitScene(sunDir) {
       camera.quaternion.copy(quat);
       const near = Math.max(0.05, h * 0.25);
       if (Math.abs(camera.near - near) / near > 0.2) { camera.near = near; camera.updateProjectionMatrix(); }
+      burst.position.copy(sun).multiplyScalar(7e5);
       // How much of the sun clears the planet (+ a soft margin through the atmosphere)
       _o.copy(camera.position).sub(C);
       const tc = -_o.dot(sun), b = tc > 0 ? _o.addScaledVector(sun, tc).length() : 1e9;

@@ -357,7 +357,13 @@ export async function initLanding(step) {
     g.add(b, p); return g;
   }
   for (let i = 0; i < 3; i++) { const a = (90 + 120 * i) * DEG, e = bell(0.42, 0.7, BELL); e.position.set(Math.cos(a) * 1.0, 0, Math.sin(a) * 1.0); tvc.add(e); }
-  for (let i = 0; i < 3; i++) { const a = (30 + 120 * i) * DEG, e = bell(0.55, 1.15, 3.4); e.position.set(Math.cos(a) * 2.9, 0.5, Math.sin(a) * 2.9); airframe.add(e); }
+  // Vacuum engines (the deorbit burn): their bells glow orange as they heat and cool after shutdown
+  const rvacMat = new THREE.MeshStandardMaterial({ color: 0x55575e, metalness: 0.9, roughness: 0.3, side: THREE.DoubleSide, emissive: new THREE.Color(1, 0.32, 0.08), emissiveIntensity: 0 });
+  const rvacs = [];
+  for (let i = 0; i < 3; i++) {
+    const a = (30 + 120 * i) * DEG, e = bell(0.55, 1.15, 3.4); e.children[0].material = rvacMat;
+    e.position.set(Math.cos(a) * 2.9, 0.5, Math.sin(a) * 2.9); airframe.add(e); rvacs.push(e);
+  }
 
   // Landing legs: 4 struts that swing down from the tail
   const legs = [];
@@ -399,6 +405,33 @@ export async function initLanding(step) {
   const plumeInner = new THREE.Mesh(plumeGeo, plumeMat(0xf0f4ff, 1.3));
   plume.add(plumeOuter, plumeInner);
   const engineLight = new THREE.PointLight(0xaac4ff, 0, 220, 1.6); engineLight.position.y = -6; plume.add(engineLight);
+  // Vacuum plume: very wide and faint, a bright core at the nozzle, no shock diamonds; startup is bigger and messier
+  const vacMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uK: { value: 0 }, uT: { value: 0 }, uStart: { value: 0 } },
+    vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV;
+      void main(){ vY = position.y; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uK, uT, uStart; varying float vY; varying vec3 vN; varying vec3 vV;
+      void main(){ float a = clamp(1.0 + vY, 0.0, 1.0);
+        float core = pow(a, 14.0) * 4.0, body = pow(a, 3.0) * 0.35;
+        float edge = pow(abs(dot(normalize(vN), normalize(vV))), 0.8);
+        float fl = 1.0 + uStart * (0.6 * sin(uT * 70.0 + vY * 13.0) + 0.4 * sin(uT * 31.0));
+        vec3 c = mix(vec3(0.55, 0.65, 1.0), vec3(1.0, 0.97, 0.92), smoothstep(0.85, 1.0, a));
+        gl_FragColor = vec4(c * (core * 0.35 + body * 0.12) * edge * uK * fl * 0.35, 1.0); }`,
+  });
+  const vacGeo = new THREE.ConeGeometry(1, 1, 32, 1, true); vacGeo.rotateX(Math.PI); vacGeo.translate(0, -0.5, 0);
+  const vacPlumes = rvacs.map(e => { const m = new THREE.Mesh(vacGeo, vacMat.clone()); m.position.y = -3.4; m.visible = false; e.add(m); return m; });
+  const engLight = new THREE.PointLight(0xbcd0ff, 0, 60, 1.5); engLight.position.y = -6; airframe.add(engLight);
+  // k[i]: each engine's level 0..1, start: startup roughness 0..1
+  function setVac(k, start, t) {
+    vacPlumes.forEach((m, i) => {
+      const v = k[i]; m.visible = v > 0.01;
+      const len = 26 * (0.7 + 0.3 * v) * (1 + 0.4 * start), r = 13 * (0.6 + 0.4 * v) * (1 + 0.5 * start);   // opens to ~55°
+      m.scale.set(r, len, r); m.material.uniforms.uK.value = v * (1 + 0.8 * start); m.material.uniforms.uT.value = t + i; m.material.uniforms.uStart.value = start;
+    });
+    const tot = (k[0] + k[1] + k[2]) / 3;
+    engLight.intensity = tot * 250 * (1 + start);
+  }
   function setPlume(thr, t) {
     plume.visible = thr > 0.01;
     const len = 18 + 42 * thr, r = 3.2 + 5 * thr;
@@ -456,9 +489,20 @@ export async function initLanding(step) {
   await step?.(0.92, 'Parking in Mars orbit');
   // In orbit the sun sits low ahead of the ship, just above the limb: a sunrise over the curve of the planet
   const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
-  const ORB_SUN = sph(-48, -2);   // low over the limb: grazing light on the ground ahead, the terminator just behind the ship
+  const ORB_SUN = sph(-48, -2);
+  // Dawn timeline: in orbit and through the deorbit the sun sits just over the limb ahead; during the entry the ship flies
+  // into daylight and the sun climbs to about the ground scene's (21° up) by the cut, so the light carries across it
+  const SUN_AZ = [-48, -100], SUN_EL = [-2, 19];
+  let sunK = -1, envSunK = -1;
+  function orbitSun(k) {
+    k = clamp(k, 0, 1); if (Math.abs(k - sunK) < 1e-4) return; sunK = k;
+    ORB_SUN.copy(sph(lerp(SUN_AZ[0], SUN_AZ[1], k), lerp(SUN_EL[0], SUN_EL[1], k)));
+    if (typeof shipSun !== 'undefined') shipSun.position.copy(ORB_SUN).multiplyScalar(100);
+    if (typeof rebuildOrbitEnv !== 'undefined' && Math.abs(k - envSunK) > 0.08) { envSunK = k; rebuildOrbitEnv(); }
+  }   // low over the limb: grazing light on the ground ahead, the terminator just behind the ship
   const orbit = createOrbitScene(ORB_SUN);
   const shipScene = new THREE.Scene();
+  let rebuildOrbitEnv;
   // Ship lighting in orbit: hard sun key, warm bounce up from the planet, a cool rim from the limb, near-black ambient
   // (a cheat, as in film: the key comes from the camera's side so the hull reads; the real sun gives a hard back rim)
   const shipKey = new THREE.DirectionalLight(0xffe8d0, 2.2); shipKey.position.copy(sph(160, 32)).multiplyScalar(100);
@@ -478,9 +522,12 @@ export async function initLanding(step) {
         c += vec3(1.0, 0.55, 0.25) * exp(-abs(d.y - lim) * 40.0) * 0.8;
         c += vec3(1.0, 0.96, 0.9) * pow(max(dot(d, normalize(uSun)), 0.0), 400.0) * 12.0;
         gl_FragColor = vec4(c, 1.0); }` })));
-    shipScene.environment = pmrem.fromScene(env, 0).texture;
+    let rt = null;
+    rebuildOrbitEnv = () => { const n = pmrem.fromScene(env, 0); shipScene.environment = n.texture; rt?.dispose(); rt = n; };
+    rebuildOrbitEnv();
   }
   const glow = createPoints(1200, true, shipScene);       // plasma streaks
+  const puffs = createPoints(900, false, shipScene);     // RCS gas
   // Post-processing (bloom, tone mapping, grade) and the look
   const post = createPost(renderer, scene, orbit.scene, orbit.camera, shipScene, camera);
   const orbitFlare = createFlare(); orbit.scene.add(orbitFlare.lf);
@@ -681,7 +728,8 @@ export async function initLanding(step) {
     dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
     et = 0; ent = { h: L.ENTRY.h0, v: L.ENTRY.v0, I: 0, fade: 0, u: 0 };
     fall.ang = fall.rate = 0;
-    ship.visible = true; debris.forEach(d => { d.m.visible = false; }); fire.clear(); dust.clear(); glow.clear();
+    ship.visible = true; debris.forEach(d => { d.m.visible = false; }); fire.clear(); dust.clear(); glow.clear(); puffs.clear();
+    orbitSun(0); setVac([0, 0, 0], 0, 0); rvacMat.emissiveIntensity = 0; $('lndBurn').hidden = true; deoShot = '';
     shipScene.add(ship); ship.position.set(0, 0, 0);
     $('lndResult').hidden = true; $('lndFeed').textContent = ''; $('lndReplay').hidden = true; fadeAmt = 0;
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
@@ -690,7 +738,7 @@ export async function initLanding(step) {
   }
   function begin() {
     if (source === 'rig' && !rigLive()) { callout('NO RIG DATA · CONNECT THE ARDUINO', 2600, 'warn'); return; }
-    state = 'deorbit'; et = 0; dipAmt = 0;
+    state = 'deorbit'; et = 0; dipAmt = 0; idleHold = false;
     callout('DEORBIT BURN', 2200);
     refresh();
   }
@@ -863,12 +911,13 @@ export async function initLanding(step) {
       pitch = 88; phi += v / 1000 / (R_MARS + h / 1000) * dt * 4;
     } else if (state === 'deorbit') {
       et += dt;
-      // swing tail-first, burn, swing back belly-first
-      const k1 = sstep(0, 0.9, et), k2 = sstep(2.1, 3.0, et);
-      pitch = 88 + 180 * k1 - 184 * k2; thr = et > 0.9 && et < 2.1 ? 0.7 : 0;
-      if (thr > 0 && !calls.ign) { calls.ign = true; flashScreen(0.25); }
+      pitch = deorbitPitch(et); curPitch = pitch;
       phi += v / 1000 / (R_MARS + h / 1000) * dt * 4;
-      if (et >= E.deorbit) { state = 'entry'; et = 0; callout('ENTRY INTERFACE · <b>×' + E.warp + ' TIME WARP</b>', 2600); }
+      deorbitFx(dt);
+      if (et >= E.deorbit) {
+        state = 'entry'; et = 0; setVac([0, 0, 0], 0, 0); $('lndBurn').hidden = true; dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }; tvc.rotation.set(0, 0, 0);
+        callout('ENTRY INTERFACE · <b>×' + E.warp + ' TIME WARP</b>', 2600);
+      }
     } else if (state === 'entry') {
       et += dt;
       const u = clamp(et / E.entry, 0, 1);
@@ -878,15 +927,19 @@ export async function initLanding(step) {
       phi += v / 1000 / (R_MARS + h / 1000) * dt * E.warp;
       ent.I = sstep(0.06, 0.3, u) * (1 - sstep(0.6, 0.86, u));
       ent.fade = sstep(0.86, 1, u); ent.u = u;
+      orbitSun(sstep(0.12, 1, u));
+      rvacMat.emissiveIntensity *= Math.exp(-dt * 0.8);
       if (u > 0.3) once('peak', 'PEAK HEATING · <b>1,600 °C</b> ON THE TILES', 2400);
       if (u >= 1) { ent.h = h; ent.v = v; cutToGround(); return; }
     }
     ent.h = h; ent.v = v;
+    if (state !== 'deorbit') curPitch = pitch;
     ship.quaternion.copy(bellyQ(pitch));
     ship.position.set(0, 0, 0);
-    tvc.rotation.set(0, 0, 0);
+    if (state !== 'deorbit') tvc.rotation.set(0, 0, 0);
     setFlaps(state === 'entry' ? 0.3 + 0.1 * Math.sin(et * 2.3) : 0.1, state === 'entry' ? 0.3 - 0.1 * Math.sin(et * 2.3) : 0.1);
-    setPlume(thr, simClock);
+    setPlume(0, simClock);
+    puffs.update(dt);
     // Plasma sheath, wake and streaks
     const I = state === 'entry' ? ent.I : 0;
     plasma.visible = wake.visible = shock.visible = I > 0.01;
@@ -907,6 +960,86 @@ export async function initLanding(step) {
       }
     }
     glow.update(dt);
+  }
+
+  // ---------- Deorbit burn (screen seconds; ENTRY.deorbit = 10.4) ----------
+  //   a 0-1.2 prep · b 1.2-4.2 flip tail-first (RCS) · c 4.2-4.8 staggered ignition · d 4.8-7.4 burn ·
+  //   e 7.4-7.9 shutdown · f 7.9-10.4 flip back belly-first (RCS), then entry
+  const DEO = { flip1: [1.2, 4.2], ign: 4.2, burn: [4.8, 7.4], off: 7.4, flip2: [7.9, 10.4] };
+  // An attitude slew: accelerate, coast, decelerate, then a small overshoot that settles
+  const slew = (t, t0, t1) => { const u = clamp((t - t0) / (t1 - t0), 0, 1), e = u * u * (3 - 2 * u);
+    const after = Math.max(0, t - t1); return e + (u >= 1 ? 0.012 * Math.sin(after * 7) * Math.exp(-after * 2.5) : 0); };
+  function deorbitPitch(t) { return 88 + 180 * slew(t, ...DEO.flip1) - 184 * slew(t, ...DEO.flip2); }
+  const vacLevel = t => [0, 1, 2].map(i => { const t0 = DEO.ign + i * 0.08;
+    return t < t0 ? 0 : t < DEO.off ? Math.min(1, (t - t0) / 0.25) * 0.85 : Math.max(0, 1 - (t - DEO.off) / 0.3) * 0.85; });
+  const _rp = new THREE.Vector3(), _rd = new THREE.Vector3();
+  // Puffs at the nose and tail in opposite directions (pitch couple); sign = which way it turns
+  function rcs(sign, n) {
+    for (const [along, dir] of [[NOSE * 0.86, 1], [-TAIL * 0.92, -1]]) for (let i = 0; i < n; i++) {
+      _rp.set(R * 1.02 * dir * sign, along, rnd(-1, 1)).applyQuaternion(ship.quaternion);
+      _rd.set(dir * sign, rnd(-0.15, 0.15), rnd(-0.25, 0.25)).normalize().applyQuaternion(ship.quaternion);
+      const v = rnd(18, 34);
+      puffs.emit({ x: _rp.x, y: _rp.y, z: _rp.z, vx: _rd.x * v, vy: _rd.y * v, vz: _rd.z * v, life: rnd(0.35, 0.8), s0: 0.8, s1: rnd(5, 9), a: 0.75, drag: 0, rgb: [0.95, 0.95, 1] });
+    }
+  }
+  let deoShot = '', curPitch = 88;
+  function deorbitFx(dt) {
+    if (dt <= 0) return;
+    const t = et;
+    if (t < 1.2) once('deo', 'DEORBIT BURN · <b>T-3</b>', 1400);
+    // RCS: start and stop of each slew, a short burst each
+    const burst = (t0) => t > t0 && t < t0 + 0.45;
+    if (burst(DEO.flip1[0])) rcs(1, 3); if (burst(DEO.flip1[1] - 0.5)) rcs(-1, 3);
+    if (burst(DEO.flip2[0])) rcs(-1, 3); if (burst(DEO.flip2[1] - 0.5)) rcs(1, 3);
+    if (t > DEO.flip1[1] && t < DEO.flip1[1] + 0.25 && Math.random() < 0.3) rcs(Math.random() < 0.5 ? 1 : -1, 1);   // trim the overshoot
+    // Engines
+    const k = vacLevel(t), start = t > DEO.ign && t < DEO.ign + 0.6 ? 1 - (t - DEO.ign) / 0.6 : 0;
+    setVac(k, start, simClock);
+    if (t > DEO.ign && !calls.ign) { calls.ign = true; flashScreen(0.18); shake = 0.8; callout('IGNITION', 1200); }
+    if (t > DEO.ign) rvacMat.emissiveIntensity = t < DEO.off ? Math.min(1.6, rvacMat.emissiveIntensity + dt * 0.5) : rvacMat.emissiveIntensity * Math.exp(-dt * 0.6);
+    // Small gimbal corrections on the centre engines while burning
+    const burning = t > DEO.burn[0] && t < DEO.off;
+    const gy = burning ? 0.9 * Math.sin(t * 3.1) + 0.4 * Math.sin(t * 7.3) : 0, gx = burning ? 0.6 * Math.sin(t * 2.3 + 1) : 0;
+    tvc.rotation.set(gx * DEG * 1.6, 0, -gy * DEG * 1.6);
+    dev = { tiltX: 0, tiltY: 0, gx, gy };
+    // Burn panel: delta-v and periapsis
+    const bu = clamp((t - DEO.ign) / (DEO.off - DEO.ign), 0, 1);
+    $('lndBurn').hidden = t < DEO.ign || t > DEO.flip2[0] + 0.8;
+    $('lndDv').textContent = (L.ENTRY.dv * bu).toFixed(1);
+    $('lndPe').textContent = (200 - 160 * bu).toFixed(0);
+    if (t > DEO.off && !calls.cut) { calls.cut = true; callout('SHUTDOWN · <b>Δv ' + L.ENTRY.dv + ' M/S</b>', 1600); rcs(1, 4); }
+    if (t > DEO.flip2[1] - 1.6 && !calls.ei) { calls.ei = true; callout('ENTRY INTERFACE IN <b>3 · 2 · 1</b>', 1500); }
+  }
+  // Camera beats for the deorbit: always toward the sunrise / limb or across the ship, never straight down
+  const _ct = new THREE.Vector3();
+  function placeCam(shipAz, shipEl, viewAz, viewEl, d, roll = 0) {
+    camera.position.copy(sph(shipAz, shipEl)).multiplyScalar(-d);
+    camera.up.set(0, 1, 0); camera.lookAt(_ct.copy(camera.position).addScaledVector(sph(viewAz, viewEl), 1000));
+    if (roll) camera.rotateZ(roll * DEG);
+  }
+  function deorbitShot(dt) {
+    const t = et, asp = camera.aspect, sq = Math.min(1, asp / 1.6), far = Math.max(1, 1.5 / Math.max(asp, 0.4));
+    const sc = (shipAz, shipEl, viewAz, viewEl, d, roll) => placeCam(viewAz + (shipAz - viewAz) * sq, viewEl + (shipEl - viewEl) * sq, viewAz, viewEl, d * far, roll);
+    let name;
+    if (t < DEO.flip1[0]) {                                     // a: hold the idle framing, push in
+      name = 'a'; camera.position.multiplyScalar(1 - dt * 0.06);
+    } else if (t < DEO.ign) {                                   // b: 3/4 side as it swings tail-first, the limb behind
+      name = 'b'; const u = (t - DEO.flip1[0]) / (DEO.ign - DEO.flip1[0]);
+      sc(-22, -5, -34, -12, lerp(150, 132, u), lerp(-1, 1, u));
+    } else if (t < DEO.burn[0] + 0.9) {                         // c: close on the bells at ignition
+      name = 'c'; const u = (t - DEO.ign) / 1.5;
+      camera.position.set(lerp(30, 26, u), lerp(10, 8, u), lerp(62, 55, u)); camera.up.set(0, 1, 0); camera.lookAt(18, -2, 0);
+    } else if (t < DEO.flip2[0]) {                              // d: wide, the plume against the planet and the sun
+      name = 'd'; const u = (t - DEO.burn[0] - 0.9) / (DEO.flip2[0] - DEO.burn[0] - 0.9);
+      sc(-26, -8, -42, -14, lerp(430, 390, u), 0.5);
+    } else {                                                    // f: back to 3/4, easing into the entry framing
+      name = 'f'; const u = sstep(DEO.flip2[0], DEO.flip2[1], t);
+      _pv.copy(sph(-30, -8)).multiplyScalar(-160).lerp(_co.set(-130, 80, -150), u);
+      camera.position.copy(_pv); camera.up.set(0, 1, 0);
+      _ct.copy(_pv).addScaledVector(sph(-40, -14), 1000).lerp(_lo.set(0, -45, 0), u * u); camera.lookAt(_ct);
+    }
+    deoShot = name;
+    camOff.copy(camera.position); orbLook.set(0, -45, 0);
   }
 
   // ---------- Placing the ship in the ground scene ----------
@@ -1026,6 +1159,12 @@ export async function initLanding(step) {
     if (inOrbit()) {   // orbit pass: the camera moves round the ship at the origin
       let off;
       if (state === 'orbit' && camMode !== 'free') { idleShot(dt); return; }
+      if (state === 'deorbit' && camMode !== 'free') {
+        deorbitShot(dt);
+        const sh = shake;
+        if (sh > 0.001 && !paused) { camera.position.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.5)); shake *= Math.exp(-dt * 3); }
+        return;
+      }
       if (state === 'orbit' || state === 'deorbit') off = _co.set(-80, 70, -110);
       else { const u = ent.u; off = _co.set(lerp(-130, -46, sstep(0, 0.6, u)), lerp(80, 22, sstep(0, 0.6, u)), lerp(-150, -64, sstep(0, 0.6, u))); }
       if (camMode === 'free') controls.update(); else {
@@ -1090,7 +1229,7 @@ export async function initLanding(step) {
     $('lndVs').textContent = vs.toFixed(1);
     const spd = orb ? ent.v : flying ? Math.hypot(s.vx, s.vh, s.vz) : 0;
     $('lndSpd').textContent = (spd * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 });
-    const thr = orb ? (state === 'deorbit' && et > 0.9 && et < 2.1 ? 0.7 : 0) : curThr();
+    const thr = orb ? (state === 'deorbit' ? vacLevel(et).reduce((x, y) => x + y) / 3 : 0) : curThr();
     $('lndThr').style.width = `${clamp(thr, 0, 1) * 100}%`;
     $('lndThrV').textContent = `${Math.round(clamp(thr, 0, 1) * 100)}%`;
     const dp = orb ? null : flight.drift;
@@ -1117,7 +1256,7 @@ export async function initLanding(step) {
     if (state === 'flight' && s.phase === 'tvc' && !paused) { trail.push([px, py]); if (trail.length > 45) trail.shift(); }
     $('lndTrail').setAttribute('points', trail.map(q => q.join(',')).join(' '));
     if (!tvcOn) {
-      const pitch = orb ? 84 : s.tilt;
+      const pitch = orb ? ((curPitch % 360) + 360) % 360 : s.tilt;
       $('lndTiltL').textContent = 'Pitch'; $('lndTilt').textContent = pitch.toFixed(0) + '°'; $('lndTilt').className = '';
     } else {
       const t = L.tiltOf(a.tiltX, a.tiltY);
@@ -1198,7 +1337,7 @@ export async function initLanding(step) {
     camera.aspect = w / h; camera.updateProjectionMatrix();
     orbit.resize(w / h, camera.fov);
     const sc = h * renderer.getPixelRatio() / (2 * Math.tan(camera.fov * DEG / 2));
-    dust.setScale(sc); fire.setScale(sc); glow.setScale(sc);
+    dust.setScale(sc); fire.setScale(sc); glow.setScale(sc); puffs.setScale(sc);
   }
   new ResizeObserver(resize).observe(view);
 

@@ -1,7 +1,6 @@
-// Entry point: builds the Bench tab, the tab switching, then the Mission tab, reporting each step
+// Entry point: builds the Bench tab, the tab switching, then the Landing tab, reporting each step
 // to the loading screen (loader.js).
 import { initBench } from './bench.js';
-import { initMission } from './mission.js';
 import { initTests } from './tests.js';
 import { initLanding } from './landing.js';
 
@@ -18,7 +17,7 @@ await step(0.3, 'Building bench rig');
 const bench = initBench();
 initTests(bench);
 
-// ---------- Tabs: the bench view moves into a mini side panel on Mission; the serial log moves to the Tests tab ----------
+// ---------- Tabs: the serial log moves to the Tests tab ----------
 const view = $('view');
 const benchMain = $('benchMain');
 const serialLog = $('serialLog'), logHome = serialLog.parentElement;
@@ -26,15 +25,14 @@ function setTab(name) {
   document.body.dataset.tab = name;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $('crumb').textContent = name;
-  if (name === 'mission') $('mbSlot').appendChild(view);
-  else benchMain.prepend(view);
+  benchMain.prepend(view);
   if (name === 'tests') $('tLogSlot').appendChild(serialLog);
   else logHome.appendChild(serialLog);
   lockWidths();
   try { localStorage.setItem('tvc-tab', name); } catch {}
 }
 
-// Labels that swap text (Connect/Disconnect, Bench/Mission, …) get a min-width equal to their
+// Labels that swap text (Connect/Disconnect, …) get a min-width equal to their
 // longest version, so switching never nudges the controls beside them.
 function lockWidths() {
   document.querySelectorAll('[data-labels]').forEach(el => {
@@ -50,19 +48,11 @@ document.fonts.ready.then(lockWidths);
 window.addEventListener('resize', lockWidths);
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => setTab(b.dataset.tab));
 
-$('mbExpand').onclick = () => setTab('bench');
-$('mbCollapse').onclick = () => {
-  const c = $('miniBench').classList.toggle('collapsed');
-  $('mbCollapse').textContent = c ? '+' : '–';
-  $('mbCollapse').title = c ? 'Expand' : 'Collapse';
-};
-if (matchMedia('(max-width: 760px), (max-height: 520px)').matches) $('mbCollapse').onclick();
 
-const mission = await initMission(step);
 await initLanding(step);
 
 // ---------- Intro after the loading screen ----------
-// Mission: the camera flies in from space while the HUD boots in around it. Bench: just the HUD boot.
+// The HUD boots in panel by panel.
 // Same-tab reloads (cached) skip the fly-in and get a quick HUD fade; "reduce motion" gets the loader's plain fade only.
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 function bootHUD(selectors, startMs, gapMs) {
@@ -81,11 +71,7 @@ function bootHUD(selectors, startMs, gapMs) {
 document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
   if (reduceMotion.matches) return;
   const g = quick ? 12 : 40;   // panels land around when the camera does (~2 s)
-  if (document.body.dataset.tab === 'mission') {
-    if (!quick) mission.flyIn(1.8);
-    bootHUD([['header'], ['.m-strip .ms-tile'], ['.m-controls'], ['#mPY'], ['#minimap'], ['.m-events'], ['#evList li', quick ? 4 : 12],
-             ['#miniBench'], ['.m-gauges'], ['.m-center'], ['.tl-ev', quick ? 6 : 25], ['.m-gimbal']], quick ? 0 : 450, g);
-  } else if (document.body.dataset.tab === 'landing') {
+  if (document.body.dataset.tab === 'landing') {
     bootHUD([['header'], ['.lnd-controls'], ['.lnd-source'], ['.lnd-alt'], ['.lnd-center'], ['.lnd-att']], quick ? 0 : 120, g);
   } else if (document.body.dataset.tab === 'tests') {
     bootHUD([['header'], ['.t-rail > *'], ['.t-strip'], ['#testsHome, .cal:not([hidden])'], ['.t-viz .t-tile']], quick ? 0 : 120, g);
@@ -95,10 +81,10 @@ document.addEventListener('tvc:reveal', ({ detail: { quick } }) => {
 });
 
 $('appVersion').textContent = 'v' + VERSION;
-// Mission is the home page; Landing, Bench or Tests only if that's where the viewer last was
+// Landing is the home page; Bench or Tests only if that's where the viewer last was
 let savedTab = null;
 try { savedTab = localStorage.getItem('tvc-tab'); } catch {}
-setTab(['bench', 'tests', 'landing'].includes(savedTab) ? savedTab : 'mission');
+setTab(['bench', 'tests'].includes(savedTab) ? savedTab : 'landing');
 // Footer loader previews (temporary): Fuel / Arc
 document.querySelectorAll('[data-ld]').forEach(b => { b.onclick = () => loader?.preview(b.dataset.ld); });
 loader?.set(1, 'Ready');

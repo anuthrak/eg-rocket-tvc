@@ -1,6 +1,6 @@
 # Rocket TVC Desk Rig (SLDP 45)
 
-EG1004 Semester-Long Design Project: a 632 mm 3D-printed rocket with an electric ducted fan (EDF) in a two-axis gimbal. An Arduino Nano reads an MPU6050 and steers the fan's thrust with two servos to hold the rocket upright on a desk rig that pivots at its centre of mass. A browser visualizer shows the rocket live and runs an Earth-to-Moon mission sim.
+EG1004 Semester-Long Design Project: a 632 mm 3D-printed rocket with an electric ducted fan (EDF) in a two-axis gimbal. An Arduino Nano reads an MPU6050 and steers the fan's thrust with two servos to hold the rocket upright on a desk rig that pivots at its centre of mass. A browser visualizer shows the rocket live and runs a Mars landing sim flown by the real TVC.
 
 **Constraints:** under $100 (spent $93.39), no lithium batteries. Full write-up: [docs/PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md).
 
@@ -13,7 +13,7 @@ MPU6050 → Arduino Nano (both on the avionic sled inside the rocket) → 2× MG
 - [x] TVC gimbal (K-9 V7) and motor tube (V8) printed
 - [x] Body, sled and assembly drawings released (batch 001)
 - [x] Firmware v1.13.1: IMU → PID → servos, calibration over serial, tilt abort, free-test mode, EDF throttle (ESC on D3), gimbal hold (`GIM`), gyro rates in calibration mode, `ARM REST` (motor test from a rocket resting on a rig stop)
-- [x] Web visualizer: live Bench view, Tests tab (System check, Calibrate, Free-hand, Laser CT-1, Throttle CT-4, Thrust vector CT-5, Stability IT-3), Mission sim
+- [x] Web visualizer: live Bench view, Tests tab (System check, Calibrate, Free-hand, Laser CT-1, Throttle CT-4, Thrust vector CT-5, Stability IT-3), Landing sim
 - [ ] Joint test, body and sled printed and assembled
 - [x] EDF + ESC arrived, first spin-up, System check passing (Nov 17)
 - [ ] Throttle in flight mode; CT-5 thrust-vector test on the rig
@@ -41,10 +41,10 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── throttle.js                  Tests → Throttle: CT-4 EDF throttle test, CSV + past runs
 ├── vector.js                    Tests → Thrust vector: CT-5 motor + gimbal on the pivot, no scale
 ├── stability.js                 Tests → Stability: IT-3 rig balance, motor off (CG vs pivot, friction, fix)
-├── mission.js                   Mission tab: Earth → Moon sim, cameras, HUD
 ├── landing.js                   Landing tab: Starship-style Mars landing, last 150 m flown by the real rig or simulated
 ├── landing-sim.js               Landing tab physics (belly flop, flip, TVC landing, gusts, push timer); no Three.js
 ├── landing-orbit.js             Landing tab: Mars from orbit (planet, clouds, atmosphere glow, stars)
+├── landing-look.js              Landing tab: looks, bloom + grading, lens flare, quality levels
 └── public/                      static assets: favicon, app icons, images
 cad/                             CadQuery models + drawing generators (Python)
 ├── lib/                         shared: sheet helpers, hidden-line removal, TVC assembly, paths
@@ -104,8 +104,7 @@ Without the visualizer, type the same commands into the Serial Monitor (115200, 
 
 Three.js and Web Serial, with no build step.
 
-- **Mission** (home page): Earth-to-Moon flight sim with a TVC controller and a SpaceX-style dashboard.
-- **Landing:** a Starship-style ship from Mars orbit to touchdown: plasma entry, belly flop and flip on autopilot, then the TVC lands it from right after the flip. **Rig · live**: the real rocket's tilt and nozzle on the desk rig are added to the ship's attitude, so pushing the real rocket pushes the ship. **Simulated**: no hardware; the Nano's controller flies it, with gusts (**Gust** or G), a **TVC: Off** switch, **Pause** (Space) and **Auto-loop** for a booth.
+- **Landing** (home page): a Starship-style ship from Mars orbit to touchdown: plasma entry, belly flop and flip on autopilot, then the TVC lands it from right after the flip. **Rig · live**: the real rocket's tilt and nozzle on the desk rig are added to the ship's attitude, so pushing the real rocket pushes the ship. **Simulated**: no hardware; the Nano's controller flies it, with gusts (**Gust** or G), a **TVC: Off** switch, **Pause** (Space) and **Auto-loop** for a booth.
 - **Bench:** live 3D view of the rig from the Arduino, with readouts and a chart on the left and gimbal/link details on the right.
 
 **Live:** https://eg-rocket-tvc.vercel.app (every push to `main` redeploys)

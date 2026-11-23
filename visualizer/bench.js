@@ -563,7 +563,7 @@ export function initBench() {
 
   function setStatus(text, on) {
     $('statusText').textContent = text;
-    for (const id of ['dot', 'mbLive']) { $(id).classList.toggle('on', !!on); $(id).classList.remove('stale'); }
+    $('dot').classList.toggle('on', !!on); $('dot').classList.remove('stale');
   }
   // Serial log: newest at the bottom, keeps the last 200 lines, follows new lines unless you've scrolled up
   function logLine(text, cls) {
@@ -772,7 +772,7 @@ export function initBench() {
   function drawChart() {
     const dpr = Math.min(devicePixelRatio, 2);
     const w = chart.clientWidth, h = chart.clientHeight;
-    if (!w || !h) return; // hidden while on the Mission tab
+    if (!w || !h) return; // hidden while on another tab
     if (chart.width !== w * dpr) { chart.width = w * dpr; chart.height = h * dpr; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -866,10 +866,6 @@ export function initBench() {
     $('rollVal').textContent = f1(target.roll);
     $('pitchMax').textContent = d1(peak.pitch);
     $('yawMax').textContent = d1(peak.yaw);
-    $('mbP').textContent = d1(target.pitch);
-    $('mbY').textContent = d1(target.yaw);
-    $('mpyP').textContent = d1(target.pitch); $('mpyY').textContent = d1(target.yaw);
-    $('mPY').classList.toggle('on', hasData);   // one-line P/Y under the mission controls on phones
     $('pitchCard').classList.toggle('limit', hasData && Math.abs(target.pitch) >= 44.5);
     $('yawCard').classList.toggle('limit', hasData && Math.abs(target.yaw) >= 44.5);
 
@@ -898,7 +894,7 @@ export function initBench() {
     if (port) {
       const stale = now - (lastLineT ?? linkStart) > 1000;
       $('statusText').textContent = stale ? 'Stale' : 'Live';
-      for (const id of ['dot', 'mbLive']) { $(id).classList.toggle('on', !stale); $(id).classList.toggle('stale', stale); }
+      $('dot').classList.toggle('on', !stale); $('dot').classList.toggle('stale', stale);
     }
 
     // Gimbal panel
