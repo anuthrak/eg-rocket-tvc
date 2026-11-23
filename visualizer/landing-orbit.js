@@ -190,7 +190,7 @@ export function createOrbitScene(sunDir) {
 
   // Sun: a star-burst sprite, faded by how much of the disc clears the limb (set each frame)
   const burst = new THREE.Sprite(new THREE.SpriteMaterial({ map: starburstTex(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: 0xffffff }));
-  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.1); scene.add(burst);
+  burst.position.copy(sun).multiplyScalar(7e5); burst.scale.setScalar(7e5 * 0.045); scene.add(burst);
 
   // Planet
   const planetU = { uSun: { value: sun }, uCanyonC: { value: new THREE.Vector3(1, 0, 0) }, uCanyonA: { value: new THREE.Vector3(0, 0, 1) },
