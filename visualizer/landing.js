@@ -207,7 +207,27 @@ export async function initLanding(step) {
     return t;
   }
   const cloudMeshes = [];
-  const clouds = [cloudLayer(7600, 90000, 0.75, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
+  // The cloud deck the ship falls through (6.6–8.1 km): soft sprite wisps round its path, bright lit tops, grey-orange
+  // ragged base. The flat layer at 6.55 km is the overcast ceiling seen from below after the breakout.
+  const DECK = { base: 6600, top: 8100 };
+  const wispTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    for (let i = 0; i < 14; i++) { const x = 64 + rnd(-26, 26), y = 64 + rnd(-26, 26), r = rnd(18, 44);
+      const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 128, 128); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const wisps = [];
+  function buildWisps(n, cx, cz) {
+    wisps.forEach(w => scene.remove(w)); wisps.length = 0;
+    for (let i = 0; i < n; i++) {
+      const y = rnd(DECK.base - 60, DECK.top), k = (y - DECK.base) / (DECK.top - DECK.base);
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, transparent: true, depthWrite: false, rotation: rnd(0, 6.28),
+        color: new THREE.Color().setRGB(lerp(0.55, 1, k), lerp(0.45, 0.93, k), lerp(0.4, 0.86, k)), opacity: lerp(0.35, 0.8, Math.min(1, k * 3)) }));
+      const near = i % 3 === 0;   // a third close to the path so they rush past the camera
+      m.position.set(cx + rnd(-1, 1) * (near ? 90 : 700), y, cz + rnd(-1, 1) * (near ? 90 : 700));
+      m.scale.setScalar(near ? rnd(40, 110) : rnd(120, 320)); m.renderOrder = 3; scene.add(m); wisps.push(m);
+    }
+  }
+  const clouds = [cloudLayer(6550, 90000, 0.75, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
   // Sun lens flare (landing-look.js), parked far along the sun direction each frame
   const flare = createFlare(); scene.add(flare.lf);
 
@@ -817,8 +837,9 @@ export async function initLanding(step) {
     scene.add(ship);
     plasma.visible = false; wake.visible = false; shock.visible = false; M.tiles.emissiveIntensity = 0; glow.clear();
     ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; burnEl.hidden = true; heatPanel(false);
-    fadeOut = 1.4;
-    once('belly', 'BELLY FLOP · <b>8 KM</b>', 2200);
+    fadeOut = 0.8; tBreak = null; trk = null;
+    buildWisps({ high: 240, medium: 150, low: 70 }[qName] ?? 240, flight.s.x ?? 0, flight.s.z ?? 0);
+    once('belly', 'BELLY FLOP · <b>INSIDE THE CLOUD DECK</b>', 2200);
     refresh();
   }
   function handover() {
@@ -1224,7 +1245,11 @@ export async function initLanding(step) {
     if (state === 'replay') return 'replay';
     if (state === 'flight') {
       const s = flight.s;
-      if (s.phase === 'belly') return s.t < 4.5 ? 'wide' : s.t < 9.5 ? 'flaps' : 'high';
+      if (s.phase === 'belly') {   // shaky close-up through the deck → long-lens tracking cam as it pierces the base
+        if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; }
+        if (tBreak === null) return 'close';
+        return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.5 ? 'flaps' : 'high';
+      }
       if (s.phase === 'flip') return 'flip';
       return s.h > 70 ? 'chase' : 'pad';
     }
@@ -1235,6 +1260,7 @@ export async function initLanding(step) {
     const h = flight.s.h;
     switch (name) {
       case 'wide': _co.set(-105 + 20 * Math.sin(orbitA), 42, -118); _lo.set(0, -8, 0); break;
+      case 'close': _co.set(-19, 3.5, -15); _lo.set(3, -2, 0); break;            // riding along by the aft flap
       case 'flaps': _co.set(-34, 12, -30); _lo.set(-12, -2, 0); break;                 // close on the aft flaps working
       case 'high': _co.set(-70, 120, -160); _lo.set(0, -40, 0); break;                 // pull back: the ground coming up
       case 'flip': _co.set(-40, 10, -150); _lo.set(0, 0, 0); break;
@@ -1270,7 +1296,7 @@ export async function initLanding(step) {
     camOff.copy(camera.position); orbLook.copy(camera.position).addScaledVector(_vd, d);
     dipAmt = Math.max(sstep(SHOT_T - 0.5, SHOT_T, idleT), 1 - sstep(0, 0.6, idleT));
   }
-  let dipAmt = 0;
+  let dipAmt = 0, tBreak = null, trk = null;
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
   const ENT_CAM = [[V3(-50, -4, -62), null, V3(0, -8, 0)], [V3(128, -66, -58), V3(108, -58, -82), V3(2, -6, 0)], [V3(-4, 12, 74), V3(-24, 7, 62), V3(-16, 2, 0)]];
   function cameraStep(dt) {
@@ -1307,6 +1333,25 @@ export async function initLanding(step) {
     if (camMode === 'still') return;
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
     const name = shot(), sp = ship.position;
+    if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
+      if (shotName !== 'track') {
+        trk = { p: sp.clone().add(_co.set(-1900, -2100, -1300)), a: sp.clone().add(_lo.set(40, -170, 25)), v: new THREE.Vector3(), t: 0 };
+        if (camera.position.y < 0) camera.position.y = 0;
+      }
+      trk.t += dt;
+      if (!paused) {
+        _lo.copy(sp).sub(trk.a).multiplyScalar(7).addScaledVector(trk.v, -3.4);           // spring-damper aim
+        trk.v.addScaledVector(_lo, dt); trk.a.addScaledVector(trk.v, dt);
+        trk.a.add(_lo.set(flight.s.vx, flight.s.vh, flight.s.vz).multiplyScalar(dt * 0.97));   // pans with it (slightly behind)
+        trk.a.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(1.6));       // hand jitter
+        if (Math.random() < 0.02) trk.v.add(_lo.set(rnd(-1, 1), rnd(-1, 1), 0).multiplyScalar(25));   // a bump
+      }
+      camera.position.copy(trk.p); camera.lookAt(trk.a);
+      camera.rotateZ(0.6 * DEG * Math.sin(trk.t * 1.3));
+      const fov = lerp(7, 3.2, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
+      if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
+      shotName = name; padCam = true; return;
+    }
     if (name === 'pad' || name === 'replay') {
       const P = name === 'pad' ? PAD_CAM : REPLAY_CAM;
       if (name !== shotName) { camera.position.copy(P); lookOff.set(sp.x, clamp(0.45 * (sp.y + 15), 14, 60), sp.z); }
@@ -1317,7 +1362,7 @@ export async function initLanding(step) {
       padCam = true;
     } else {
       camGoal(name);
-      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || shotName === 'flaps');
+      const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'close' || shotName === 'flaps' || shotName === 'track');
       if (padCam || cut) { camOff.copy(cut ? _co : camera.position.clone().sub(sp)); lookOff.copy(_lo); padCam = false; }
       camOff.lerp(_co, 1 - Math.exp(-dt * 1.2)); lookOff.lerp(_lo, 1 - Math.exp(-dt * 2));
       camera.position.copy(sp).add(camOff);
@@ -1327,11 +1372,17 @@ export async function initLanding(step) {
     }
     shotName = name;
     const s = flight.s;
+    if (tBreak !== null && state === 'flight' && s.phase === 'belly' && s.t < tBreak + 2.5 && !paused) {   // torn streamers off the flaps
+      if (s.h < DECK.base) once('base', 'CLOUD BASE · <b>6.6 KM</b>', 2000);
+      for (const i of [1, 2, 3, 4]) { const a = ship.localToWorld(_pv.copy(ribbons[i].a));
+        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-4, 4), vy: -s.vh * 0.85 + rnd(-10, 10), vz: rnd(-4, 4), life: rnd(0.6, 1.4), s0: 6, s1: 30, a: 0.35, drag: 0.6, rgb: [0.95, 0.9, 0.86] }); }
+    }
     const buffet = paused ? 0 : state === 'flight' ? (s.phase === 'belly' ? clamp(s.q / 1100, 0, 1) * 0.5 : s.phase === 'flip' ? 0.8 : 0.35 * sstep(40, 0, s.h)) : 0;
-    const sh = (paused ? 0 : shake) + buffet;
+    const inDeck = s.h > DECK.base - 40 && s.h < DECK.top ? 1 : 0;
+    const sh = (paused ? 0 : shake) + buffet + (name === 'close' && !paused ? 0.5 + 0.7 * inDeck + (Math.random() < 0.04 ? 1.6 : 0) : 0);
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) shake *= Math.exp(-dt * 2.5);
-    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' ? 50 : 40;
+    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' ? 52 : 40;
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
 
@@ -1498,7 +1549,7 @@ export async function initLanding(step) {
       else { placeShip(); setPlume(state === 'falling' || state === 'tipping' ? 0 : curThr(), simClock); }
       if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < 0.6)) record();
       if (!paused) effects(sdt);
-      if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 1.4; } else fadeAmt = 0;
+      if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 0.8; } else fadeAmt = 0;
       padLights.forEach((m, i) => { m.visible = Math.floor(simClock * 2 + i / 3) % 2 === 0 || state === 'landed'; });
       const lp = ship.position, throwD = Math.max(lp.y, 0) / SUN.y;
       sun.target.position.copy(lp).addScaledVector(SUN, -throwD); sun.position.copy(sun.target.position).addScaledVector(SUN, throwD + 120);
@@ -1532,6 +1583,7 @@ export async function initLanding(step) {
       },
       look(name) { lookOverride = name; },
       entry(u) { window.__entU = u; },
+      ground() { cutToGround(); },
       shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
     };
   }
