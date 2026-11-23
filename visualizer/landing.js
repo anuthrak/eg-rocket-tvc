@@ -986,17 +986,22 @@ export async function initLanding(step) {
       phi += v / 1000 / (R_MARS + h / 1000) * dt * 4;
       deorbitFx(dt);
       if (et >= E.deorbit) {
-        state = 'entry'; et = 0; setVac([0, 0, 0], [], 0); deoEndPos.copy(camera.position); deoEndLook.copy(deoLook); heatPanel(true); burnEl.hidden = false; entShot = -1; dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }; tvc.rotation.set(0, 0, 0);
-        callout('ENTRY INTERFACE · <b>×' + E.warp + ' TIME WARP</b>', 2600);
+        state = 'entry'; et = 0; setVac([0, 0, 0], [], 0); deoEndPos.copy(camera.position); deoEndLook.copy(deoLook); heatPanel(true); burnEl.hidden = false; entShot = -1; ent.tr = 0; dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }; tvc.rotation.set(0, 0, 0);
+        callout('ENTRY INTERFACE · <b>TIME WARP</b>', 2600);
       }
     } else if (state === 'entry') {
-      et += dt;
+      // Time warp ramps instead of switching: a 1.5 s beat at ×1 (the ship settles nose-up), ×1 → ×30 over 3 s, then
+      // down to ×10 into the cloud cut. Progress through the 20 s profile runs at warp/30; the badge counts live.
+      ent.tr += dt;
+      const wNow = 1 + (E.warp - 1) * sstep(1.5, 4.5, ent.tr) - (E.warp - 10) * sstep(0.88, 1, et / E.entry);
+      et += dt * wNow / E.warp;
+      $('lndWarp').textContent = '×' + Math.max(1, Math.round(wNow)) + ' time warp';
       if (window.__entU != null) et = window.__entU * E.entry;
       const u = clamp(et / E.entry, 0, 1);
       [h, v] = entryHV(u);
       const q = qRaw(h, v) / Q_MAX; ent.q = q;
-      pitch = lerp(84, 68, sstep(0, 0.15, u) * (1 - sstep(0.86, 1, u))) + 3 * Math.sin(et * 1.7) + 1.5 * q * Math.sin(et * 5.3) * Math.sin(et * 2.1);   // buffets a little at peak
-      phi += v / 1000 / (R_MARS + h / 1000) * dt * E.warp;
+      pitch = lerp(84, 68, sstep(0, 2.5, ent.tr) * (1 - sstep(0.86, 1, u))) + 3 * Math.sin(et * 1.7) + 1.5 * q * Math.sin(et * 5.3) * Math.sin(et * 2.1);   // buffets a little at peak
+      phi += v / 1000 / (R_MARS + h / 1000) * dt * clamp(wNow, 4, 12);   // ground scroll: from the orbit's ×4, capped: drifts, never races
       ent.I = Math.pow(clamp(q * 1.1, 0, 1), 0.8);
       tileT += (q - tileT) * (1 - Math.exp(-dt * (q > tileT ? 0.9 : 0.35)));   // thermal lag: heats fast, cools slowly
       $('lndQ').textContent = (q * 1.15).toFixed(2); $('lndTile').textContent = Math.round(20 + 1580 * tileT).toLocaleString('en-US');
