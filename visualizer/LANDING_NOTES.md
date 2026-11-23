@@ -1,0 +1,52 @@
+# Landing tab: working notes (handoff)
+
+Branch `landing-tab` (not merged; planned release v2.13.0 after user approval → merge to `main` → bump `VERSION` in `main.js`).
+CHANGELOG "Unreleased" lists every step. Read this file first in a new session.
+
+## How we work
+- One section at a time: write a short prompt/plan → user says "go" → one patch → at most one check render → commit, push,
+  pull the user's local copy (device bash: `cd $HOME/mnt/EG_SLDP && git -c core.autocrlf=true pull -q origin landing-tab`).
+- Keep token use low: terse replies, targeted `sed -n`/`grep` reads, no renders unless needed or asked.
+- Style: procedural only (no photo textures). The default look (not `?sunrise`) is the preferred one. No cinematic callout
+  banners (`callout()` only shows `cls` containing `sys`). Visual changes stay on the branch until approved.
+
+## Files
+- `landing.js`: everything in the scene. Key parts: `PHASE_LOOKS`; terrain `terrain(x,z)` (smooth plains, 420 craters,
+  7 mesas, far mountains/canyon) and the ground shader (`gMat.onBeforeCompile`, dune fields/streaks); sky shader (blue
+  sun halo); cloud deck `DECK` + `buildWisps` (cumulus clusters, sprites); ship model (`R`, `LEN`, `TAIL`, flaps, RVacs,
+  `vacCores`/`setVac`); entry plasma (`HEATC`, `plasmaMat`/`shockMat`/`wakeMat`, `ribbons`/`RIB`, `plasmaLight`,
+  `entryHV`/`qRaw`, `tileT`, heat panel `heatPanel()`); cameras `cameraStep` (`ENT_CAM`, `shot()`, `camGoal`, `track`
+  long-lens operator `trk`, `glint`); `cloudFx` (vapour trail, streamers, belly speed motes, chill-down, `bGust`);
+  `placeShip` (flap steering + wobble in belly); `reset()` (full reset for Fly again); `__lnd` debug API (`?debug`):
+  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`.
+- `landing-orbit.js`: orbit planet (craters, canyon, caps for late southern spring: `POLE_TILT`, `SPIN`), clouds, atmosphere,
+  stars, sun burst.
+- `landing-look.js`: looks A/B/C/space (palette now matches the orbit planet), grade shader, bloom, quality, flare.
+- `landing-sim.js`: physics (`createFlight`, phases belly → flip → tvc), `ENTRY` timings (entry 20 s profile, warp ramps).
+
+## Timeline (as built)
+Orbit idle → deorbit burn (`DEO`) → entry plasma (~25 s incl. warp ramp ×1→×30→×10) → hidden switch inside the cloud
+deck → shaky close-up (6.6–8.1 km) → long-lens tracking cam with vapour trail → belly flop shots (flaps, top-down, side)
+with chill-down and "Flip in 3·2·1" → flip → TVC landing → touchdown/crash, replay, result card.
+
+## Done (sections)
+Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (+ nose-up 70° AoA, smooth warp) ·
+4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset.
+
+## Next
+1. Flip: make it violent and readable (RVac/centre relight, flaps fold, big gimbal, camera).
+2. TVC landing plume: visible engine fire that points with the gimbal; dust kicked up near the ground.
+3. Landing legs deploy, touchdown dust storm, crash.
+4. Optional polish left out to save tokens: heat shimmer, uneven tile glow, entry grade, focus-hunt blur, ship shadow on
+   clouds/ground, flap-angle HUD graphic, mesa/canyon banding, canyon ground haze, cloud shadows.
+
+## Known issues
+- Debug `still()` from ~4 km can show a pure-black block (bloom NaN); pre-existing, not seen in flight shots.
+- Peak-entry shot still bright near the nose; tracking shot sky is Mars-orange (less contrast than the blue-sky refs).
+- Landing Monte Carlo script (`/tmp/mc2.mjs`) needs rewriting; flight physics untouched since it last passed (0/200 crashes
+  with TVC on).
+
+## Testing (headless)
+(Scripts lived in the previous session's container and may need recreating.) `/home/claude/srv.sh [speed]` serves a sped-up copy; `shotfast.py '[["wait",ms],["eval",js],["shot",name],...]'` with
+`Q='?debug'`. Headless runs at ~3–30 fps, so flight-time screenshots need long waits; use `__lnd.ground()` to skip to the
+cloud deck.
