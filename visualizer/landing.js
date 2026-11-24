@@ -246,7 +246,7 @@ export async function initLanding(step) {
   function puff(x, y, z, size, k, op) {
     const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, transparent: true, depthWrite: false, rotation: rnd(0, 6.28),
       color: new THREE.Color().setRGB(lerp(0.58, 1, k), lerp(0.5, 0.95, k), lerp(0.46, 0.9, k)), opacity: op }));
-    m.position.set(x, y, z); m.scale.setScalar(size); m.renderOrder = 3; scene.add(m); wisps.push(m);
+    m.position.set(x, y, z); m.scale.setScalar(size); m.renderOrder = 3; m.userData.op = op; scene.add(m); wisps.push(m);
   }
   function buildWisps(q, cx, cz) {
     wisps.forEach(w => scene.remove(w)); wisps.length = 0;
@@ -1435,7 +1435,7 @@ export async function initLanding(step) {
       // TVC landing (side approach): wide at the handover, side profile across the divert, then the pad cam. All cuts.
       const hg = s.h - groundUnder();
       if (hg < TVC_CAM.padH) return 'pad';
-      return s.t - s.tPh < TVC_CAM.wideT ? 'tvcWide' : hg > TVC_CAM.trackH ? 'tvcTop' : 'tvcTrack';
+      return hg > TVC_CAM.bH ? 'droneA' : 'droneB';
     }
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
     return 'chase';
@@ -1577,33 +1577,19 @@ export async function initLanding(step) {
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
       shotName = name; padCam = true; return;
     }
-    if (name === 'tvcTop') {   // overhead chase: above and behind (away from the pad), looking down past the ship at the ground and the pad
-      const C = TVC_CAM.tvcTop;
-      camera.position.copy(sp).add(_co.set(C.off[0], C.off[1], apSide * C.off[2]));
-      camera.lookAt(_pv.copy(sp).add(_lo.set(C.look[0], C.look[1], -apSide * C.look[2])));
-      shotName = name; padCam = true;
-    } else if (name === 'tvcTrack') {   // ground tracker: fixed long lens off to the side, pans with a little operator lag
-      const C = TVC_CAM.tvcTrack, gp = heightAt(C.x, C.z);
-      camera.position.set(C.x, gp + C.y, C.z);
-      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(C.fov * DEG / 2);
-      _lo.copy(sp).y -= C.drop * frameH;                                          // ship high in the frame, above the HUD
-      if (name !== shotName) { trkAim.copy(_lo); trkV.set(0, 0, 0); }
-      else if (!paused) {
-        trkAim.add(_co.set(flight.s.vx, flight.s.vh, flight.s.vz).multiplyScalar(dt));   // pans with it
-        _co.copy(_lo).sub(trkAim).multiplyScalar(C.k).addScaledVector(trkV, -2 * Math.sqrt(C.k));
-        trkV.addScaledVector(_co, dt); trkAim.addScaledVector(trkV, dt);
-        trkAim.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(C.jit * frameH / 100));   // hand jitter
+    if (name === 'droneA' || name === 'droneB') {   // hovering camera drone, fixed in the air off to the side: the ship comes down past it and grows,
+      const C = TVC_CAM[name];                       // like the pad view; only the aim pans (eased), plus a little hover wobble
+      if (name !== shotName) {
+        const gy = heightAt(C.x, apSide * C.z);
+        droneP.set(C.x, gy + C.h, apSide * C.z); droneAim.copy(sp); droneT = 0;
       }
-      camera.lookAt(trkAim);
-      if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the swing, as in the flip
-      shotName = name; padCam = true;
-    } else if (name === 'tvcWide') {   // world-anchored across the divert (camera on -x, the divert along z): the ship crosses the frame
-      const C = TVC_CAM[name], gy = heightAt(C.x, C.z(apSide)) + 12;
-      if (name !== shotName) tvcCam.set(C.x, Math.max(sp.y + C.dy, gy), C.z(apSide));
-      tvcCam.y = Math.max(sp.y + C.dy, gy);                              // a crane: rides down with the ship, never into the ground
-      camera.position.copy(tvcCam);
-      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2);
-      camera.lookAt(_pv.copy(sp).add(_lo.set(0, -C.drop * frameH, -apSide * C.lead)));   // ship high in the frame, room toward the pad
+      if (!paused) droneT += dt;
+      camera.position.copy(droneP).add(_co.set(Math.sin(droneT * 0.9), 0.6 * Math.sin(droneT * 1.3 + 1), Math.sin(droneT * 0.7 + 2)).multiplyScalar(C.wob));
+      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(C.fov * DEG / 2);
+      _lo.copy(sp).y -= C.drop * frameH;                                          // ship above the HUD
+      droneAim.lerp(_lo, 1 - Math.exp(-dt * C.aim));
+      camera.lookAt(droneAim);
+      if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the RCS, as in the flip
       shotName = name; padCam = true;
     } else if (name === 'pad' || name === 'replay') {
       const P = name === 'pad' ? _pc.set(PAD_CAM.x, PAD_CAM.y, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
@@ -1635,15 +1621,16 @@ export async function initLanding(step) {
     const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name in TVC_CAM && TVC_CAM[name].fov ? TVC_CAM[name].fov : 40;
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
-  // TVC landing shots (whole rocket in frame; cuts only): x/z world position (z by approach side), height = ship + dy,
-  // drop = how far below the ship to aim (× frame height: keeps it above the HUD), lead = aim offset toward the pad (m)
+  // TVC landing shots, the pad view's way (fixed camera, the ship comes through the frame and grows, ground in view; cuts only):
+  // two hovering drones, then the pad cam. x/z: world spot (z on the approach side × apSide), h: height above the ground,
+  // drop: aim below the ship (× frame height, keeps it above the HUD), aim: pan easing rate, wob: hover wobble (m)
   const TVC_CAM = {
-    wideT: 2, trackH: 600, padH: 110,
-    tvcWide: { x: -300, z: sd => sd * 170, dy: -20, drop: 0.12, lead: 45, fov: 36 },
-    tvcTop: { off: [-85, 50, 85], look: [0, -28, 10], fov: 44 },              // offsets from the ship (z toward its side of the pad)
-    tvcTrack: { x: -700, z: 0, y: 30, fov: 14, drop: 0.2, k: 14, jit: 0.15 },  // world spot, lens, aim spring, jitter (% of frame)
+    bH: 650, padH: 110,                                       // drone A above bH m, drone B down to padH, then the pad cam
+    droneA: { x: -210, z: 80, h: 1200, fov: 40, drop: 0.14, aim: 5, wob: 0.6 },
+    droneB: { x: -170, z: -25, h: 250, fov: 42, drop: 0.12, aim: 5, wob: 0.4 },
   };
-  const tvcCam = new THREE.Vector3(), _pc = new THREE.Vector3(), trkAim = new THREE.Vector3(), trkV = new THREE.Vector3();
+  const _pc = new THREE.Vector3(), droneP = new THREE.Vector3(), droneAim = new THREE.Vector3();
+  let droneT = 0;
 
 
   // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
@@ -1971,11 +1958,14 @@ export async function initLanding(step) {
   // ---------- Effects per frame (ground scene) ----------
   const _ex = new THREE.Vector3();
   // Flip effects carried into the TVC phase (tunable)
-  const TFX = { gimbal: 1.5, buffet: [0.45, 0.3, 0.18], cutKick: 0.5, rcsOn: 10, rcsKick: 0.3, camLean: 2 };   // buffet by engines lit [3, 2, 1]; rcsOn in deg/s
+  const TFX = { gimbal: 1.5, buffet: [0.45, 0.3, 0.18], cutKick: 0.5, rcsOn: 10, rcsKick: 0.3, camLean: 2, rcsSize: 5 };   // buffet by engines lit [3, 2, 1]; rcsOn in deg/s
   const _rv = new THREE.Vector3(), lastUp = new THREE.Vector3(0, 1, 0);
-  let rcsOn = false, rcsK = 0;
+  let rcsOn = false, rcsK = 0, wispK = 1;
   function effects(dt) {
     const sp = ship.position;
+    // TVC landing: the cloud deck (6.6–8.1 km) is far above; seen from the low cameras its sprites read as cartoon puffs, so fade it out
+    if (state === 'flight' && wisps.length) { const k = flight.s.phase === 'tvc' ? 1 - sstep(0, 1.2, flight.s.t - flight.s.tPh) : 1;
+      if (k !== wispK) { wispK = k; wisps.forEach(w => { w.material.opacity = w.userData.op * k; w.visible = k > 0.01; }); } }
     _up.set(0, 1, 0).applyQuaternion(ship.quaternion);
     if (state === 'flight' && flight.s.phase === 'belly') {   // dust in the air rushing past
       const s = flight.s, v = Math.hypot(s.vx, s.vh), n = Math.round(clamp((v - 60) / 60, 0, 5));
@@ -2004,7 +1994,7 @@ export async function initLanding(step) {
         _rv.normalize();
         const n = burst ? 14 : Math.random() < 0.8 ? Math.round(2 + 3 * clamp((w - TFX.rcsOn) / 6, 0, 1)) : 0, v = burst ? 70 : 50;
         for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y + rnd(-1, 1), z: nose.z, vx: _rv.x * v * rnd(0.6, 1) + s.vx, vy: rnd(-4, 4) + s.vh, vz: _rv.z * v * rnd(0.6, 1) + s.vz,
-          life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
+          life: rnd(0.25, burst ? 0.7 : 0.45), s0: 0.8, s1: burst ? TFX.rcsSize : TFX.rcsSize * 0.6, a: 0.55, drag: 3, rgb: [1, 1, 1] });   // small, quick jets (not puffy clouds)
       } else rcsOn = false;
       rcsSide = 0;
     } else { rcsSide = 0; rcsOn = false; rcsK = 0; lastUp.copy(_up); }
