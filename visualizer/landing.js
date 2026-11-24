@@ -1068,7 +1068,7 @@ export async function initLanding(step) {
   }
   function startTip() {
     state = 'tipping';
-    const s = flight.s, ax = L.axisFromTilt(s.cmd.x + dev.tiltX, s.cmd.y + dev.tiltY);
+    const s = flight.s, ax = L.axisFromTilt(s.cmd.x + s.big.tiltX, s.cmd.y + s.big.tiltY);
     fall.axis.set(ax.z, 0, -ax.x).normalize(); fall.rate = 0.18;
     callout('TIPPING OVER', 2000, 'warn');
     refresh();
@@ -1346,13 +1346,16 @@ export async function initLanding(step) {
   }
   function placeShip() {
     if (state !== 'flight' && !(state === 'landed' && !replay)) return;
-    const s = flight.s, tx = s.cmd.x + dev.tiltX, ty = s.cmd.y + dev.tiltY, ax = L.axisFromTilt(tx, ty);
+    const s = flight.s, B = s.big, tx = s.cmd.x + B.tiltX, ty = s.cmd.y + B.tiltY, ax = L.axisFromTilt(tx, ty);   // the big ship's (heavy) attitude
     ship.rotation.set(Math.atan2(ax.z, ax.y), 0, Math.atan2(-ax.x, Math.hypot(ax.y, ax.z)));
-    ship.position.set(s.x + ax.x * CG_H(), s.h + ax.y * CG_H(), s.z + ax.z * CG_H());
     const ft = flipT();
+    // Belly flop: hung from the trajectory point at the tail as before; from the flip on, it turns about its CG (a lean swings
+    // the engines the other way), blended over the flip so nothing jumps
+    const cgK = s.phase === 'belly' ? 0 : s.phase === 'flip' ? sstep(0, 4.5, ft) : 1, ch = CG_H();
+    ship.position.set(s.x + ax.x * ch * (1 - cgK), s.h + ch * (ax.y * (1 - cgK) + cgK), s.z + ax.z * ch * (1 - cgK));
     // The autopilot's swing drawn up to ~1.9× in the flip so it reads (sim stays at ±8°), easing back after the handover
     const gb = s.phase === 'flip' ? 1 + 0.9 * sstep(0, 0.4, ft) : s.phase === 'tvc' ? 1 + 0.9 * (1 - sstep(0, 1.2, s.t - s.tPh)) : 1;
-    const gx = clamp(s.gA.x * gb, -16, 16) + dev.gx * VIS_GIMBAL, gy = clamp(s.gA.y * gb, -16, 16) + dev.gy * VIS_GIMBAL;
+    const gx = clamp(s.gA.x * gb, -16, 16) + s.big.gx * VIS_GIMBAL, gy = clamp(s.gA.y * gb, -16, 16) + s.big.gy * VIS_GIMBAL;
     tvc.rotation.set(gx * DEG, 0, -gy * DEG);
     if (s.phase === 'belly') {   // flaps steer: pitch trim from the sim, a roll fight against wobble and gusts, micro-corrections
       const wob = (2.2 * Math.sin(s.t * 1.7) + 1.1 * Math.sin(s.t * 3.9 + 1.3) + 4 * bGust.k * bGust.d) * DEG;
@@ -1384,7 +1387,7 @@ export async function initLanding(step) {
       if (lowestPoint() <= heightAt(ship.position.x, ship.position.z) + 0.3) explode(ship.position.clone().setY(heightAt(ship.position.x, ship.position.z)), 'air');
     } else if (state === 'tipping') {
       fall.rate += 1.4 * dt;
-      const s = flight.s, ang = fall.rate * dt, ax = L.axisFromTilt(s.cmd.x + dev.tiltX, s.cmd.y + dev.tiltY), hl = Math.hypot(ax.x, ax.z) || 1;
+      const s = flight.s, ang = fall.rate * dt, ax = L.axisFromTilt(s.cmd.x + s.big.tiltX, s.cmd.y + s.big.tiltY), hl = Math.hypot(ax.x, ax.z) || 1;
       const pivot = _pv.set(s.x + ax.x / hl * FOOT_R, groundUnder(), s.z + ax.z / hl * FOOT_R);
       _q.setFromAxisAngle(fall.axis, ang);
       ship.position.sub(pivot).applyQuaternion(_q).add(pivot);
@@ -1754,7 +1757,7 @@ export async function initLanding(step) {
     if (show && _ad.lengthSq() > 1e-8) gimArrow.set(_ao.addScaledVector(_sa, 1.5).addScaledVector(_ad.normalize(), R * 0.9), _ad, aLen(gAng), thick, aFade(gAng), dt, bright);
     else gimArrow.set(_ao, _sa, 1, thick, 0, dt);
     // Tilt: the TVC source's lean (what the person pushes), at the nose
-    const tl = L.tiltOf(dev.tiltX, dev.tiltY), a = L.axisFromTilt(dev.tiltX, dev.tiltY);
+    const B = state === 'flight' ? flight.s.big : dev, tl = L.tiltOf(B.tiltX, B.tiltY), a = L.axisFromTilt(B.tiltX, B.tiltY);   // the big ship's lean (the inset shows the raw rig)
     _lean.set(a.x, 0, a.z);
     const tip = _ao.copy(ship.position).addScaledVector(_sa, NOSE * 0.75);
     if (show && _lean.lengthSq() > 1e-8) { _lean.normalize(); tiltArrow.set(tip, _lean, aLen(tl), thick, aFade(tl), dt, bright); }

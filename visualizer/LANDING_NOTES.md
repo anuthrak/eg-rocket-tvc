@@ -31,7 +31,7 @@ with chill-down and "Flip in 3·2·1" → flip → TVC landing → touchdown/cra
 
 ## Done (sections)
 Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (+ nose-up 70° AoA, smooth warp) ·
-4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer) · 8 rig link (prompt strip, ship arrows, Your-rocket CAD inset, push cues, recovery tag) · 8b calmer rig link (`RL` constants) · Starship-style side approach (flaps steer, 3-engine translate with one overshoot, 3 → 2 → 1 engines, 5 s settle) + TVC landing shots (wide → overhead → ground tracker → pad, cuts) + Skip to flip (B). User rejected: zoom/close-up shots, slow eases, inset growing.
+4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer) · 8 rig link (prompt strip, ship arrows, Your-rocket CAD inset, push cues, recovery tag) · 8b calmer rig link (`RL` constants) · Starship-style side approach (flaps steer, 3-engine translate with one overshoot, 3 → 2 → 1 engines, 5 s settle) + TVC landing shots (wide → overhead → ground tracker → pad, cuts) · Starship-scale attitude (`HEAVY` follow of the TVC source, CG pivot, pushes move the ship) + Skip to flip (B). User rejected: zoom/close-up shots, slow eases, inset growing.
 
 ## Next
 1. Landing legs deploy (9), touchdown (10), crash (11).
@@ -42,7 +42,9 @@ Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (
 ## Tuning
 - `RL` (Section 8): arrow thickness/length/opacity/easing/fade band/push brightness, ghosts, cue ring, push kick/shake, tag timing.
 - `TVC_CAM` (landing.js): shot times/heights, camera x/z, height offset, aim drop, lead, fov.
-- landing-sim.js: `DIVERT` (start offset), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC `kp`/`kd`/`amax`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
+- landing-sim.js: `DIVERT` (start offset), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC `kp`/`kd`/`amax`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds), `HEAVY` (big-ship follow of the raw source: `release`, `wn`, `zeta`, `vMax`, `aMax`, nozzle `gTau`/`gRate`; `s.big` vs raw `s.dev`), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
+
+- Raw vs big: raw `dev`/`s.dev` → abort, tracker, HUD, inset; `s.big` → thrust, ship pose, nozzles, tilt arrow. `flightStart()` aims the along-track coast (`x + 2·vx` at the TVC start) over the pad.
 
 ## Known issues
 - Debug `still()` from ~4 km can show a pure-black block (bloom NaN); pre-existing, not seen in flight shots.

@@ -50,6 +50,11 @@ export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3
 // with one small overshoot (LAT).
 export const DIVERT = 350;
 export const BELLY = { aim: 0, kp: 0.01, kd: 0.1, bankMax: 25, lift: 1.0 };   // flap bank (deg) → side force = drag·lift·sin(bank)
+// Starship scale: the TVC source (the 45 cm desk rocket, or its simulation) moves ~10× faster than a 50 m ship could.
+// The big ship follows it as a heavy body: the lean target holds the peak and lets go over `release` s, then a damped
+// 2nd-order follow with turn rate/acceleration caps (about what its gimbal can do). The raw source still drives the
+// abort, the tracker, the HUD and the inset; the big ship's attitude drives the thrust, so a push moves it off course.
+export const HEAVY = { release: 0.8, wn: 3, zeta: 0.85, vMax: 12, aMax: 28, gTau: 0.25, gRate: 30 };
 export const ENG3 = { to2: 0.72, to1: 0.31, h1: 100, hold: 0.3 };   // shut one engine below these 3-engine throttle fractions (to1 only below h1 m)
 export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };
 // TVC phase: sideways accel = -kd·v - kp·(z - aim), clamped to amax (m/s²). The aim swings `over` m past the pad
@@ -63,12 +68,26 @@ export function createFlight(x0 = 0, z0 = 0) {
     m: SHIP.m0, thr: 0, flap: 0, rcs: 0,
     q: 0, acc: 0,
     dev: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }, eng: 3,
+    big: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 },   // the big ship's deviation (heavy-body follow of dev)
     tilt: 0,                              // total tilt from vertical (deg)
   };
   const T_FLIP = 4.5, MARGIN = 0.95, side = Math.sign(z0);
   const ss = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   const latAim = h => -side * LAT.over * ss(LAT.hA, LAT.hB, h) * ss(LAT.hD, LAT.hC, h);
   let aRef = 16, engT = 0;
+  const hv = { ex: 0, ey: 0, vx: 0, vy: 0 };
+  function heavyStep(u) {
+    const H = HEAVY, b = s.big, um = Math.hypot(u.tiltX, u.tiltY), em = Math.hypot(hv.ex, hv.ey);
+    if (um >= em) { hv.ex = u.tiltX; hv.ey = u.tiltY; }                                    // the peak, held
+    else { const k = 1 - Math.exp(-DT / H.release); hv.ex += (u.tiltX - hv.ex) * k; hv.ey += (u.tiltY - hv.ey) * k; }   // let go slowly
+    let ax = H.wn * H.wn * (hv.ex - b.tiltX) - 2 * H.zeta * H.wn * hv.vx, ay = H.wn * H.wn * (hv.ey - b.tiltY) - 2 * H.zeta * H.wn * hv.vy;
+    const am = Math.hypot(ax, ay); if (am > H.aMax) { ax *= H.aMax / am; ay *= H.aMax / am; }
+    hv.vx += ax * DT; hv.vy += ay * DT;
+    const vm = Math.hypot(hv.vx, hv.vy); if (vm > H.vMax) { hv.vx *= H.vMax / vm; hv.vy *= H.vMax / vm; }
+    b.tiltX += hv.vx * DT; b.tiltY += hv.vy * DT;
+    const gk = 1 - Math.exp(-DT / H.gTau), gr = H.gRate * DT;                                // nozzles: smoothed, rate-limited
+    b.gx += clamp(((u.gx ?? 0) - b.gx) * gk, -gr, gr); b.gy += clamp(((u.gy ?? 0) - b.gy) * gk, -gr, gr);
+  }
   // Speed target for the TVC phase (negative = down). Deceleration a(h) = A_LOW below 40 m, ramping up to A_LOW + aRef
   // by 160 m: hard braking high up, a gentle last 40 m, 1.5 m/s at the ground. v² = 1.5² + 2∫a dh.
   const A_LOW = 4, H0 = 60, H1 = 130;
@@ -91,8 +110,9 @@ export function createFlight(x0 = 0, z0 = 0) {
   // dev: the TVC source's attitude (deg) once it flies, else null
   function step(dev) {
     const v = Math.hypot(s.vx, s.vh, s.vz), r = rho(s.h);
-    const d = s.phase === 'tvc' && dev ? dev : { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
-    s.dev = d;
+    s.dev = s.phase === 'tvc' && dev ? dev : { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
+    heavyStep(s.dev);
+    const d = s.big;
     const tx = s.cmd.x + d.tiltX, ty = s.cmd.y + d.tiltY;
     const ax = axisFromTilt(tx, ty);
     // Drag on the body: belly area across the flow, end area along it
@@ -119,9 +139,9 @@ export function createFlight(x0 = 0, z0 = 0) {
       else aH = G + aProfile(hh) + clamp((vProfile(hh) - s.vh) * 2.5, -6, 20);   // feed-forward + speed error
       aH = clamp(aH, 0, 40);
       const tv = s.phase === 'tvc';
-      const aX = clamp(-(tv ? 0.7 : 0.32) * s.vx - (tv ? 0.05 : 0.022) * s.x, -9, 9);
+      const aX = tv ? clamp(-LAT.kd * s.vx - LAT.kp * s.x, -LAT.amax, LAT.amax) : clamp(-0.32 * s.vx - 0.022 * s.x, -9, 9);   // TVC: same loop along track
       const aZ = tv ? clamp(-LAT.kd * s.vz - LAT.kp * (s.z - latAim(hh)), -LAT.amax, LAT.amax) : clamp(-0.2 * s.vz - LAT.kFlip * s.z, -9, 9);
-      const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 12 : 25;    // near the ground: stand up straight
+      const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 15 : 25;    // near the ground: stand up straight
       tgtY = clamp(Math.atan2(aX, aH) / DEG, -lim, lim);
       tgtX = clamp(Math.atan2(aZ, aH) / DEG, -lim, lim);
       need = aH / Math.max(ax.y, 0.35) * s.m / SHIP.T;    // throttle for the vertical part; the lean does the sideways part
@@ -165,15 +185,16 @@ export function createFlight(x0 = 0, z0 = 0) {
     // Seconds to touchdown at the current deceleration (for the HUD)
     get ttg() { const a = Math.max(s.thr * SHIP.T / s.m - G, 0.5); return Math.max(0, -s.vh / a); } };
 }
-function runFrom(x0, z0 = 0) {   // to the ground, with no TVC input
+function runFrom(x0, z0 = 0) {   // to the start of the TVC phase, with no TVC input
   const f = createFlight(x0, z0);
-  while (f.s.h > 0 && f.s.t < 200) f.step(null);
+  while (f.s.phase !== 'tvc' && f.s.h > 0 && f.s.t < 200) f.step(null);
   return f;
 }
-// Where to start the belly flop so that, with no TVC input, it lands on the pad centre
+// Where to start the belly flop so that the TVC phase starts over the pad line along track (x ≈ 0, coasting toward it);
+// the TVC loop then only trims (aiming at the landing point instead let the strong loop hide a 400 m along-track swing)
 export function flightStart() {
   let x0 = 0;
-  for (let i = 0; i < 10; i++) x0 -= 0.9 * runFrom(x0, DIVERT).s.x;
+  for (let i = 0; i < 10; i++) { const s = runFrom(x0, DIVERT).s; x0 -= 0.9 * (s.x + 2.0 * s.vx); }   // coast-to-stop point over the pad
   return { x0 };   // the same x0 serves both sides (mirror image in z)
 }
 
