@@ -36,7 +36,7 @@ export const PAD_R = 25;             // landing pad radius
 export const ABORT_DEG = 25;         // TVC deviation past this = the ship is lost (same abort as the firmware)
 export const LAND_OK_DEG = 8;        // touchdown tilt for a clean landing
 export const TIP_DEG = 15;           // touchdown tilt past which it falls over
-export const LEGS_AT = 700;          // legs deploy below this height
+export const LEGS_AT = 220;          // legs deploy below this height (in the ground telephoto shot)
 
 // Scripted orbit → entry sequence (screen seconds). The real entry takes ~6 minutes: shown about 30x faster.
 export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3, v0: 3450, v1: 420, dv: 85 };
