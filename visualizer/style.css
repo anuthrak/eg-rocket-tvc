@@ -791,3 +791,9 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-burn-row { display: flex; gap: 16px; margin-top: 4px; font: 500 12px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .lnd-burn-row b { color: #fff; font: 600 18px var(--cond); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 @media (max-width: 760px) { .lnd-burn { top: auto; bottom: 210px; } }
+
+/* Engines lit, webcast style: three dots (two up, one down) that go out 3 → 2 → 1 */
+.lnd-eng { display: inline-grid; grid-template-columns: 6px 6px; gap: 1px 2px; margin-left: 6px; vertical-align: middle; }
+.lnd-eng i { width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; transition: background .2s; }
+.lnd-eng i:nth-child(3) { grid-column: 1 / 3; justify-self: center; }
+.lnd-eng i.on { background: #fff; border-color: #fff; }

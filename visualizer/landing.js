@@ -441,6 +441,41 @@ export async function initLanding(step) {
     }
   }
   const FOOT_R = R + LEG * Math.sin(36 * DEG);
+
+  // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
+  // A parked cargo Starship (same hull, legs out), a 90 m lattice comms mast, a few hab modules and a solar array field.
+  // Fixed spots, clear of the approach (it crosses along z over the pad) and of the pad cam's view up at the ship.
+  const BASE = { parked: [170, -390], mast: [-175, 95], habs: [-250, 300], solar: [-90, 360] };
+  {
+    const put = (o, x, z, dy = 0) => { o.position.set(x, heightAt(x, z) + dy, z); o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); scene.add(o); return o; };
+    // Parked ship: hull halves, base, flaps and legs cloned from the flying one, standing on its feet
+    const pk = new THREE.Group(), pa = new THREE.Group(); pk.add(pa); pa.position.y = FOOT;
+    [body, shield, base].forEach(m => pa.add(m.clone()));
+    flaps.forEach(f => { const c = f.pivot.clone(); c.rotation.y = f.side * 0.3; pa.add(c); });
+    const legM = M.dark;
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.3, leg = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, LEG, 8), legM);
+      leg.position.set(Math.cos(a) * (R + LEG * Math.sin(36 * DEG) / 2), FOOT - LEG * Math.cos(36 * DEG) / 2, Math.sin(a) * (R + LEG * Math.sin(36 * DEG) / 2));
+      leg.rotation.set(Math.sin(a) * 36 * DEG, 0, -Math.cos(a) * 36 * DEG); pk.add(leg); }
+    pk.rotation.y = 2.1; put(pk, ...BASE.parked);
+    // Lattice mast: four legs, cross bracing, a dish and a red beacon
+    const mast = new THREE.Group(), steel = new THREE.MeshStandardMaterial({ color: 0x9a9690, metalness: 0.6, roughness: 0.5 }), MH = 90, W = 3;
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, MH, 6), steel); l.position.set(sx * W / 2, MH / 2, sz * W / 2); mast.add(l); }
+    for (let y = 2; y < MH; y += 3) for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, Math.hypot(W, 3), 4), steel);
+      b.position.set(k < 2 ? 0 : (k === 2 ? 1 : -1) * W / 2, y + 1.5, k < 2 ? (k === 0 ? 1 : -1) * W / 2 : 0); b.rotation.set(k < 2 ? 0 : Math.atan2(W, 3) * (y % 6 ? 1 : -1), 0, k < 2 ? Math.atan2(W, 3) * (y % 6 ? 1 : -1) : 0); mast.add(b); }
+    const dish = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 8, 0, Math.PI * 2, 0, 0.9), steel); dish.position.set(1.8, MH - 4, 0); dish.rotation.z = -1.2; mast.add(dish);
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false })); beacon.position.y = MH + 0.6; mast.add(beacon);
+    put(mast, ...BASE.mast);
+    // Habs: white cylinders on their sides with dark bands, half-buried in regolith berms
+    const white = new THREE.MeshStandardMaterial({ color: 0xd9d4cc, metalness: 0.1, roughness: 0.7 }), berm = new THREE.MeshStandardMaterial({ color: 0x8a4a2c, roughness: 1 });
+    [[0, 0, 0.2], [16, 6, -0.3], [-14, 10, 0.5], [4, 20, 1.4]].forEach(([dx, dz, ry]) => { const h = new THREE.Group();
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 12, 20), white); c.rotation.z = Math.PI / 2; c.position.y = 3.4; h.add(c);
+      const b = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), berm); b.scale.set(1.5, 0.45, 1); h.add(b);
+      h.rotation.y = ry; put(h, BASE.habs[0] + dx, BASE.habs[1] + dz); });
+    // Solar field: rows of dark tilted panels
+    const panel = new THREE.MeshStandardMaterial({ color: 0x1b2433, metalness: 0.4, roughness: 0.35 });
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 8; c++) { const p = new THREE.Mesh(new THREE.BoxGeometry(6, 0.15, 3), panel); p.rotation.x = -0.5;
+      put(p, BASE.solar[0] + c * 7, BASE.solar[1] + r * 6, 1.3); }
+  }
   const setLegs = k => legs.forEach(p => { p.visible = k > 0.001; p.rotation.z = lerp(176, 36, k) * DEG; });
 
   // Engine fire (RVacs), cinematic: a long bright core per engine (white-hot at the nozzle → blue-violet → faint pink),
@@ -1435,7 +1470,7 @@ export async function initLanding(step) {
       // TVC landing (side approach): wide at the handover, side profile across the divert, then the pad cam. All cuts.
       const hg = s.h - groundUnder();
       if (hg < TVC_CAM.padH) return 'pad';
-      return hg > TVC_CAM.bH ? 'droneA' : 'droneB';
+      return hg > TVC_CAM.wideH ? 'siteT' : hg > TVC_CAM.teleH ? 'siteW' : 'tele';
     }
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
     return 'chase';
@@ -1577,18 +1612,19 @@ export async function initLanding(step) {
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
       shotName = name; padCam = true; return;
     }
-    if (name === 'droneA' || name === 'droneB') {   // hovering camera drone, fixed in the air off to the side: the ship comes down past it and grows,
-      const C = TVC_CAM[name];                       // like the pad view; only the aim pans (eased), plus a little hover wobble
-      if (name !== shotName) {
-        const gy = heightAt(C.x, apSide * C.z);
-        droneP.set(C.x, gy + C.h, apSide * C.z); droneAim.copy(sp); droneT = 0;
-      }
-      if (!paused) droneT += dt;
-      camera.position.copy(droneP).add(_co.set(Math.sin(droneT * 0.9), 0.6 * Math.sin(droneT * 1.3 + 1), Math.sin(droneT * 0.7 + 2)).multiplyScalar(C.wob));
+    if (name === 'siteT' || name === 'siteW' || name === 'tele') {   // fixed cameras (SpaceX webcast style): only the aim pans, eased
+      const C = TVC_CAM[name];
+      camera.position.set(C.x, heightAt(C.x, C.z) + C.h, C.z);
       const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(C.fov * DEG / 2);
       _lo.copy(sp).y -= C.drop * frameH;                                          // ship above the HUD
-      droneAim.lerp(_lo, 1 - Math.exp(-dt * C.aim));
-      camera.lookAt(droneAim);
+      if (C.padK != null) {   // wide: a held composition, the pad PADK of the frame height below centre; tilts up only if the ship would leave the top
+        const hd = Math.hypot(camera.position.x, camera.position.z), gp = heightAt(0, 0), half = C.fov / 2;
+        const eP = Math.atan2(gp - camera.position.y, hd) / DEG + C.padK * C.fov, eS = Math.atan2(sp.y - camera.position.y, hd) / DEG;
+        const e = Math.max(eP, eS - half * C.top);
+        _lo.set(0, camera.position.y + hd * Math.tan(e * DEG), 0);
+      }
+      if (name !== shotName) siteAim.copy(_lo); else siteAim.lerp(_lo, 1 - Math.exp(-dt * C.aim));
+      camera.lookAt(siteAim);
       if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the RCS, as in the flip
       shotName = name; padCam = true;
     } else if (name === 'pad' || name === 'replay') {
@@ -1621,16 +1657,17 @@ export async function initLanding(step) {
     const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name in TVC_CAM && TVC_CAM[name].fov ? TVC_CAM[name].fov : 40;
     if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
-  // TVC landing shots, the pad view's way (fixed camera, the ship comes through the frame and grows, ground in view; cuts only):
-  // two hovering drones, then the pad cam. x/z: world spot (z on the approach side × apSide), h: height above the ground,
-  // drop: aim below the ship (× frame height, keeps it above the HUD), aim: pan easing rate, wob: hover wobble (m)
+  // TVC landing shots after the Starship Flight 15 webcast: a far site camera (~250 m up, ~3 km out, off to the side of
+  // the divert) on a long lens, then the same spot wide with the pad and the base in the lower third, then a low ground
+  // telephoto looking up past the comms mast, then the pad cam. x/z/h: spot (h above the ground), drop: aim below the ship
+  // (× frame height, keeps it above the HUD), pad/padY: how much the aim holds the pad area (wide), aim: pan easing rate
   const TVC_CAM = {
-    bH: 650, padH: 110,                                       // drone A above bH m, drone B down to padH, then the pad cam
-    droneA: { x: -210, z: 80, h: 1200, fov: 40, drop: 0.14, aim: 5, wob: 0.6 },
-    droneB: { x: -170, z: -25, h: 250, fov: 42, drop: 0.12, aim: 5, wob: 0.4 },
+    wideH: 1000, teleH: 250, padH: 40,
+    siteT: { x: -2200, z: 350, h: 400, fov: 12, drop: 0.1, aim: 4 },
+    siteW: { x: -2200, z: 350, h: 400, fov: 32, drop: 0, padK: 0.05, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
+    tele: { x: -330, z: 60, h: 2, fov: 25, drop: 0.14, aim: 4 },
   };
-  const _pc = new THREE.Vector3(), droneP = new THREE.Vector3(), droneAim = new THREE.Vector3();
-  let droneT = 0;
+  const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3();
 
 
   // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
@@ -1895,6 +1932,7 @@ export async function initLanding(step) {
     if (state === 'falling') return 'tvc';
     return 'td';
   }
+  const engDots = [...document.querySelectorAll('#lndEng i')];
   function hud() {
     const s = flight.s, orb = inOrbit();
     const alt = orb ? ent.h : state === 'landed' || state === 'crashed' || state === 'replay' ? 0 : Math.max(0, s.h - groundUnder());
@@ -1911,6 +1949,8 @@ export async function initLanding(step) {
     const thr = orb ? (state === 'deorbit' ? vacLevel(et).reduce((x, y) => x + y) / 3 : 0) : curThr();
     $('lndThr').style.width = `${clamp(thr, 0, 1) * 100}%`;
     $('lndThrV').textContent = `${Math.round(clamp(thr, 0, 1) * 100)}%`;
+    { const fs = flight.s, n = state === 'flight' ? (fs.phase === 'tvc' ? fs.eng : fs.phase === 'flip' ? 3 : 0) : state === 'falling' ? 3 : 0;   // engines lit, webcast style
+      engDots.forEach((d, i) => d.classList.toggle('on', i < n)); }
     const dp = orb ? null : flight.drift;
     $('lndDrift').textContent = dp === null ? '—' : dp >= 1000 ? (dp / 1000).toFixed(2) + ' km' : dp.toFixed(0) + ' m';
     $('lndTtg').textContent = state === 'flight' && s.phase === 'tvc' ? flight.ttg.toFixed(0) + ' s' : '—';
@@ -1993,6 +2033,7 @@ export async function initLanding(step) {
         if (burst) shake = Math.max(shake, TFX.rcsKick);
         _rv.normalize();
         const n = burst ? 14 : Math.random() < 0.8 ? Math.round(2 + 3 * clamp((w - TFX.rcsOn) / 6, 0, 1)) : 0, v = burst ? 70 : 50;
+        nose.addScaledVector(_rv, R);   // side vents on the hull
         for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y + rnd(-1, 1), z: nose.z, vx: _rv.x * v * rnd(0.6, 1) + s.vx, vy: rnd(-4, 4) + s.vh, vz: _rv.z * v * rnd(0.6, 1) + s.vz,
           life: rnd(0.25, burst ? 0.7 : 0.45), s0: 0.8, s1: burst ? TFX.rcsSize : TFX.rcsSize * 0.6, a: 0.55, drag: 3, rgb: [1, 1, 1] });   // small, quick jets (not puffy clouds)
       } else rcsOn = false;
