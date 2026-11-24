@@ -443,37 +443,48 @@ export async function initLanding(step) {
   const FOOT_R = R + LEG * Math.sin(36 * DEG);
 
   // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
-  // A parked cargo Starship (same hull, legs out), a 90 m lattice comms mast, a few hab modules and a solar array field.
+  // A parked cargo Starship (same hull, legs out), two lattice masts (120/100 m), a propellant tank farm, bermed habs, a
+  // greenhouse dome and a solar field: light materials and lamps so they read from the site camera 2 km out.
   // Fixed spots, clear of the approach (it crosses along z over the pad) and of the pad cam's view up at the ship.
-  const BASE = { parked: [170, -390], mast: [-175, 95], habs: [-250, 300], solar: [-90, 360] };
+  const BASE = { parked: [200, -270], masts: [[-175, 95, 120], [250, 180, 100]], tanks: [110, 250], habs: [-250, 280], dome: [-200, 330], solar: [-120, 380] };
   {
     const put = (o, x, z, dy = 0) => { o.position.set(x, heightAt(x, z) + dy, z); o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); scene.add(o); return o; };
+    const white = new THREE.MeshStandardMaterial({ color: 0xf2eee8, metalness: 0.15, roughness: 0.55 }), berm = new THREE.MeshStandardMaterial({ color: 0x8a4a2c, roughness: 1 });
+    const lamp = new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }), red = new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false });
     // Parked ship: hull halves, base, flaps and legs cloned from the flying one, standing on its feet
     const pk = new THREE.Group(), pa = new THREE.Group(); pk.add(pa); pa.position.y = FOOT;
     [body, shield, base].forEach(m => pa.add(m.clone()));
     flaps.forEach(f => { const c = f.pivot.clone(); c.rotation.y = f.side * 0.3; pa.add(c); });
-    const legM = M.dark;
-    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.3, leg = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, LEG, 8), legM);
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.3, leg = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, LEG, 8), M.dark);
       leg.position.set(Math.cos(a) * (R + LEG * Math.sin(36 * DEG) / 2), FOOT - LEG * Math.cos(36 * DEG) / 2, Math.sin(a) * (R + LEG * Math.sin(36 * DEG) / 2));
       leg.rotation.set(Math.sin(a) * 36 * DEG, 0, -Math.cos(a) * 36 * DEG); pk.add(leg); }
     pk.rotation.y = 2.1; put(pk, ...BASE.parked);
-    // Lattice mast: four legs, cross bracing, a dish and a red beacon
-    const mast = new THREE.Group(), steel = new THREE.MeshStandardMaterial({ color: 0x9a9690, metalness: 0.6, roughness: 0.5 }), MH = 90, W = 3;
-    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, MH, 6), steel); l.position.set(sx * W / 2, MH / 2, sz * W / 2); mast.add(l); }
-    for (let y = 2; y < MH; y += 3) for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, Math.hypot(W, 3), 4), steel);
-      b.position.set(k < 2 ? 0 : (k === 2 ? 1 : -1) * W / 2, y + 1.5, k < 2 ? (k === 0 ? 1 : -1) * W / 2 : 0); b.rotation.set(k < 2 ? 0 : Math.atan2(W, 3) * (y % 6 ? 1 : -1), 0, k < 2 ? Math.atan2(W, 3) * (y % 6 ? 1 : -1) : 0); mast.add(b); }
-    const dish = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 8, 0, Math.PI * 2, 0, 0.9), steel); dish.position.set(1.8, MH - 4, 0); dish.rotation.z = -1.2; mast.add(dish);
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false })); beacon.position.y = MH + 0.6; mast.add(beacon);
-    put(mast, ...BASE.mast);
-    // Habs: white cylinders on their sides with dark bands, half-buried in regolith berms
-    const white = new THREE.MeshStandardMaterial({ color: 0xd9d4cc, metalness: 0.1, roughness: 0.7 }), berm = new THREE.MeshStandardMaterial({ color: 0x8a4a2c, roughness: 1 });
-    [[0, 0, 0.2], [16, 6, -0.3], [-14, 10, 0.5], [4, 20, 1.4]].forEach(([dx, dz, ry]) => { const h = new THREE.Group();
+    // Lattice masts (light steel so they read against the ground), cross bracing, a dish, beacons
+    const steel = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, metalness: 0.5, roughness: 0.45 });
+    BASE.masts.forEach(([mx, mz, MH]) => { const mast = new THREE.Group(), W = 4;
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, MH, 6), steel); l.position.set(sx * W / 2, MH / 2, sz * W / 2); mast.add(l); }
+      for (let y = 2; y < MH; y += 4) for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, Math.hypot(W, 4), 4), steel);
+        b.position.set(k < 2 ? 0 : (k === 2 ? 1 : -1) * W / 2, y + 2, k < 2 ? (k === 0 ? 1 : -1) * W / 2 : 0); b.rotation.set(k < 2 ? 0 : Math.atan2(W, 4) * (y % 8 ? 1 : -1), 0, k < 2 ? Math.atan2(W, 4) * (y % 8 ? 1 : -1) : 0); mast.add(b); }
+      const dish = new THREE.Mesh(new THREE.SphereGeometry(3.5, 16, 8, 0, Math.PI * 2, 0, 0.9), white); dish.position.set(2.8, MH - 6, 0); dish.rotation.z = -1.2; mast.add(dish);
+      for (const y of [MH + 0.8, MH * 0.5]) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 6), red); b.position.y = y; mast.add(b); }
+      put(mast, mx, mz); });
+    // Propellant tank farm: tall white tanks (methane/oxygen from the ISRU plant)
+    [[0, 0], [12, 0], [0, 12], [12, 12], [24, 6]].forEach(([dx, dz], i) => { const t = new THREE.Group(), h = i === 4 ? 22 : 32;
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, h, 24), white); c.position.y = h / 2; t.add(c);
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(4.5, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2), white); cap.position.y = h; t.add(cap);
+      const l = new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), lamp); l.position.set(0, h + 4.6, 0); t.add(l);
+      put(t, BASE.tanks[0] + dx, BASE.tanks[1] + dz); });
+    // Habs: white cylinders on their sides, half-buried in regolith berms, a lamp on each; a big greenhouse dome
+    [[0, 0, 0.2], [26, 8, -0.3], [-24, 14, 0.5], [6, 32, 1.4], [40, 30, 0.9], [-30, 44, -0.6]].forEach(([dx, dz, ry]) => { const h = new THREE.Group(); h.scale.setScalar(1.7);
       const c = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 12, 20), white); c.rotation.z = Math.PI / 2; c.position.y = 3.4; h.add(c);
       const b = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), berm); b.scale.set(1.5, 0.45, 1); h.add(b);
+      const l = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 4), lamp); l.position.set(0, 7.6, 0); h.add(l);
       h.rotation.y = ry; put(h, BASE.habs[0] + dx, BASE.habs[1] + dz); });
+    { const d = new THREE.Group(), g = new THREE.Mesh(new THREE.SphereGeometry(20, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcfe2e8, metalness: 0.6, roughness: 0.15, transparent: true, opacity: 0.85 }));
+      d.add(g); const ring = new THREE.Mesh(new THREE.TorusGeometry(20, 0.8, 6, 48), white); ring.rotation.x = Math.PI / 2; d.add(ring); put(d, ...BASE.dome); }
     // Solar field: rows of dark tilted panels
-    const panel = new THREE.MeshStandardMaterial({ color: 0x1b2433, metalness: 0.4, roughness: 0.35 });
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 8; c++) { const p = new THREE.Mesh(new THREE.BoxGeometry(6, 0.15, 3), panel); p.rotation.x = -0.5;
+    const panel = new THREE.MeshStandardMaterial({ color: 0x3a5a86, metalness: 0.8, roughness: 0.2 });   // glints in the sun
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 12; c++) { const p = new THREE.Mesh(new THREE.BoxGeometry(6, 0.15, 3), panel); p.rotation.x = -0.5;
       put(p, BASE.solar[0] + c * 7, BASE.solar[1] + r * 6, 1.3); }
   }
   const setLegs = k => legs.forEach(p => { p.visible = k > 0.001; p.rotation.z = lerp(176, 36, k) * DEG; });
@@ -1664,7 +1675,7 @@ export async function initLanding(step) {
   const TVC_CAM = {
     wideH: 1000, teleH: 250, padH: 40,
     siteT: { x: -2200, z: 350, h: 400, fov: 12, drop: 0.1, aim: 4 },
-    siteW: { x: -2200, z: 350, h: 400, fov: 32, drop: 0, padK: 0.05, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
+    siteW: { x: -2200, z: 350, h: 400, fov: 32, drop: 0, padK: 0, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
     tele: { x: -330, z: 60, h: 2, fov: 25, drop: 0.14, aim: 4 },
   };
   const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3();
