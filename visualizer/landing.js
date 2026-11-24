@@ -1029,10 +1029,13 @@ export async function initLanding(step) {
     flight.step(d);
     if (wasPhase === 'belly' && s.phase === 'flip') shake = 0.5;   // the RCS kick; the relight flashes come per engine (flipFx)
     if (wasPhase === 'flip' && s.phase === 'tvc') handover();
+    if (s.phase === 'tvc' && s.eng < lastEng) shake = Math.max(shake, TFX.cutKick);   // an engine shuts down: a jolt (the plume stutters out in setPlume)
+    lastEng = s.phase === 'tvc' ? s.eng : 3;
     if (s.h < L.LEGS_AT) { legK = clamp(legK + L.DT / 2.2, 0, 1); once('legs', 'LEGS DEPLOYED', 1400); }
     if (s.h <= groundUnder()) touchdown(s.tilt);
   }
   const groundUnder = () => heightAt(flight.s.x, flight.s.z);
+  let lastEng = 3;
 
   function touchdown(tilt) {
     const s = flight.s, miss = flight.drift;
@@ -1354,7 +1357,7 @@ export async function initLanding(step) {
     const cgK = s.phase === 'belly' ? 0 : s.phase === 'flip' ? sstep(0, 4.5, ft) : 1, ch = CG_H();
     ship.position.set(s.x + ax.x * ch * (1 - cgK), s.h + ch * (ax.y * (1 - cgK) + cgK), s.z + ax.z * ch * (1 - cgK));
     // The autopilot's swing drawn up to ~1.9× in the flip so it reads (sim stays at ±8°), easing back after the handover
-    const gb = s.phase === 'flip' ? 1 + 0.9 * sstep(0, 0.4, ft) : s.phase === 'tvc' ? 1 + 0.9 * (1 - sstep(0, 1.2, s.t - s.tPh)) : 1;
+    const gb = s.phase === 'flip' ? 1 + 0.9 * sstep(0, 0.4, ft) : s.phase === 'tvc' ? TFX.gimbal + (1.9 - TFX.gimbal) * (1 - sstep(0, 1.2, s.t - s.tPh)) : 1;
     const gx = clamp(s.gA.x * gb, -16, 16) + s.big.gx * VIS_GIMBAL, gy = clamp(s.gA.y * gb, -16, 16) + s.big.gy * VIS_GIMBAL;
     tvc.rotation.set(gx * DEG, 0, -gy * DEG);
     if (s.phase === 'belly') {   // flaps steer: pitch trim from the sim, a roll fight against wobble and gusts, micro-corrections
@@ -1592,6 +1595,7 @@ export async function initLanding(step) {
         trkAim.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(C.jit * frameH / 100));   // hand jitter
       }
       camera.lookAt(trkAim);
+      if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the swing, as in the flip
       shotName = name; padCam = true;
     } else if (name === 'tvcWide') {   // world-anchored across the divert (camera on -x, the divert along z): the ship crosses the frame
       const C = TVC_CAM[name], gy = heightAt(C.x, C.z(apSide)) + 12;
@@ -1622,7 +1626,7 @@ export async function initLanding(step) {
     }
     shotName = name;
     const s = flight.s;
-    const buffet = paused ? 0 : state === 'flight' ? (s.phase === 'belly' ? clamp(s.q / 1100, 0, 1) * 0.5 : s.phase === 'flip' ? 0.8 : 0.35 * sstep(40, 0, s.h)) : 0;
+    const buffet = paused ? 0 : state === 'flight' ? (s.phase === 'belly' ? clamp(s.q / 1100, 0, 1) * 0.5 : s.phase === 'flip' ? 0.8 : s.phase === 'tvc' ? Math.max(TFX.buffet[3 - s.eng] ?? 0, 0.35 * sstep(40, 0, s.h)) : 0.35 * sstep(40, 0, s.h)) : 0;
     const inDeck = s.h > DECK.base - 40 && s.h < DECK.top ? 1 : 0;
     const sh = (paused ? 0 : shake) + buffet + (name === 'close' && !paused ? 0.5 + 0.7 * inDeck + (Math.random() < 0.04 ? 1.6 : 0) : 0);
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
@@ -1966,6 +1970,10 @@ export async function initLanding(step) {
 
   // ---------- Effects per frame (ground scene) ----------
   const _ex = new THREE.Vector3();
+  // Flip effects carried into the TVC phase (tunable)
+  const TFX = { gimbal: 1.5, buffet: [0.45, 0.3, 0.18], cutKick: 0.5, rcsOn: 10, rcsKick: 0.3, camLean: 2 };   // buffet by engines lit [3, 2, 1]; rcsOn in deg/s
+  const _rv = new THREE.Vector3(), lastUp = new THREE.Vector3(0, 1, 0);
+  let rcsOn = false, rcsK = 0;
   function effects(dt) {
     const sp = ship.position;
     _up.set(0, 1, 0).applyQuaternion(ship.quaternion);
@@ -1984,7 +1992,22 @@ export async function initLanding(step) {
       const n = burst ? 16 : Math.random() < 0.85 ? Math.round(2 + 4 * Math.abs(s.rcs)) : 0, v = burst ? 70 : 50;
       for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y, z: nose.z + rnd(-3, 3), vx: -_up.y * v * side * rnd(0.6, 1) + s.vx, vy: _up.x * v * side * rnd(0.6, 1) + s.vh, vz: rnd(-6, 6),
         life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
-    } else rcsSide = 0;
+    } else if (state === 'flight' && flight.s.phase === 'tvc' && !paused) {
+      // TVC: the nose RCS helps the gimbal: it fires while the nose swings faster than TFX.rcsOn, gas out the side it swings toward
+      const s = flight.s, nose = _pv.copy(sp).addScaledVector(_up, NOSE * 0.8);
+      _rv.copy(_up).sub(lastUp).divideScalar(Math.max(dt, 1e-3)); _rv.y = 0; lastUp.copy(_up);
+      const w = _rv.length() / DEG, on = w > TFX.rcsOn;
+      rcsK += ((on ? Math.sign(_rv.x - _rv.z || 1) : 0) - rcsK) * (1 - Math.exp(-dt * 6));
+      if (on) {
+        const burst = !rcsOn; rcsOn = true;
+        if (burst) shake = Math.max(shake, TFX.rcsKick);
+        _rv.normalize();
+        const n = burst ? 14 : Math.random() < 0.8 ? Math.round(2 + 3 * clamp((w - TFX.rcsOn) / 6, 0, 1)) : 0, v = burst ? 70 : 50;
+        for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y + rnd(-1, 1), z: nose.z, vx: _rv.x * v * rnd(0.6, 1) + s.vx, vy: rnd(-4, 4) + s.vh, vz: _rv.z * v * rnd(0.6, 1) + s.vz,
+          life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
+      } else rcsOn = false;
+      rcsSide = 0;
+    } else { rcsSide = 0; rcsOn = false; rcsK = 0; lastUp.copy(_up); }
     // Dust blown off the ground where the exhaust (along the nozzle, so it follows the gimbal) meets it
     if (plumeFx.on) {
       tvc.updateWorldMatrix(true, false);

@@ -42,7 +42,7 @@ Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (
 ## Tuning
 - `RL` (Section 8): arrow thickness/length/opacity/easing/fade band/push brightness, ghosts, cue ring, push kick/shake, tag timing.
 - `TVC_CAM` (landing.js): shot times/heights, camera x/z, height offset, aim drop, lead, fov.
-- landing-sim.js: `DIVERT` (start offset), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC `kp`/`kd`/`amax`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds), `HEAVY` (big-ship follow of the raw source: `release`, `wn`, `zeta`, `vMax`, `aMax`, nozzle `gTau`/`gRate`; `s.big` vs raw `s.dev`), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
+- landing-sim.js: `DIVERT` (start offset), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC `kp`/`kd`/`amax`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds), `TFX` in landing.js (TVC-phase flip effects: gimbal draw, buffet by engines, shutdown kick, RCS threshold °/s, RCS kick, camera lean), `HEAVY` (big-ship follow of the raw source: `release`, `wn`, `zeta`, `vMax`, `aMax`, nozzle `gTau`/`gRate`; `s.big` vs raw `s.dev`), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
 
 - Raw vs big: raw `dev`/`s.dev` → abort, tracker, HUD, inset; `s.big` → thrust, ship pose, nozzles, tilt arrow. `flightStart()` aims the along-track coast (`x + 2·vx` at the TVC start) over the pad.
 
