@@ -724,10 +724,9 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-prompt.now { color: #fff; }   /* eases amber → white once and holds */
 .lnd-inset { position: absolute; left: clamp(12px, 2.4vw, 30px); bottom: 150px; width: clamp(150px, 15vw, 210px); aspect-ratio: 1;
   border: 1px solid rgba(255,255,255,.2); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
-  transition: width .6s ease, border-color .6s ease, box-shadow .6s ease; animation: lnd-fade-in .6s ease-out both; }
+  transition: border-color .6s ease, box-shadow .6s ease; animation: lnd-fade-in .6s ease-out both; }
 @keyframes lnd-fade-in { from { opacity: 0; } }
 .lnd-inset[hidden] { display: none; }
-.lnd-inset.big { width: 25vw; }   /* mirror moment: grows during the TVC close-up */
 .lnd-inset.cue { border-color: rgba(245,166,35,.75); }   /* one soft fade to amber, held */
 .lnd-inset.push { border-color: rgba(255,150,80,.5); box-shadow: 0 0 0 1px rgba(0,0,0,.35), inset 0 0 14px rgba(255,138,61,.18); }
 .lnd-inset-l { position: absolute; left: 8px; top: 6px; font: 600 10px var(--label); letter-spacing: .14em; color: rgba(255,255,255,.75); }
@@ -737,9 +736,6 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-tag { position: absolute; transform: translate(0, -50%); padding: 5px 9px; border-left: 2px solid var(--ok); background: rgba(10,12,16,.55);
   font: 600 14px var(--cond); letter-spacing: .1em; color: #fff; white-space: nowrap; pointer-events: none; animation: lnd-tag .4s ease-out both; transition: opacity .4s; }
 .lnd-tag.out { opacity: 0; }
-/* TVC close-up: dim the altitude/speed/throttle panel; attitude dial, inset and strip stay full */
-#landing .lnd-alt { transition: opacity .4s; }
-#landing.lnd-tvcclose .lnd-alt { opacity: .4; }
 .lnd-tag[hidden] { display: none; }
 .lnd-tag.warn { border-color: var(--amber); } .lnd-tag.bad { border-color: var(--warn); color: var(--warn); }
 @keyframes lnd-tag { from { opacity: 0; transform: translate(-8px, -50%); } }
@@ -757,7 +753,6 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
   .lnd-loop { display: none; }
   .lnd-res-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lnd-inset { width: 120px; bottom: auto; top: 150px; left: 12px; }
-  .lnd-inset.big { width: 40vw; }
   .lnd-prompt { font-size: 12px; letter-spacing: .12em; }
 }
 .lnd-controls { top: 12px; }

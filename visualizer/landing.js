@@ -848,7 +848,9 @@ export async function initLanding(step) {
   let outcome = null, legK = 0, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
   let calls = {};                    // callouts already shown this run
   const START = L.flightStart();
-  let flight = L.createFlight(START.x0);
+  let apSide = 1;   // which side of the pad the ship comes in from (+1/-1, random each run)
+  function newFlight() { apSide = Math.random() < 0.5 ? -1 : 1; return L.createFlight(START.x0, apSide * L.DIVERT); }
+  let flight = newFlight();
   const att = L.createAttitudeSim();
   let dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };      // the TVC source's attitude (deg), once it flies
   let rig = null, rigSeen = -1e9;
@@ -859,7 +861,6 @@ export async function initLanding(step) {
   const tracker = L.createTracker(d => {
     feed(`Pushed to <b>${d.peak.toFixed(1)}°</b> · back in <b>${d.recover.toFixed(2)} s</b>`, d.peak > 15 ? 'warn' : 'ok');
     showTag(`${d.peak.toFixed(1)}° → 0 in <b>${d.recover.toFixed(2)} s</b>`, d.peak > 15 ? 'warn' : '');
-    cuRecovered();
   });
   const fall = { v: new THREE.Vector3(), axis: new THREE.Vector3(), ang: 0, rate: 0 };
 
@@ -886,12 +887,21 @@ export async function initLanding(step) {
   goBtn.onclick = () => (state === 'orbit' ? begin() : ended() ? (reset(), begin()) : null);
   pauseBtn.onclick = () => setPaused(!paused);
   $('lndAgain').onclick = () => { reset(); begin(); };
-  const CAMS = ['auto', 'tvc', 'chase', 'pad', 'free'];
+  // Skip to the belly flop: a fresh run cut straight into the cloud deck (works from orbit, mid-flight or after landing)
+  function skipToBelly() {
+    if (source === 'rig' && !rigLive()) { callout('NO RIG DATA · CONNECT THE ARDUINO', 2600, 'warn'); return; }
+    if (state !== 'orbit') reset();
+    if (paused) setPaused(false);
+    begin(); if (state === 'deorbit') cutToGround();
+  }
+  $('lndSkip').onclick = skipToBelly;
+  const CAMS = ['auto', 'chase', 'pad', 'free'];
   let camMode = 'auto';
   camBtn.onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % CAMS.length]; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); };
   addEventListener('keydown', e => {
     if (document.body.dataset.tab !== 'landing' || e.target.closest('input, select, textarea')) return;
     if (e.key === 'g' || e.key === 'G') doGust();
+    if (e.key === 'b' || e.key === 'B') skipToBelly();
     if (e.key === ' ') {
       e.preventDefault();
       if (running()) setPaused(!paused);
@@ -916,7 +926,7 @@ export async function initLanding(step) {
     tvcBtn.classList.toggle('off', !att.tvc);
     gustBtn.querySelector('.lbl').textContent = source === 'rig' ? 'Call a gust' : 'Gust';
     gustBtn.title = source === 'rig' ? 'Shows a prompt to push the real rocket (G)' : 'Shove the ship sideways (G)';
-    camBtn.querySelector('.lbl').textContent = 'Cam: ' + (camMode === 'tvc' ? 'TVC' : camMode[0].toUpperCase() + camMode.slice(1));
+    camBtn.querySelector('.lbl').textContent = 'Cam: ' + camMode[0].toUpperCase() + camMode.slice(1);
   }
 
   let calloutTimer = 0;
@@ -942,8 +952,8 @@ export async function initLanding(step) {
   let loopTimer = 0;
   function reset() {
     state = 'orbit'; paused = false; $('landing').classList.remove('paused');
-    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; cu = null; cuEnd = -1e9; ringK = 0; insEl.classList.remove('big'); $('landing').classList.remove('lnd-tvcclose'); outcome = null; legK = 0; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
-    flight = L.createFlight(START.x0); att.reset(); tracker.reset();
+    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; ringK = 0; outcome = null; legK = 0; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
+    flight = newFlight(); att.reset(); tracker.reset();
     trim = { x: 0, y: 0 }; trimN = 0; maxTilt = 0; maxGimbal = 0; trail.length = 0; frames = []; simClock = 0;
     dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
     et = 0; ent = { h: L.ENTRY.h0, v: L.ENTRY.v0, I: 0, fade: 0, u: 0 };
@@ -1403,7 +1413,7 @@ export async function initLanding(step) {
   let shake = 0, orbitA = 0, shotName = '', padCam = false, rcsSide = 0;
   const PAD_CAM = new THREE.Vector3(-82, 6, -98), REPLAY_CAM = new THREE.Vector3(70, 5, 62);
   function shot() {
-    if (camMode !== 'auto' && camMode !== 'tvc') return camMode;
+    if (camMode !== 'auto') return camMode;
     if (state === 'replay') return 'replay';
     if (state === 'flight') {
       const s = flight.s;
@@ -1413,10 +1423,9 @@ export async function initLanding(step) {
         return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.2 ? 'flaps' : s.t < tBreak + 9.4 ? 'top' : 'side';
       }
       if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
-      // TVC scene: handover → descent; close-ups on pushes/gusts (TVC cam: close-up throughout); pad below 70 m
-      if (camMode === 'tvc' || cu) return 'tvcClose';
-      if (s.t - s.tPh < TC.handover) return 'handover';
-      return s.h > 70 ? 'descent' : 'pad';
+      // TVC landing (side approach): wide at the handover, side profile across the divert, then the pad cam. All cuts.
+      if (s.h - groundUnder() < TVC_CAM.padH) return 'pad';
+      return s.t - s.tPh < TVC_CAM.wideT ? 'tvcWide' : 'tvcSide';
     }
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
     return 'chase';
@@ -1435,16 +1444,6 @@ export async function initLanding(step) {
         _co.set(-30 - 30 * k, 4 + 10 * k, -170); _lo.copy(_up.set(0, 1, 0).applyQuaternion(ship.quaternion)).multiplyScalar(4); break;
       }
       case 'flipLow': _co.set(-80, -18, -70); _lo.set(0, -6, 0); break;   // low aft, looking up past the exhaust at the gimballing bells
-      case 'handover': {   // low 3/4 on the engine section, slow push-in: bells, plumes, aft flaps
-        const k = sstep(0, TC.handover, flight.s.t - flight.s.tPh);
-        _co.set(-38, 0, -30).multiplyScalar(lerp(1, 0.74, k)); _co.y = lerp(-TAIL - 9, -TAIL - 4, k); _lo.set(0, -TAIL - 2, 0); break;   // bells mid-frame, above the HUD
-      }
-      case 'tvcClose': _co.set(-27, -TAIL, -22); _lo.set(0, -TAIL - 1, 0); break;   // aft third: bells, plumes, flaps; nose out of frame
-      case 'descent': {   // the chase, slower: a gentle orbit drift, ship in the upper half, ground growing below
-        const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + TC.driftDeg * DEG * Math.sin(Math.PI * camT / TC.driftSweep), el = lerp(10, 22, k) * DEG, Rr = lerp(80, 130, k);
-        _co.set(Rr * Math.cos(el) * Math.cos(az), Rr * Math.sin(el), Rr * Math.cos(el) * Math.sin(az));
-        _lo.set(0, -0.2 * Rr, 0); break;
-      }
       default: {   // chase: from above, the pad below; lower as it nears the ground
         const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + 0.5 * Math.sin(orbitA), el = lerp(16, 50, k) * DEG, R = lerp(110, 170, k);
         _co.set(R * Math.cos(el) * Math.cos(az), R * Math.sin(el), R * Math.cos(el) * Math.sin(az));
@@ -1546,11 +1545,7 @@ export async function initLanding(step) {
     if (camMode === 'still') return;
     if (state === 'flight') cloudFx(dt);
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
-    if (!paused) camT += dt;
-    closeUpStep();
     const name = shot(), sp = ship.position;
-    $('landing').classList.toggle('lnd-tvcclose', name === 'tvcClose');
-    let fovSnap = true;
     glint.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
       if (shotName !== 'track') {
@@ -1572,16 +1567,19 @@ export async function initLanding(step) {
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
       shotName = name; padCam = true; return;
     }
-    if (name === 'pad' || name === 'replay') {
-      const P = name === 'pad' ? PAD_CAM : REPLAY_CAM;
-      if (name !== shotName) {
-        padEase = name === 'pad' && TVC_SHOTS.includes(shotName) ? 0 : -1;   // from the TVC scene: ease in, otherwise cut
-        if (padEase < 0) { camera.position.copy(P); lookOff.set(sp.x, clamp(0.45 * (sp.y + 15), 14, 60), sp.z); } else lookOff.add(sp);
-      }
-      if (padEase >= 0) { padEase += dt; fovSnap = false; }
-      camera.position.lerp(P, 1 - Math.exp(-dt * (padEase >= 0 ? lerp(0.9, 2, sstep(0, 2.5, padEase)) : 2)));
-      if (padEase >= 0) { const gm = heightAt(camera.position.x, camera.position.z) + 3; if (camera.position.y < gm) camera.position.y = gm; }
-      _lo.set(sp.x * 0.8, clamp(0.45 * (sp.y + 15), 14, 60), sp.z * 0.8);
+    if (name === 'tvcWide' || name === 'tvcSide') {   // world-anchored across the divert (camera on -x, the divert along z): the ship crosses the frame
+      const C = TVC_CAM[name], gy = heightAt(C.x, C.z(apSide)) + 12;
+      if (name !== shotName) tvcCam.set(C.x, Math.max(sp.y + C.dy, gy), C.z(apSide));
+      tvcCam.y = Math.max(sp.y + C.dy, gy);                              // a crane: rides down with the ship, never into the ground
+      camera.position.copy(tvcCam);
+      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2);
+      camera.lookAt(_pv.copy(sp).add(_lo.set(0, -C.drop * frameH, -apSide * C.lead)));   // ship high in the frame, room toward the pad
+      shotName = name; padCam = true;
+    } else if (name === 'pad' || name === 'replay') {
+      const P = name === 'pad' ? _pc.set(PAD_CAM.x, PAD_CAM.y, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
+      if (name !== shotName) { camera.position.copy(P); lookOff.set(sp.x, Math.max(14, 0.92 * sp.y), sp.z); }
+      camera.position.lerp(P, 1 - Math.exp(-dt * 2));
+      _lo.set(sp.x * 0.8, Math.max(14, 0.92 * sp.y), sp.z * 0.8);   // tilts up to keep the whole ship in frame as it comes in
       lookOff.lerp(_lo, 1 - Math.exp(-dt * 4));
       camera.lookAt(lookOff);
       padCam = true;
@@ -1589,9 +1587,7 @@ export async function initLanding(step) {
       camGoal(name);
       const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'flipLow' || name === 'close' || name === 'top' || name === 'side' || shotName === 'flaps' || shotName === 'track');
       if (padCam || cut) { camOff.copy(cut ? _co : camera.position.clone().sub(sp)); lookOff.copy(_lo); padCam = false; }
-      const tv = TVC_SHOTS.includes(name) && name !== 'chase';   // TVC scene: ~1 s eases, no cuts, FOV eases too
-      fovSnap = cut;
-      camOff.lerp(_co, 1 - Math.exp(-dt * (tv ? TC.ease : 1.2))); lookOff.lerp(_lo, 1 - Math.exp(-dt * (tv ? TC.ease + 0.6 : 2)));
+      camOff.lerp(_co, 1 - Math.exp(-dt * 1.2)); lookOff.lerp(_lo, 1 - Math.exp(-dt * 2));
       camera.position.copy(sp).add(camOff);
       const gmin = heightAt(camera.position.x, camera.position.z) + 3;
       if (camera.position.y < gmin) camera.position.y = gmin;
@@ -1606,33 +1602,18 @@ export async function initLanding(step) {
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) camera.position.add(kick);   // a push knocks the camera a little the same way
     if (!paused) shake *= Math.exp(-dt * 2.5);
-    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name === 'tvcClose' ? 46 : name === 'handover' ? 48 : 40;
-    if (fovSnap || paused) { if (camera.fov !== fov) { camera.fov = fov; resize(); } }
-    else if (Math.abs(camera.fov - fov) > 0.02) setFov(camera.fov + (fov - camera.fov) * (1 - Math.exp(-dt * 2.5)));
-    else if (camera.fov !== fov) setFov(fov);
+    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name === 'tvcWide' || name === 'tvcSide' ? TVC_CAM[name].fov : 40;
+    if (camera.fov !== fov) { camera.fov = fov; resize(); }
   }
+  // TVC landing shots (whole rocket in frame; cuts only): x/z world position (z by approach side), height = ship + dy,
+  // drop = how far below the ship to aim (× frame height: keeps it above the HUD), lead = aim offset toward the pad (m)
+  const TVC_CAM = {
+    wideT: 3, padH: 110,
+    tvcWide: { x: -300, z: sd => sd * L.DIVERT, dy: -20, drop: 0.12, lead: 45, fov: 36 },
+    tvcSide: { x: -320, z: sd => sd * L.DIVERT * 0.4, dy: -10, drop: 0.2, lead: 0, fov: 32 },
+  };
+  const tvcCam = new THREE.Vector3(), _pc = new THREE.Vector3();
 
-  // ---------- TVC scene (Auto camera): handover → descent, eased close-ups on pushes/gusts, eased pad ----------
-  const TC = { handover: 3, ease: 2.3, hold: 2.5, after: 1.0, cool: 3, maxNoRec: 8, driftDeg: 15, driftSweep: 20 };
-  const TVC_SHOTS = ['handover', 'descent', 'tvcClose', 'chase'];
-  let camT = 0, bigAt = -1e9, cu = null, cuEnd = -1e9, lastRec = -1e9, padEase = -1;
-  function cuRecovered() { lastRec = camT; if (cu) cu.rec = camT; }
-  function closeUpStep() {
-    const s = flight.s, inTvc = state === 'flight' && s.phase === 'tvc';
-    if (!inTvc) { if (cu) cuEnd = camT; cu = null; return; }
-    const want = !!cue || pushOn;   // a countdown running, or a push past rigTilt (onPushStart)
-    if (!cu) {
-      if (want && s.t - s.tPh >= TC.handover && camT - cuEnd >= TC.cool) cu = { t0: camT, rec: camT - lastRec < 1.5 ? lastRec : null };
-      return;
-    }
-    const held = camT - cu.t0 >= TC.hold, done = cu.rec !== null ? camT - cu.rec >= TC.after : camT - cu.t0 >= TC.maxNoRec;
-    if (held && done && !pushOn) { cu = null; cuEnd = camT; }   // the 3 s cooldown stops ping-pong on repeated pushes
-  }
-  function setFov(f) {   // FOV ease without a full resize (no render-target reallocation)
-    camera.fov = f; camera.updateProjectionMatrix(); orbit.resize(camera.aspect, f);
-    const sc = view.clientHeight * renderer.getPixelRatio() / (2 * Math.tan(f * DEG / 2));
-    dust.setScale(sc); fire.setScale(sc); glow.setScale(sc); puffs.setScale(sc); haze.setScale(sc);
-  }
 
   // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
   const _sA = new THREE.Vector3(), _sB = new THREE.Vector3();
@@ -1880,8 +1861,6 @@ export async function initLanding(step) {
     const counting = stripStep();
     insEl.classList.toggle('cue', !!counting);
     // Mirror moment: the inset grows during the TVC close-up, shrinks back after the recovery tag
-    if (shotName === 'tvcClose') bigAt = camT;
-    insEl.classList.toggle('big', shotName === 'tvcClose' || (!tagEl.hidden && camT - bigAt < RL.tagMs / 1000 + 0.5));
     arrowsStep(dt, counting);
     tagStep(dt);
     return insetStep();
@@ -2100,7 +2079,7 @@ export async function initLanding(step) {
         const s = flight.s; for (let n = 0; n < 1e5 && s.phase !== 'tvc' && !(s.phase === 'flip' && s.t - s.tPh >= at); n++) simStep();
       },
       shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
-      cam() { const s = flight.s; return { shot: shotName, cu: !!cu, fov: +camera.fov.toFixed(1), h: Math.round(s.h - groundUnder()), t: +(s.t - s.tPh).toFixed(1), phase: s.phase, state, big: insEl.classList.contains('big'), tag: !tagEl.hidden }; },   // TVC-scene state
+      cam() { const s = flight.s; return { shot: shotName, side: apSide, z: Math.round(s.z), fov: +camera.fov.toFixed(1), h: Math.round(s.h - groundUnder()), t: +(s.t - s.tPh).toFixed(1), phase: s.phase, state, tag: !tagEl.hidden }; },   // TVC-scene state
     };
   }
 

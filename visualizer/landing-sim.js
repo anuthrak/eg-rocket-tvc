@@ -44,10 +44,16 @@ export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3
 // ---------- 1 + 2. The flight from the belly flop to touchdown ----------
 // Attitude is a pair of tilts in the Bench convention (tiltY leans toward +x, the direction of travel; tiltX toward
 // +z). Belly-first is tiltY = +84°. cmd = the autopilot's attitude; dev = the TVC source's deviation on top of it.
-export function createFlight(x0 = 0) {
+// Side approach: the belly flop starts DIVERT m to the left or right of the pad line (z); in the TVC phase the ship
+// leans over toward the pad, overshoots it once and settles (a lightly damped lateral loop: LAT).
+export const DIVERT = 200;
+export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };
+// TVC phase: sideways accel = -kd·v - kp·(z - aim), clamped to amax (m/s²). The aim swings `over` m past the pad
+// between hA→hB and back by hC→hD (smoothstep ramps), so the ship overshoots once and comes back while it's still high.
+export function createFlight(x0 = 0, z0 = 0) {
   const s = {
     phase: 'belly', t: 0, tPh: 0,
-    x: x0, h: H_START, z: 0, vx: 28, vh: -330, vz: 0,
+    x: x0, h: H_START, z: z0, vx: 28, vh: -330, vz: 0,
     cmd: { x: 0, y: 84, wx: 0, wy: 0 },   // commanded tilts (deg) and their rates (deg/s)
     gA: { x: 0, y: 0 },                   // the autopilot's own gimbal (deg), from the torque it asks for
     m: SHIP.m0, thr: 0, flap: 0, rcs: 0,
@@ -55,7 +61,9 @@ export function createFlight(x0 = 0) {
     dev: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 },
     tilt: 0,                              // total tilt from vertical (deg)
   };
-  const T_FLIP = 4.5, MARGIN = 0.95;
+  const T_FLIP = 4.5, MARGIN = 0.95, side = Math.sign(z0);
+  const ss = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const latAim = h => -side * LAT.over * ss(LAT.hA, LAT.hB, h) * ss(LAT.hD, LAT.hC, h);
   let aRef = 16;
   // Speed target for the TVC phase (negative = down). Deceleration a(h) = A_LOW below 40 m, ramping up to A_LOW + aRef
   // by 160 m: hard braking high up, a gentle last 40 m, 1.5 m/s at the ground. v² = 1.5² + 2∫a dh.
@@ -105,7 +113,7 @@ export function createFlight(x0 = 0) {
       aH = clamp(aH, 0, 40);
       const tv = s.phase === 'tvc';
       const aX = clamp(-(tv ? 0.7 : 0.32) * s.vx - (tv ? 0.05 : 0.022) * s.x, -9, 9);
-      const aZ = clamp(-(tv ? 0.7 : 0.2) * s.vz - (tv ? 0.05 : 0.01) * s.z, -9, 9);
+      const aZ = tv ? clamp(-LAT.kd * s.vz - LAT.kp * (s.z - latAim(hh)), -LAT.amax, LAT.amax) : clamp(-0.2 * s.vz - LAT.kFlip * s.z, -9, 9);
       const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 12 : 25;    // near the ground: stand up straight
       tgtY = clamp(Math.atan2(aX, aH) / DEG, -lim, lim);
       tgtX = clamp(Math.atan2(aZ, aH) / DEG, -lim, lim);
@@ -145,16 +153,16 @@ export function createFlight(x0 = 0) {
     // Seconds to touchdown at the current deceleration (for the HUD)
     get ttg() { const a = Math.max(s.thr * SHIP.T / s.m - G, 0.5); return Math.max(0, -s.vh / a); } };
 }
-function runFrom(x0) {   // to the ground, with no TVC input
-  const f = createFlight(x0);
+function runFrom(x0, z0 = 0) {   // to the ground, with no TVC input
+  const f = createFlight(x0, z0);
   while (f.s.h > 0 && f.s.t < 200) f.step(null);
   return f;
 }
 // Where to start the belly flop so that, with no TVC input, it lands on the pad centre
 export function flightStart() {
   let x0 = 0;
-  for (let i = 0; i < 10; i++) x0 -= 0.9 * runFrom(x0).s.x;
-  return { x0 };
+  for (let i = 0; i < 10; i++) x0 -= 0.9 * runFrom(x0, DIVERT).s.x;
+  return { x0 };   // the same x0 serves both sides (mirror image in z)
 }
 
 // ---------- Simulated attitude: the demo source for the terminal phase ----------
