@@ -1,15 +1,17 @@
-// Landing Monte Carlo (side approach): Simulated source, TVC on, 3 random gusts, random side. node tests/landing_mc.mjs [N] [kd]
+// Landing Monte Carlo (side approach): Simulated source, TVC on, 3 random gusts (GT=t1,t2,t3), random side. node tests/landing_mc.mjs [N] [kd]
 const L = await import('../visualizer/landing-sim.js');
+const GUSTS_T = (process.env.GT || "3,7,13").split(",").map(Number);   // gust times into the TVC phase (s)
 if (process.argv[3]) L.LAT.kd = +process.argv[3]; const N = +process.argv[2] || 200, rnd = (a, b) => a + Math.random() * (b - a);
 const { x0 } = L.flightStart();
 let crash = 0, offPad = 0, lost = 0, maxMiss = 0, maxDev = 0, maxTD = 0, sumMiss = 0;
 for (let i = 0; i < N; i++) {
   const f = L.createFlight(x0, (Math.random() < 0.5 ? -1 : 1) * L.DIVERT), s = f.s, att = L.createAttitudeSim();
+  if (process.env.TVC === "0") att.setTvc(false);   // TVC off: it should be lost
   let plan = null, gone = false;
   while (s.h > 0 && s.t < 300) {
     let d = null;
     if (s.phase === 'tvc') {
-      if (!plan) { att.reset(); plan = [2, 6, 10].map(t => ({ t: t + rnd(-0.6, 0.6), dir: rnd(0, 360) })); }
+      if (!plan) { att.reset(); plan = GUSTS_T.map(t => ({ t: t + rnd(-0.6, 0.6), dir: rnd(0, 360) })); }
       const t = s.t - s.tPh;
       for (const g of plan) if (!g.done && t >= g.t) { g.done = true; att.gust(g.dir, 0.85); }
       att.step(1 + 1.5 * Math.min(1, Math.max(0, (80 - s.h) / 80)));

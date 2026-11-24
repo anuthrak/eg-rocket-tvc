@@ -44,9 +44,13 @@ export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3
 // ---------- 1 + 2. The flight from the belly flop to touchdown ----------
 // Attitude is a pair of tilts in the Bench convention (tiltY leans toward +x, the direction of travel; tiltX toward
 // +z). Belly-first is tiltY = +84°. cmd = the autopilot's attitude; dev = the TVC source's deviation on top of it.
-// Side approach: the belly flop starts DIVERT m to the left or right of the pad line (z); in the TVC phase the ship
-// leans over toward the pad, overshoots it once and settles (a lightly damped lateral loop: LAT).
-export const DIVERT = 200;
+// Side approach (after the real Starship flights: the flaps steer to the target, then flip, a 3-engine landing burn that
+// translates over the pad in one motion, and 3 → 2 → 1 engines for the settle). The belly flop starts DIVERT m to the left
+// or right of the pad line (z); the flaps bank it toward the pad (BELLY), the flip and burn carry it the rest of the way
+// with one small overshoot (LAT).
+export const DIVERT = 350;
+export const BELLY = { aim: 0, kp: 0.01, kd: 0.1, bankMax: 25, lift: 1.0 };   // flap bank (deg) → side force = drag·lift·sin(bank)
+export const ENG3 = { to2: 0.72, to1: 0.31, h1: 100, hold: 0.3 };   // shut one engine below these 3-engine throttle fractions (to1 only below h1 m)
 export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };
 // TVC phase: sideways accel = -kd·v - kp·(z - aim), clamped to amax (m/s²). The aim swings `over` m past the pad
 // between hA→hB and back by hC→hD (smoothstep ramps), so the ship overshoots once and comes back while it's still high.
@@ -58,16 +62,16 @@ export function createFlight(x0 = 0, z0 = 0) {
     gA: { x: 0, y: 0 },                   // the autopilot's own gimbal (deg), from the torque it asks for
     m: SHIP.m0, thr: 0, flap: 0, rcs: 0,
     q: 0, acc: 0,
-    dev: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 },
+    dev: { tiltX: 0, tiltY: 0, gx: 0, gy: 0 }, eng: 3,
     tilt: 0,                              // total tilt from vertical (deg)
   };
   const T_FLIP = 4.5, MARGIN = 0.95, side = Math.sign(z0);
   const ss = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   const latAim = h => -side * LAT.over * ss(LAT.hA, LAT.hB, h) * ss(LAT.hD, LAT.hC, h);
-  let aRef = 16;
+  let aRef = 16, engT = 0;
   // Speed target for the TVC phase (negative = down). Deceleration a(h) = A_LOW below 40 m, ramping up to A_LOW + aRef
   // by 160 m: hard braking high up, a gentle last 40 m, 1.5 m/s at the ground. v² = 1.5² + 2∫a dh.
-  const A_LOW = 6.5, H0 = 22, H1 = 90;
+  const A_LOW = 4, H0 = 60, H1 = 130;
   const ramp = h => h <= H0 ? 0 : h < H1 ? (h - H0) ** 2 / (2 * (H1 - H0)) : (H1 - H0) / 2 + (h - H1);
   const vProfile = h => -Math.sqrt(2.25 + 2 * (A_LOW * h + aRef * ramp(h)));
   const aProfile = h => A_LOW + aRef * (h <= H0 ? 0 : h < H1 ? (h - H0) / (H1 - H0) : 1);
@@ -101,6 +105,9 @@ export function createFlight(x0 = 0, z0 = 0) {
     let tgtX = 0, tgtY = s.cmd.y, alphaMax = 5, need = 0;
     if (s.phase === 'belly') {
       tgtY = 84;
+      // Flaps bank it toward the pad line: aim for `aim` m off at the flip (the burn does the rest)
+      const zt = side * BELLY.aim, aW = -BELLY.kd * s.vz - BELLY.kp * (s.z - zt), aMax = drag / s.m * BELLY.lift;
+      tgtX = clamp(Math.asin(clamp(aW / Math.max(aMax, 1e-3), -1, 1)) / DEG, -BELLY.bankMax, BELLY.bankMax);
       s.flap = clamp((84 - s.cmd.y) * 0.07 - s.cmd.wy * 0.035, -1, 1);
       if (s.h <= stopH()) { s.phase = 'flip'; s.tPh = s.t; }
     } else {
@@ -127,11 +134,16 @@ export function createFlight(x0 = 0, z0 = 0) {
           aRef = Math.max((s.vh * s.vh - 2.25 - 2 * A_LOW * s.h) / (2 * ramp(Math.max(s.h, 200))), 2);   // the profile starts at the current speed
         }
       } else {
-        s.thr = clamp(need, 0.05, 1);   // down to one engine throttled low: the light ship can hover
+        // 3 → 2 → 1 engines as the burn eases (Flight 13 did the same); relights one if it needs more than it has
+        engT = need < (s.eng === 3 ? ENG3.to2 : s.eng === 2 && hh < ENG3.h1 ? ENG3.to1 : -1) ? engT + DT : 0;
+        if (engT > ENG3.hold && s.eng > 1) { s.eng--; engT = 0; }
+        if (need > s.eng / 3 * 0.97 && s.eng < 3) s.eng++;
+        s.thr = clamp(need, 0.05, s.eng / 3);   // fraction of three engines; one engine throttled low can hover the light ship
         alphaMax = 14;
       }
       s.flap *= 0.98;
     }
+    if (s.phase === 'belly') fz += drag * BELLY.lift * Math.sin(s.cmd.x * DEG);   // the flaps' side force at the bank
     const alY = drive('y', tgtY, alphaMax), alX = drive('x', tgtX, alphaMax);
     s.rcs = s.phase === 'flip' ? clamp(alY / alphaMax, -1, 1) : 0;
     const thrust = s.phase === 'belly' ? 0 : s.thr * SHIP.T;

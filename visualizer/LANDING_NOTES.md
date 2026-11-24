@@ -18,7 +18,7 @@ CHANGELOG "Unreleased" lists every step. Read this file first in a new session.
   `entryHV`/`qRaw`, `tileT`, heat panel `heatPanel()`); cameras `cameraStep` (`ENT_CAM`, `shot()`, `camGoal`, `track`
   long-lens operator `trk`, `glint`); `cloudFx` (vapour trail, streamers, belly speed motes, chill-down, `bGust`);
   `placeShip` (flap steering + wobble in belly); `reset()` (full reset for Fly again); `__lnd` debug API (`?debug`):
-  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`, `flip(t)`, `at(h)`, `cam()` (shot name, approach side, z, fov, height, TVC time, tag shown). Plumes: `ENG`, `setPlume(thr,t,ft)`, `plumeFx`, `nozLight`/`poolLight`/`pool`, shimmer uniforms `uSh*` in the grade pass. Section 8: `setStrip`/`cue` (prompt strip), `gimArrow`/`tiltArrow`/`ghosts`/`cueRing`, `insScene` rendered after the composer with a scissor (`renderInset`), `showTag`. Strengths in `RL` (top of the Section 8 block). TVC landing shots: `TVC_CAM` (`tvcWide`, `tvcSide`: world-anchored x/z, height rides with the ship; `padH`), `apSide` (approach side, `newFlight()`), `skipToBelly()`. `callout()` still shows only `sys`; rig prompts go through the strip.
+  `still(look,x,y,z,tx,ty,tz)`, `shot(i,t)`, `entry(u)`, `ground()`, `flip(t)`, `at(h)`, `cam()` (shot name, approach side, z, fov, height, TVC time, tag shown). Plumes: `ENG`, `setPlume(thr,t,ft)`, `plumeFx`, `nozLight`/`poolLight`/`pool`, shimmer uniforms `uSh*` in the grade pass. Section 8: `setStrip`/`cue` (prompt strip), `gimArrow`/`tiltArrow`/`ghosts`/`cueRing`, `insScene` rendered after the composer with a scissor (`renderInset`), `showTag`. Strengths in `RL` (top of the Section 8 block). TVC landing shots: `TVC_CAM` (`tvcWide`, `tvcTop` ship-relative, `tvcTrack` fixed ground spot with spring aim `trkAim`; `wideT`/`trackH`/`padH`), `setPlume(..., neng)` (engines lit from `s.eng`), `apSide` (approach side, `newFlight()`), `skipToFlip()`. `callout()` still shows only `sys`; rig prompts go through the strip.
 - `landing-orbit.js`: orbit planet (craters, canyon, caps for late southern spring: `POLE_TILT`, `SPIN`), clouds, atmosphere,
   stars, sun burst.
 - `landing-look.js`: looks A/B/C/space (palette now matches the orbit planet), grade shader, bloom, quality, flare.
@@ -31,7 +31,7 @@ with chill-down and "Flip in 3·2·1" → flip → TVC landing → touchdown/cra
 
 ## Done (sections)
 Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (+ nose-up 70° AoA, smooth warp) ·
-4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer) · 8 rig link (prompt strip, ship arrows, Your-rocket CAD inset, push cues, recovery tag) · 8b calmer rig link (`RL` constants) · side approach (200 m divert, one overshoot) + TVC landing shots (wide → side profile → pad, cuts) + Skip to belly flop (B). User rejected: zoom/close-up shots, slow eases, inset growing.
+4 clouds (+ cumulus, far tracking shot) · ground look · 5 belly flop · terrain after Perseverance views · Fly-again reset · 6 flip (staggered relight, flap fold, 1.9× gimbal, RCS bursts, side → low aft shots; no slow-mo, user said no) · orbit idle 3 shots + less bloom · 7 engines & plume (per-engine plumes/gimbal, engine-out, nozzle + ground-pool lights, shimmer) · 8 rig link (prompt strip, ship arrows, Your-rocket CAD inset, push cues, recovery tag) · 8b calmer rig link (`RL` constants) · Starship-style side approach (flaps steer, 3-engine translate with one overshoot, 3 → 2 → 1 engines, 5 s settle) + TVC landing shots (wide → overhead → ground tracker → pad, cuts) + Skip to flip (B). User rejected: zoom/close-up shots, slow eases, inset growing.
 
 ## Next
 1. Landing legs deploy (9), touchdown (10), crash (11).
@@ -42,12 +42,12 @@ Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (
 ## Tuning
 - `RL` (Section 8): arrow thickness/length/opacity/easing/fade band/push brightness, ghosts, cue ring, push kick/shake, tag timing.
 - `TVC_CAM` (landing.js): shot times/heights, camera x/z, height offset, aim drop, lead, fov.
-- `DIVERT`, `LAT` (landing-sim.js): side offset; flip-phase pull `kFlip`, TVC-phase `kp`/`kd`/`amax`, overshoot `over` and its height ramps `hA..hD`. Re-run `node tests/landing_mc.mjs 500` after any change.
+- landing-sim.js: `DIVERT` (start offset), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC `kp`/`kd`/`amax`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
 
 ## Known issues
 - Debug `still()` from ~4 km can show a pure-black block (bloom NaN); pre-existing, not seen in flight shots.
 - Peak-entry shot still bright near the nose; tracking shot sky is Mars-orange (less contrast than the blue-sky refs).
-- Landing Monte Carlo: `tests/landing_mc.mjs` (side approach, 3 gusts, both sides): 0/500 lost/crashed/off-pad.
+- Landing Monte Carlo: `tests/landing_mc.mjs` (side approach, 3 gusts at 3/7/13 s, both sides; `GT=`, `TVC=0` env): 0/500 lost/crashed/off-pad; TVC off 100/100 lost.
 
 ## Testing (headless)
 Recreate per session: `npm i three@0.160.0` in /tmp/nm, then a Playwright script (google-chrome + swiftshader) that routes the jsdelivr three URLs to /tmp/nm and serves visualizer/ from disk; wait for `window.__lnd` + ~15 s for the loader, then `[["eval",js],["wait",ms],["until",js],["shot",name]]` steps (`until` = waitForFunction) with `?debug`. Headless runs at ~3–30 fps, so flight-time screenshots need long waits; use `__lnd.ground()` to skip to the
