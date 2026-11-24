@@ -712,24 +712,34 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-res-src { font: 500 11px var(--label); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-bottom: 12px; }
 
 /* Section 8: the rig link — instruction strip, "your rocket" inset, recovery tag */
-.lnd-prompt { min-height: 20px; margin-top: 4px; font: 600 15px var(--cond); letter-spacing: .2em; text-transform: uppercase; color: var(--amber);
-  text-shadow: 0 1px 8px rgba(0,0,0,.7); transition: opacity .2s; }
-.lnd-prompt:empty { opacity: 0; }
+.lnd-prompt { min-height: 20px; margin-top: 4px; font: 600 13px var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--amber);
+  text-shadow: 0 1px 8px rgba(0,0,0,.7); transition: opacity .4s, color .5s ease; }
+.lnd-prompt:empty, .lnd-prompt.off { opacity: 0; }
 .lnd-prompt b { color: #fff; font-weight: 700; }
-.lnd-prompt.now { color: #fff; animation: lnd-now .5s ease-in-out infinite alternate; }
-@keyframes lnd-now { to { color: var(--amber); } }
+.lnd-prompt b.d { display: inline-grid; }   /* countdown digit: old and new stacked, cross-fading */
+.lnd-prompt b.d i { grid-area: 1 / 1; font-style: normal; animation: lnd-dig-in .15s ease-out both; }
+.lnd-prompt b.d i.o { animation: lnd-dig-out .15s ease-in both; }
+@keyframes lnd-dig-in { from { opacity: 0; } }
+@keyframes lnd-dig-out { to { opacity: 0; } }
+.lnd-prompt.now { color: #fff; }   /* eases amber → white once and holds */
 .lnd-inset { position: absolute; left: clamp(12px, 2.4vw, 30px); bottom: 150px; width: clamp(150px, 15vw, 210px); aspect-ratio: 1;
-  border: 1px solid rgba(255,255,255,.2); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+  border: 1px solid rgba(255,255,255,.2); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  transition: width .6s ease, border-color .6s ease, box-shadow .6s ease; animation: lnd-fade-in .6s ease-out both; }
+@keyframes lnd-fade-in { from { opacity: 0; } }
 .lnd-inset[hidden] { display: none; }
-.lnd-inset.cue { animation: lnd-cue .45s ease-in-out infinite alternate; }
-@keyframes lnd-cue { to { border-color: var(--amber); box-shadow: 0 0 18px rgba(245,166,35,.45); } }
-.lnd-inset.push { border-color: var(--yaw); }
+.lnd-inset.big { width: 25vw; }   /* mirror moment: grows during the TVC close-up */
+.lnd-inset.cue { border-color: rgba(245,166,35,.75); }   /* one soft fade to amber, held */
+.lnd-inset.push { border-color: rgba(255,150,80,.5); box-shadow: 0 0 0 1px rgba(0,0,0,.35), inset 0 0 14px rgba(255,138,61,.18); }
 .lnd-inset-l { position: absolute; left: 8px; top: 6px; font: 600 10px var(--label); letter-spacing: .14em; color: rgba(255,255,255,.75); }
 .lnd-inset.live .lnd-inset-l { color: var(--ok); }
 .lnd-inset-k { position: absolute; left: 8px; right: 8px; bottom: 6px; display: flex; justify-content: space-between; font: 500 10px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
 .lnd-inset-k .p b { color: var(--pitch); } .lnd-inset-k .y b { color: var(--yaw); }
-.lnd-tag { position: absolute; transform: translate(0, -50%); padding: 5px 9px; border-left: 3px solid var(--ok); background: rgba(10,12,16,.72);
-  font: 600 14px var(--cond); letter-spacing: .1em; color: #fff; white-space: nowrap; pointer-events: none; animation: lnd-tag .3s ease-out both; }
+.lnd-tag { position: absolute; transform: translate(0, -50%); padding: 5px 9px; border-left: 2px solid var(--ok); background: rgba(10,12,16,.55);
+  font: 600 14px var(--cond); letter-spacing: .1em; color: #fff; white-space: nowrap; pointer-events: none; animation: lnd-tag .4s ease-out both; transition: opacity .4s; }
+.lnd-tag.out { opacity: 0; }
+/* TVC close-up: dim the altitude/speed/throttle panel; attitude dial, inset and strip stay full */
+#landing .lnd-alt { transition: opacity .4s; }
+#landing.lnd-tvcclose .lnd-alt { opacity: .4; }
 .lnd-tag[hidden] { display: none; }
 .lnd-tag.warn { border-color: var(--amber); } .lnd-tag.bad { border-color: var(--warn); color: var(--warn); }
 @keyframes lnd-tag { from { opacity: 0; transform: translate(-8px, -50%); } }
@@ -747,6 +757,7 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
   .lnd-loop { display: none; }
   .lnd-res-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lnd-inset { width: 120px; bottom: auto; top: 150px; left: 12px; }
+  .lnd-inset.big { width: 40vw; }
   .lnd-prompt { font-size: 12px; letter-spacing: .12em; }
 }
 .lnd-controls { top: 12px; }

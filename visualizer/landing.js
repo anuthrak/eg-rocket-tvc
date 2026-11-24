@@ -859,6 +859,7 @@ export async function initLanding(step) {
   const tracker = L.createTracker(d => {
     feed(`Pushed to <b>${d.peak.toFixed(1)}°</b> · back in <b>${d.recover.toFixed(2)} s</b>`, d.peak > 15 ? 'warn' : 'ok');
     showTag(`${d.peak.toFixed(1)}° → 0 in <b>${d.recover.toFixed(2)} s</b>`, d.peak > 15 ? 'warn' : '');
+    cuRecovered();
   });
   const fall = { v: new THREE.Vector3(), axis: new THREE.Vector3(), ang: 0, rate: 0 };
 
@@ -885,7 +886,7 @@ export async function initLanding(step) {
   goBtn.onclick = () => (state === 'orbit' ? begin() : ended() ? (reset(), begin()) : null);
   pauseBtn.onclick = () => setPaused(!paused);
   $('lndAgain').onclick = () => { reset(); begin(); };
-  const CAMS = ['auto', 'chase', 'pad', 'free'];
+  const CAMS = ['auto', 'tvc', 'chase', 'pad', 'free'];
   let camMode = 'auto';
   camBtn.onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % CAMS.length]; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); };
   addEventListener('keydown', e => {
@@ -915,7 +916,7 @@ export async function initLanding(step) {
     tvcBtn.classList.toggle('off', !att.tvc);
     gustBtn.querySelector('.lbl').textContent = source === 'rig' ? 'Call a gust' : 'Gust';
     gustBtn.title = source === 'rig' ? 'Shows a prompt to push the real rocket (G)' : 'Shove the ship sideways (G)';
-    camBtn.querySelector('.lbl').textContent = 'Cam: ' + camMode[0].toUpperCase() + camMode.slice(1);
+    camBtn.querySelector('.lbl').textContent = 'Cam: ' + (camMode === 'tvc' ? 'TVC' : camMode[0].toUpperCase() + camMode.slice(1));
   }
 
   let calloutTimer = 0;
@@ -941,7 +942,7 @@ export async function initLanding(step) {
   let loopTimer = 0;
   function reset() {
     state = 'orbit'; paused = false; $('landing').classList.remove('paused');
-    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; outcome = null; legK = 0; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
+    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; cu = null; cuEnd = -1e9; ringK = 0; insEl.classList.remove('big'); $('landing').classList.remove('lnd-tvcclose'); outcome = null; legK = 0; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
     flight = L.createFlight(START.x0); att.reset(); tracker.reset();
     trim = { x: 0, y: 0 }; trimN = 0; maxTilt = 0; maxGimbal = 0; trail.length = 0; frames = []; simClock = 0;
     dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
@@ -981,6 +982,7 @@ export async function initLanding(step) {
     gustPlan = source === 'sim' ? [2, 6, 10].map(t => ({ t: t + rnd(-0.6, 0.6), dir: rnd(0, 360) })) : [];
     promptPlan = source === 'rig' ? [2.5, 8].map(t => ({ t })) : [];
     callout(source === 'rig' ? 'TVC CONTROL · <b>RIG ACTIVE</b>' : 'TVC CONTROL · SIMULATED', 2400);
+    setStrip('<b>TVC on</b>', 2000, 'tvcon');
   }
 
   // ---------- Simulation step (100 Hz) ----------
@@ -1401,7 +1403,7 @@ export async function initLanding(step) {
   let shake = 0, orbitA = 0, shotName = '', padCam = false, rcsSide = 0;
   const PAD_CAM = new THREE.Vector3(-82, 6, -98), REPLAY_CAM = new THREE.Vector3(70, 5, 62);
   function shot() {
-    if (camMode !== 'auto') return camMode;
+    if (camMode !== 'auto' && camMode !== 'tvc') return camMode;
     if (state === 'replay') return 'replay';
     if (state === 'flight') {
       const s = flight.s;
@@ -1411,7 +1413,10 @@ export async function initLanding(step) {
         return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.2 ? 'flaps' : s.t < tBreak + 9.4 ? 'top' : 'side';
       }
       if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
-      return s.h > 70 ? 'chase' : 'pad';
+      // TVC scene: handover → descent; close-ups on pushes/gusts (TVC cam: close-up throughout); pad below 70 m
+      if (camMode === 'tvc' || cu) return 'tvcClose';
+      if (s.t - s.tPh < TC.handover) return 'handover';
+      return s.h > 70 ? 'descent' : 'pad';
     }
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
     return 'chase';
@@ -1430,6 +1435,16 @@ export async function initLanding(step) {
         _co.set(-30 - 30 * k, 4 + 10 * k, -170); _lo.copy(_up.set(0, 1, 0).applyQuaternion(ship.quaternion)).multiplyScalar(4); break;
       }
       case 'flipLow': _co.set(-80, -18, -70); _lo.set(0, -6, 0); break;   // low aft, looking up past the exhaust at the gimballing bells
+      case 'handover': {   // low 3/4 on the engine section, slow push-in: bells, plumes, aft flaps
+        const k = sstep(0, TC.handover, flight.s.t - flight.s.tPh);
+        _co.set(-38, 0, -30).multiplyScalar(lerp(1, 0.74, k)); _co.y = lerp(-TAIL - 9, -TAIL - 4, k); _lo.set(0, -TAIL - 2, 0); break;   // bells mid-frame, above the HUD
+      }
+      case 'tvcClose': _co.set(-27, -TAIL, -22); _lo.set(0, -TAIL - 1, 0); break;   // aft third: bells, plumes, flaps; nose out of frame
+      case 'descent': {   // the chase, slower: a gentle orbit drift, ship in the upper half, ground growing below
+        const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + TC.driftDeg * DEG * Math.sin(Math.PI * camT / TC.driftSweep), el = lerp(10, 22, k) * DEG, Rr = lerp(80, 130, k);
+        _co.set(Rr * Math.cos(el) * Math.cos(az), Rr * Math.sin(el), Rr * Math.cos(el) * Math.sin(az));
+        _lo.set(0, -0.2 * Rr, 0); break;
+      }
       default: {   // chase: from above, the pad below; lower as it nears the ground
         const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + 0.5 * Math.sin(orbitA), el = lerp(16, 50, k) * DEG, R = lerp(110, 170, k);
         _co.set(R * Math.cos(el) * Math.cos(az), R * Math.sin(el), R * Math.cos(el) * Math.sin(az));
@@ -1531,7 +1546,11 @@ export async function initLanding(step) {
     if (camMode === 'still') return;
     if (state === 'flight') cloudFx(dt);
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
+    if (!paused) camT += dt;
+    closeUpStep();
     const name = shot(), sp = ship.position;
+    $('landing').classList.toggle('lnd-tvcclose', name === 'tvcClose');
+    let fovSnap = true;
     glint.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
       if (shotName !== 'track') {
@@ -1555,8 +1574,13 @@ export async function initLanding(step) {
     }
     if (name === 'pad' || name === 'replay') {
       const P = name === 'pad' ? PAD_CAM : REPLAY_CAM;
-      if (name !== shotName) { camera.position.copy(P); lookOff.set(sp.x, clamp(0.45 * (sp.y + 15), 14, 60), sp.z); }
-      camera.position.lerp(P, 1 - Math.exp(-dt * 2));
+      if (name !== shotName) {
+        padEase = name === 'pad' && TVC_SHOTS.includes(shotName) ? 0 : -1;   // from the TVC scene: ease in, otherwise cut
+        if (padEase < 0) { camera.position.copy(P); lookOff.set(sp.x, clamp(0.45 * (sp.y + 15), 14, 60), sp.z); } else lookOff.add(sp);
+      }
+      if (padEase >= 0) { padEase += dt; fovSnap = false; }
+      camera.position.lerp(P, 1 - Math.exp(-dt * (padEase >= 0 ? lerp(0.9, 2, sstep(0, 2.5, padEase)) : 2)));
+      if (padEase >= 0) { const gm = heightAt(camera.position.x, camera.position.z) + 3; if (camera.position.y < gm) camera.position.y = gm; }
       _lo.set(sp.x * 0.8, clamp(0.45 * (sp.y + 15), 14, 60), sp.z * 0.8);
       lookOff.lerp(_lo, 1 - Math.exp(-dt * 4));
       camera.lookAt(lookOff);
@@ -1565,7 +1589,9 @@ export async function initLanding(step) {
       camGoal(name);
       const cut = name !== shotName && shotName !== '' && (name === 'flaps' || name === 'flip' || name === 'flipLow' || name === 'close' || name === 'top' || name === 'side' || shotName === 'flaps' || shotName === 'track');
       if (padCam || cut) { camOff.copy(cut ? _co : camera.position.clone().sub(sp)); lookOff.copy(_lo); padCam = false; }
-      camOff.lerp(_co, 1 - Math.exp(-dt * 1.2)); lookOff.lerp(_lo, 1 - Math.exp(-dt * 2));
+      const tv = TVC_SHOTS.includes(name) && name !== 'chase';   // TVC scene: ~1 s eases, no cuts, FOV eases too
+      fovSnap = cut;
+      camOff.lerp(_co, 1 - Math.exp(-dt * (tv ? TC.ease : 1.2))); lookOff.lerp(_lo, 1 - Math.exp(-dt * (tv ? TC.ease + 0.6 : 2)));
       camera.position.copy(sp).add(camOff);
       const gmin = heightAt(camera.position.x, camera.position.z) + 3;
       if (camera.position.y < gmin) camera.position.y = gmin;
@@ -1580,8 +1606,32 @@ export async function initLanding(step) {
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) camera.position.add(kick);   // a push knocks the camera a little the same way
     if (!paused) shake *= Math.exp(-dt * 2.5);
-    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : 40;
-    if (camera.fov !== fov) { camera.fov = fov; resize(); }
+    const fov = name === 'pad' || name === 'replay' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name === 'tvcClose' ? 46 : name === 'handover' ? 48 : 40;
+    if (fovSnap || paused) { if (camera.fov !== fov) { camera.fov = fov; resize(); } }
+    else if (Math.abs(camera.fov - fov) > 0.02) setFov(camera.fov + (fov - camera.fov) * (1 - Math.exp(-dt * 2.5)));
+    else if (camera.fov !== fov) setFov(fov);
+  }
+
+  // ---------- TVC scene (Auto camera): handover → descent, eased close-ups on pushes/gusts, eased pad ----------
+  const TC = { handover: 3, ease: 2.3, hold: 2.5, after: 1.0, cool: 3, maxNoRec: 8, driftDeg: 15, driftSweep: 20 };
+  const TVC_SHOTS = ['handover', 'descent', 'tvcClose', 'chase'];
+  let camT = 0, bigAt = -1e9, cu = null, cuEnd = -1e9, lastRec = -1e9, padEase = -1;
+  function cuRecovered() { lastRec = camT; if (cu) cu.rec = camT; }
+  function closeUpStep() {
+    const s = flight.s, inTvc = state === 'flight' && s.phase === 'tvc';
+    if (!inTvc) { if (cu) cuEnd = camT; cu = null; return; }
+    const want = !!cue || pushOn;   // a countdown running, or a push past rigTilt (onPushStart)
+    if (!cu) {
+      if (want && s.t - s.tPh >= TC.handover && camT - cuEnd >= TC.cool) cu = { t0: camT, rec: camT - lastRec < 1.5 ? lastRec : null };
+      return;
+    }
+    const held = camT - cu.t0 >= TC.hold, done = cu.rec !== null ? camT - cu.rec >= TC.after : camT - cu.t0 >= TC.maxNoRec;
+    if (held && done && !pushOn) { cu = null; cuEnd = camT; }   // the 3 s cooldown stops ping-pong on repeated pushes
+  }
+  function setFov(f) {   // FOV ease without a full resize (no render-target reallocation)
+    camera.fov = f; camera.updateProjectionMatrix(); orbit.resize(camera.aspect, f);
+    const sc = view.clientHeight * renderer.getPixelRatio() / (2 * Math.tan(f * DEG / 2));
+    dust.setScale(sc); fire.setScale(sc); glow.setScale(sc); puffs.setScale(sc); haze.setScale(sc);
   }
 
   // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
@@ -1600,22 +1650,39 @@ export async function initLanding(step) {
   }
 
   // ---------- Section 8: the rig link, easy to read ----------
+  // Tunable strengths (lengths m, times s, opacities 0–1)
+  const RL = {
+    arrowThick: 0.0018, arrowMinThick: 0.2,          // shaft radius: × camera distance, floor (m)
+    arrowLen0: 3, arrowLenPerDeg: 1.0, arrowMaxK: 0.4, // length = len0 + perDeg·angle, capped at maxK × ship length
+    arrowOpacity: 0.7, outlineOpacity: 0.3, outlineWidth: 1.4, arrowEase: 0.15,
+    fadeFrom: 0.8, fadeTo: 1.8, pushBright: 0.15,      // arrows fade in between these angles (deg); push = +15% brightness
+    ghostN: 3, ghostOp0: 0.25, ghostOp1: 0.1, ghostLife: 0.5, ghostSize: 0.9,
+    ringTube: 0.12, ringOpLo: 0.10, ringOpHi: 0.20, ringHz: 1, ringIn: 3, ringOut: 1,
+    kick: 0.8, kickDecay: 0.6, pushShake: 0.15,
+    tagMs: 2000, tagFade: 0.4, tagEase: 0.2,
+  };
   // Instruction strip (the rig/gust prompts; the cinematic banners stay off): a fixed message, or a countdown cue
   const stripEl = $('lndPrompt');
-  let stripMsg = null, cue = null;   // cue: { at (s into the TVC phase), kind: 'push' | 'gust' }
+  let stripMsg = null, cue = null, stripDig = null, stripPrev = '';   // cue: { at (s into the TVC phase), kind: 'push' | 'gust' }
   function setStrip(html, ms, cls = '') { stripMsg = { html, until: performance.now() + ms, cls }; }
   function stripStep() {
     const s = flight.s, t = s.phase === 'tvc' ? s.t - s.tPh : 0;
     let html = '', cls = '';
+    const msgOn = stripMsg && performance.now() < stripMsg.until;
     if (cue && state === 'flight' && s.phase === 'tvc') {
       const rem = cue.at - t, push = cue.kind === 'push';
       if (rem < (push ? -2.5 : -1.5)) cue = null;
-      else if (rem > 0.05) html = push ? `Push the rocket in <b>${Math.ceil(rem)}</b>` : `Gust in <b>${Math.ceil(rem)}</b>`;
+      else if (rem > 0.05) {   // countdown digit cross-fades (old one stacked under the new one)
+        const n = Math.ceil(rem), o = stripDig !== null && stripDig !== n ? `<i class="o">${stripDig}</i>` : '';
+        if (stripDig !== n) { stripPrev = o; stripDig = n; }
+        html = `${msgOn && stripMsg.cls === 'tvcon' ? stripMsg.html + ' · ' : ''}${push ? 'Push the rocket in' : 'Gust in'} <b class="d">${stripPrev}<i>${n}</i></b>`;
+      }
       else { html = push ? '<b>Push the rocket</b> · now' : '<b>Gust</b>'; cls = 'now'; }
     } else if (!['flight', 'falling', 'tipping'].includes(state)) cue = null;
-    if (!html && stripMsg && performance.now() < stripMsg.until) { html = stripMsg.html; cls = stripMsg.cls; }
-    if (stripEl.innerHTML !== html) stripEl.innerHTML = html;
-    stripEl.className = 'lnd-prompt ' + cls;
+    if (!cue) stripDig = null;
+    if (!html && msgOn) { html = stripMsg.html; cls = stripMsg.cls === 'tvcon' ? '' : stripMsg.cls; }
+    if (html) { if (stripEl.innerHTML !== html) stripEl.innerHTML = html; }   // empty: keep the last text and fade it out
+    stripEl.className = 'lnd-prompt ' + cls + (html ? '' : ' off');
     return cue && !(cls === 'now');   // counting down
   }
 
@@ -1626,85 +1693,99 @@ export async function initLanding(step) {
     const shaft = new THREE.CylinderGeometry(1, 1, 1, 12); shaft.translate(0, 0.5, 0);
     const head = new THREE.ConeGeometry(1, 1, 16); head.translate(0, 0.5, 0);
     const parts = [];
-    for (const [c, o, ord] of [[0x05070a, 0.55, 20], [color, 1, 21]]) {
+    for (const [c, o, ord] of [[0x05070a, RL.outlineOpacity, 20], [color, RL.arrowOpacity, 21]]) {
       const m = mk(c, o), s = new THREE.Mesh(shaft, m), h = new THREE.Mesh(head, m);
       s.renderOrder = h.renderOrder = ord; g.add(s, h); parts.push({ s, h, m, line: c === 0x05070a });
     }
     scene.add(g);
-    const _q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
+    const _q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), base = new THREE.Color(color);
+    const sm = { d: new THREE.Vector3(0, 1, 0), len: 0, a: 0 };   // eased direction, length, alpha (no snapping per IMU sample)
     return {
       g,
-      set(origin, dir, len, thick, alpha) {
-        g.visible = alpha > 0.01; if (!g.visible) return;
-        g.position.copy(origin); g.quaternion.copy(_q.setFromUnitVectors(Y, dir));
-        const hl = Math.min(len * 0.45, thick * 5), sl = Math.max(len - hl, 0.01);
+      set(origin, dir, len, thick, alpha, dt = 0, bright = 1) {
+        const k = dt > 0 ? 1 - Math.exp(-dt / RL.arrowEase) : 1;
+        if (sm.a < 0.01) { sm.d.copy(dir); sm.len = len; } else { sm.d.lerp(dir, k).normalize(); sm.len += (len - sm.len) * k; }
+        sm.a += (alpha - sm.a) * k;
+        g.visible = sm.a > 0.01; if (!g.visible) return;
+        g.position.copy(origin); g.quaternion.copy(_q.setFromUnitVectors(Y, sm.d));
+        const L2 = sm.len, hl = Math.min(L2 * 0.45, thick * 5), sl = Math.max(L2 - hl, 0.01);
         for (const p of parts) {
-          const k = p.line ? 1.7 : 1;
-          p.s.scale.set(thick * k, sl, thick * k); p.h.position.y = sl; p.h.scale.set(thick * 2.4 * k, hl * (p.line ? 1.15 : 1), thick * 2.4 * k);
-          p.m.opacity = alpha * p.m.userData.o;
+          const w = p.line ? RL.outlineWidth : 1;
+          p.s.scale.set(thick * w, sl, thick * w); p.h.position.y = sl; p.h.scale.set(thick * 2.4 * w, hl * (p.line ? 1.15 : 1), thick * 2.4 * w);
+          p.m.opacity = sm.a * p.m.userData.o;
+          if (!p.line) p.m.color.copy(base).multiplyScalar(bright);
         }
       },
     };
   }
-  const gimArrow = makeArrow(0xff8a3d), tiltArrow = makeArrow(0x5b8cff);
-  const ghosts = [...Array(5)].map(() => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0x5b8cff, transparent: true, depthTest: false, depthWrite: false, fog: false }));
+  const gimArrow = makeArrow(0xe8935a), tiltArrow = makeArrow(0x6b8fdc);   // slightly desaturated
+  const ghosts = [...Array(RL.ghostN)].map(() => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0x6b8fdc, transparent: true, depthTest: false, depthWrite: false, fog: false }));
     m.renderOrder = 19; m.visible = false; scene.add(m); return m; });
   const ghostTrail = [];
   // A ring round the ship while a push or gust is counting down
-  const cueRing = new THREE.Mesh(new THREE.TorusGeometry(R * 2.1, 0.22, 8, 64), new THREE.MeshBasicMaterial({ color: 0xf5a623, transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  const cueRing = new THREE.Mesh(new THREE.TorusGeometry(R * 2.1, RL.ringTube, 8, 64), new THREE.MeshBasicMaterial({ color: 0xf5a623, transparent: true, opacity: 0, depthWrite: false, fog: false }));
   cueRing.rotation.x = Math.PI / 2; cueRing.position.y = 4; cueRing.visible = false; ship.add(cueRing);
   const _ao = new THREE.Vector3(), _ad = new THREE.Vector3(), _sa = new THREE.Vector3(), _lean = new THREE.Vector3();
   const kick = new THREE.Vector3();
-  let pushOn = false, pushGlow = 0, ghostT = 0;
+  let pushOn = false, pushGlow = 0, ghostT = 0, ringK = 0;
   function onPushStart() {
-    pushOn = true; shake = Math.max(shake, 0.45);
-    const a = L.axisFromTilt(dev.tiltX, dev.tiltY); kick.set(a.x, 0, a.z).normalize().multiplyScalar(2.2);
+    pushOn = true; shake = Math.max(shake, RL.pushShake);
+    const a = L.axisFromTilt(dev.tiltX, dev.tiltY); kick.set(a.x, 0, a.z).normalize().multiplyScalar(RL.kick);
     if (!isFinite(kick.x)) kick.set(0, 0, 0);
   }
   function arrowsStep(dt, counting) {
     const s = flight.s, show = (state === 'flight' && s.phase === 'tvc') || state === 'falling';
-    const dist = camera.position.distanceTo(ship.position), thick = Math.max(0.3, dist * 0.0032);
+    const dist = camera.position.distanceTo(ship.position), thick = Math.max(RL.arrowMinThick, dist * RL.arrowThick);
     pushGlow += ((pushOn ? 1 : 0) - pushGlow) * (1 - Math.exp(-dt * 8));
-    const boost = 1 + 0.35 * pushGlow;
+    const bright = 1 + RL.pushBright * pushGlow, maxLen = RL.arrowMaxK * LEN;
+    const aLen = ang => Math.min(RL.arrowLen0 + RL.arrowLenPerDeg * ang, maxLen), aFade = ang => sstep(RL.fadeFrom, RL.fadeTo, ang);
     // Gimbal: the nozzles' sideways aim (exhaust direction off the ship's axis), from the engine exit outward
     _sa.set(0, 1, 0).applyQuaternion(ship.quaternion);
     tvc.updateWorldMatrix(true, false);
     _ad.set(0, -1, 0).transformDirection(tvc.matrixWorld); _ao.set(0, -BELL, 0).applyMatrix4(tvc.matrixWorld);
     const gAng = Math.acos(clamp(-_ad.dot(_sa), -1, 1)) / DEG;
     _ad.addScaledVector(_sa, -_ad.dot(_sa));                                    // lateral part: where the nozzles point the exhaust
-    if (show && _ad.lengthSq() > 1e-8) gimArrow.set(_ao.addScaledVector(_sa, 1.5).addScaledVector(_ad.normalize(), R * 0.9), _ad, (4 + 1.4 * Math.min(gAng, 16)) * boost, thick * boost, sstep(0.4, 1.4, gAng));
-    else gimArrow.set(_ao, _sa, 1, 1, 0);
+    if (show && _ad.lengthSq() > 1e-8) gimArrow.set(_ao.addScaledVector(_sa, 1.5).addScaledVector(_ad.normalize(), R * 0.9), _ad, aLen(gAng), thick, aFade(gAng), dt, bright);
+    else gimArrow.set(_ao, _sa, 1, thick, 0, dt);
     // Tilt: the TVC source's lean (what the person pushes), at the nose
     const tl = L.tiltOf(dev.tiltX, dev.tiltY), a = L.axisFromTilt(dev.tiltX, dev.tiltY);
     _lean.set(a.x, 0, a.z);
     const tip = _ao.copy(ship.position).addScaledVector(_sa, NOSE * 0.75);
-    if (show && _lean.lengthSq() > 1e-8) { _lean.normalize(); tiltArrow.set(tip, _lean, (4 + 1.6 * Math.min(tl, 20)) * boost, thick * boost, sstep(0.4, 1.4, tl)); }
-    else tiltArrow.set(tip, _sa, 1, 1, 0);
+    if (show && _lean.lengthSq() > 1e-8) { _lean.normalize(); tiltArrow.set(tip, _lean, aLen(tl), thick, aFade(tl), dt, bright); }
+    else tiltArrow.set(tip, _sa, 1, thick, 0, dt);
     // Ghost trail of the tilt arrow's tip while pushed
     ghostT += dt;
-    if (pushOn && show && ghostT > 0.1 && tl > 0.4) { ghostT = 0; ghostTrail.unshift(tip.clone().addScaledVector(_lean, 4 + 1.6 * Math.min(tl, 20))); ghostTrail.length = Math.min(ghostTrail.length, 5); }
-    if (!pushOn && ghostT > 0.1) { ghostT = 0; ghostTrail.pop(); }
-    ghosts.forEach((m, i) => { const p = ghostTrail[i]; m.visible = !!p && show; if (p) { m.position.copy(p); m.scale.setScalar(thick * 1.4); m.material.opacity = 0.5 * (1 - i / 5); } });
-    // Cue ring and camera kick
-    cueRing.visible = !!counting && show;
-    if (cueRing.visible) cueRing.material.opacity = 0.25 + 0.25 * Math.sin(performance.now() / 140);
-    kick.multiplyScalar(Math.exp(-dt * 4));
+    ghostTrail.forEach(g => { g.age += dt; });
+    while (ghostTrail.length && ghostTrail.at(-1).age > RL.ghostLife) ghostTrail.pop();   // each dot fades out over ghostLife
+    if (pushOn && show && ghostT > 0.1 && tl > RL.fadeFrom) { ghostT = 0; ghostTrail.unshift({ p: tip.clone().addScaledVector(_lean, aLen(tl)), age: 0 }); ghostTrail.length = Math.min(ghostTrail.length, RL.ghostN); }
+    ghosts.forEach((m, i) => { const g = ghostTrail[i]; m.visible = !!g && show; if (g) { m.position.copy(g.p); m.scale.setScalar(thick * RL.ghostSize);
+      m.material.opacity = lerp(RL.ghostOp0, RL.ghostOp1, i / Math.max(RL.ghostN - 1, 1)) * (1 - g.age / RL.ghostLife); } });
+    // Cue ring: fades in over the countdown, breathes slowly, fades out after "now"; camera kick decays
+    ringK = clamp(ringK + (counting && show ? dt / RL.ringIn : -dt / RL.ringOut), 0, 1);
+    cueRing.visible = ringK > 0.005 && show;
+    if (cueRing.visible) cueRing.material.opacity = ringK * lerp(RL.ringOpLo, RL.ringOpHi, 0.5 + 0.5 * Math.sin(2 * Math.PI * RL.ringHz * performance.now() / 1000));
+    kick.multiplyScalar(Math.exp(-dt * 3 / RL.kickDecay));
   }
 
   // Recovery tag beside the ship: "9.0° → 0 in 0.33 s" (or LOST past the abort)
   const tagEl = $('lndTag');
-  let tagUntil = 0;
-  function showTag(html, cls = '', ms = 2600) { tagEl.innerHTML = html; tagEl.className = 'lnd-tag ' + cls; tagEl.hidden = false; tagUntil = performance.now() + ms;
-    tagEl.style.animation = 'none'; void tagEl.offsetWidth; tagEl.style.animation = ''; }
-  function tagStep() {
+  let tagUntil = 0, tagSnap = true;
+  const tagPos = { x: 0, y: 0 };
+  function showTag(html, cls = '', ms = RL.tagMs) { tagEl.innerHTML = html; tagEl.className = 'lnd-tag ' + cls; tagEl.hidden = false; tagUntil = performance.now() + ms;
+    tagSnap = true; tagEl.style.animation = 'none'; void tagEl.offsetWidth; tagEl.style.animation = ''; }
+  function tagStep(dt) {
     if (tagEl.hidden) return;
-    if (performance.now() > tagUntil || !(state === 'flight' || state === 'falling' || state === 'tipping')) { tagEl.hidden = true; return; }
+    const now = performance.now();
+    if (now > tagUntil + RL.tagFade * 1000 || !(state === 'flight' || state === 'falling' || state === 'tipping')) { tagEl.hidden = true; return; }
+    tagEl.classList.toggle('out', now > tagUntil);   // CSS fades it over tagFade
     const p = _ao.copy(ship.position).project(camera), r = renderer.domElement.getBoundingClientRect(), v = $('landing').getBoundingClientRect();
     if (p.z > 1) return;
     const dist = camera.position.distanceTo(ship.position), off = (R * 3) / (2 * dist * Math.tan(camera.fov * DEG / 2)) * r.height;
-    tagEl.style.left = `${r.left - v.left + (p.x * 0.5 + 0.5) * r.width + off + 12}px`;
-    tagEl.style.top = `${r.top - v.top + (0.5 - p.y * 0.5) * r.height}px`;
+    const x = r.left - v.left + (p.x * 0.5 + 0.5) * r.width + off + 12, y = r.top - v.top + (0.5 - p.y * 0.5) * r.height;
+    const k = tagSnap ? 1 : 1 - Math.exp(-dt / RL.tagEase); tagSnap = false;   // smoothed: doesn't shake with the camera
+    tagPos.x += (x - tagPos.x) * k; tagPos.y += (y - tagPos.y) * k;
+    tagEl.style.left = `${tagPos.x.toFixed(1)}px`; tagEl.style.top = `${tagPos.y.toFixed(1)}px`;
   }
 
   // Inset: the real rocket on the desk rig (CAD, models/sldp45.glb), driven by the same tilt and nozzle angles
@@ -1798,8 +1879,11 @@ export async function initLanding(step) {
   function rigLinkStep(dt) {
     const counting = stripStep();
     insEl.classList.toggle('cue', !!counting);
+    // Mirror moment: the inset grows during the TVC close-up, shrinks back after the recovery tag
+    if (shotName === 'tvcClose') bigAt = camT;
+    insEl.classList.toggle('big', shotName === 'tvcClose' || (!tagEl.hidden && camT - bigAt < RL.tagMs / 1000 + 0.5));
     arrowsStep(dt, counting);
-    tagStep();
+    tagStep(dt);
     return insetStep();
   }
 
@@ -2016,6 +2100,7 @@ export async function initLanding(step) {
         const s = flight.s; for (let n = 0; n < 1e5 && s.phase !== 'tvc' && !(s.phase === 'flip' && s.t - s.tPh >= at); n++) simStep();
       },
       shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
+      cam() { const s = flight.s; return { shot: shotName, cu: !!cu, fov: +camera.fov.toFixed(1), h: Math.round(s.h - groundUnder()), t: +(s.t - s.tPh).toFixed(1), phase: s.phase, state, big: insEl.classList.contains('big'), tag: !tagEl.hidden }; },   // TVC-scene state
     };
   }
 
