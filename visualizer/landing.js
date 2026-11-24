@@ -495,6 +495,11 @@ export async function initLanding(step) {
       put(p, BASE.solar[0] + c * 7, BASE.solar[1] + r * 6, 1.3); }
   }
   const setLegs = t => legs.forEach((p, i) => { p.rotation.z = legAng(t - i * LEGS.stag) * DEG; });
+  // Touchdown (section 10): each leg's shock absorber takes up to stroke m (vertical); perMs m per m/s of touchdown speed;
+  // the last engine cuts cut s after contact; over hardVs m/s it is a hard landing even upright.
+  const TDN = { stroke: 0.6, perMs: 0.13, cut: 0.3, hardVs: 3, rest: 0.75, comp: 0.15, bDecay: 0.15, bPer: 0.35, rock: 0.18, rockPer: 0.7 };
+  const legC = [0, 0, 0, 0], LEG_COS = Math.cos(LEGS.open * DEG);
+  function setLegComp(c) { legs.forEach((p, i) => { const d = (c[i] || 0) / LEG_COS; p.children[0].scale.y = (LEG - d) / LEG; p.children[1].position.y = -(LEG - d); }); }
 
   // Engine fire (RVacs), cinematic: a long bright core per engine (white-hot at the nozzle → blue-violet → faint pink),
   // glowing fire particles streaming along it (fireFx), a flare at each nozzle; startup stutters and over-expands, the
@@ -899,7 +904,7 @@ export async function initLanding(step) {
   // then a short replay before the result card
   let source = 'sim';
   let state = 'orbit', paused = false;
-  let outcome = null, legK = 0, legT = 0, legEv = 0, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
+  let outcome = null, legK = 0, legT = 0, legEv = 0, land = null, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
   let calls = {};                    // callouts already shown this run
   const START = L.flightStart();
   let apSide = 1;   // which side of the pad the ship comes in from (+1/-1, random each run)
@@ -1008,7 +1013,7 @@ export async function initLanding(step) {
   let loopTimer = 0;
   function reset() {
     state = 'orbit'; paused = false; $('landing').classList.remove('paused');
-    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; ringK = 0; outcome = null; legK = 0; legT = 0; legEv = 0; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
+    cue = null; stripMsg = null; pushOn = false; pushGlow = 0; ghostTrail.length = 0; kick.set(0, 0, 0); $('lndTag').hidden = true; ringK = 0; outcome = null; legK = 0; legT = 0; legEv = 0; land = null; td = null; lost = false; calls = {}; endState = null; replay = null; stormT = 0; fadeOut = 0;
     flight = newFlight(); att.reset(); tracker.reset();
     trim = { x: 0, y: 0 }; trimN = 0; maxTilt = 0; maxGimbal = 0; trail.length = 0; frames = []; simClock = 0;
     dev = { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
@@ -1023,7 +1028,7 @@ export async function initLanding(step) {
     shipScene.add(ship); ship.position.set(0, 0, 0);
     $('lndResult').hidden = true; $('lndFeed').textContent = ''; $('lndReplay').hidden = true; fadeAmt = 0;
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
-    setLegs(0);
+    setLegs(0); legC.fill(0); setLegComp(legC);
     refresh();
   }
   function begin() {
@@ -1085,7 +1090,8 @@ export async function initLanding(step) {
     if (s.phase === 'tvc' && s.eng < lastEng) shake = Math.max(shake, TFX.cutKick);   // an engine shuts down: a jolt (the plume stutters out in setPlume)
     lastEng = s.phase === 'tvc' ? s.eng : 3;
     if (s.h < L.LEGS_AT) { legT += L.DT; legK = clamp(legT / LEGS_DONE, 0, 1); }
-    if (s.h <= groundUnder()) touchdown(s.tilt);
+    { const ax = L.axisFromTilt(s.cmd.x + s.big.tiltX, s.cmd.y + s.big.tiltY);   // the lowest foot touches first
+      if (s.h - FOOT_R * Math.hypot(ax.x, ax.z) * legK <= groundUnder()) touchdown(s.tilt); }
   }
   const groundUnder = () => heightAt(flight.s.x, flight.s.z);
   let lastEng = 3;
@@ -1095,12 +1101,16 @@ export async function initLanding(step) {
     td = { tilt, vs: -s.vh, miss };
     s.h = groundUnder();
     if (tilt > L.TIP_DEG) { startTip(); return; }
-    const onPad = miss <= L.PAD_R;
+    const onPad = miss <= L.PAD_R, vs = Math.max(0, td.vs), clean = tilt <= L.LAND_OK_DEG && vs <= TDN.hardVs;
+    land = { t0: simClock, vs, tx: s.cmd.x + s.big.tiltX, ty: s.cmd.y + s.big.tiltY, y0: ship.position.y, thr: Math.max(s.thr, 0.05), off: null,
+      cPeak: Math.min(TDN.stroke, TDN.perMs * vs) };
+    land.used = land.cPeak / TDN.stroke;
+    shake = Math.max(shake, 0.3 + 0.12 * vs);
     outcome = { ok: true,
-      title: tilt <= L.LAND_OK_DEG ? (onPad ? 'TOUCHDOWN' : 'TOUCHDOWN · OFF THE PAD') : 'HARD LANDING',
-      sub: tilt <= L.LAND_OK_DEG
+      title: clean ? (onPad ? 'TOUCHDOWN' : 'TOUCHDOWN · OFF THE PAD') : 'HARD LANDING',
+      sub: clean
         ? (onPad ? `Upright on the pad, ${miss.toFixed(1)} m from centre` : `Upright, but ${miss.toFixed(1)} m from the pad centre`)
-        : `It stayed up, landing at ${tilt.toFixed(1)}°` };
+        : tilt > L.LAND_OK_DEG ? `It stayed up, landing at ${tilt.toFixed(1)}°` : `It stayed up, touching down at ${vs.toFixed(1)} m/s (over ${TDN.hardVs} m/s)` };
     dustStorm(s.x, s.h, s.z);
     stormT = 2.5;
     finish('landed');
@@ -1159,10 +1169,11 @@ export async function initLanding(step) {
     refresh();
     setTimeout(() => {
       if (state !== how) return;
-      const tEnd = simClock, rf = frames.filter(f => f.t >= tEnd - 1.6 - (how === 'crashed' ? 0.2 : 0));
+      const tEnd = simClock, rf = how === 'landed' && land ? frames.filter(f => f.t >= land.t0 - 1.2 && f.t <= land.t0 + 1.1)
+        : frames.filter(f => f.t >= tEnd - 1.6 - (how === 'crashed' ? 0.2 : 0));
       if (rf.length > 5) { replay = { frames: rf, t: rf[0].t, end: rf[rf.length - 1].t }; state = 'replay'; $('lndReplay').hidden = false; ship.visible = true; refresh(); }
       else showResult();
-    }, how === 'landed' ? 1600 : 2200);
+    }, how === 'landed' ? 2400 : 2200);
   }
   function endReplay() {
     $('lndReplay').hidden = true;
@@ -1194,10 +1205,22 @@ export async function initLanding(step) {
       ['Peak gimbal', `${maxGimbal.toFixed(1)}°`],
       ['Touchdown tilt', td ? `${td.tilt.toFixed(1)}°` : '—'],
       ['From pad centre', td ? `${td.miss.toFixed(1)} m` : '—'],
+      ['Touchdown speed', td ? `${Math.max(0, td.vs).toFixed(1)} m/s` : '—'],
+      ['Leg travel used', land ? `${Math.round(land.used * 100)}%` : '—'],
     ].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
     $('lndResSrc').textContent = source === 'rig' ? 'From the flip down, flown by the real rocket on the desk rig'
       : `From the flip down, simulated TVC ${att.tvc ? 'on' : 'off'} (same controller as the Nano)`;
+    placeResult();
   }
+  // The result card sits right under the source card (same width), clear of the bottom panels
+  function placeResult() {
+    const r = $('lndResult'); if (r.hidden || !r.offsetParent) return;
+    const pr = r.offsetParent.getBoundingClientRect(), sr = $('lndSource').getBoundingClientRect(), att = document.querySelector('#landing .lnd-att');
+    const lim = att && att.offsetParent ? att.getBoundingClientRect().top : pr.bottom;
+    r.style.top = `${sr.bottom - pr.top + 10}px`; r.style.right = `${pr.right - sr.right}px`; r.style.width = `${sr.width}px`;
+    r.style.maxHeight = `${Math.max(180, lim - sr.bottom - 20)}px`;
+  }
+  addEventListener('resize', placeResult);
 
   // ---------- Orbit timeline (screen time) ----------
   const qA = new THREE.Quaternion(), qB = new THREE.Quaternion(), _z = new THREE.Vector3(0, 0, 1);
@@ -1402,6 +1425,7 @@ export async function initLanding(step) {
   }
   function placeShip() {
     if (state !== 'flight' && !(state === 'landed' && !replay)) return;
+    if (state === 'landed' && land) { settle(); return; }
     const s = flight.s, B = s.big, tx = s.cmd.x + B.tiltX, ty = s.cmd.y + B.tiltY, ax = L.axisFromTilt(tx, ty);   // the big ship's (heavy) attitude
     ship.rotation.set(Math.atan2(ax.z, ax.y), 0, Math.atan2(-ax.x, Math.hypot(ax.y, ax.z)));
     const ft = flipT();
@@ -1429,6 +1453,26 @@ export async function initLanding(step) {
     });
     setLegs(legT);
   }
+  // On the ground: the first leg's absorber takes the hit, the ship rocks down onto the others (a little overshoot) and
+  // settles level, the absorbers spring back part way (crush cores keep TDN.rest of the stroke); the bells re-centre.
+  const _fd = new THREE.Vector3();
+  function settle() {
+    const t = simClock - land.t0, s = flight.s, cp = land.cPeak, cs = cp * TDN.rest;
+    const comp = t < TDN.comp ? cp * Math.sin(Math.PI / 2 * t / TDN.comp)
+      : cs + (cp - cs) * Math.exp(-(t - TDN.comp) / TDN.bDecay) * Math.cos(2 * Math.PI * (t - TDN.comp) / TDN.bPer);
+    const k = Math.exp(-t / TDN.rock) * Math.cos(2 * Math.PI * t / TDN.rockPer), ax = L.axisFromTilt(land.tx * k, land.ty * k);
+    ship.rotation.set(Math.atan2(ax.z, ax.y), 0, Math.atan2(-ax.x, Math.hypot(ax.y, ax.z)));
+    const y = groundUnder() + (TAIL + FOOT) * ax.y - comp;
+    if (land.off === null) land.off = land.y0 - y;
+    ship.position.set(s.x, y + land.off * Math.max(0, 1 - t / TDN.comp), s.z);
+    ship.updateMatrixWorld(true);
+    const sinT = Math.hypot(ax.x, ax.z);
+    legs.forEach((p, i) => { p.parent.getWorldPosition(_fd); _fd.sub(ship.position); _fd.y = 0; _fd.normalize();
+      const low = sinT > 1e-4 ? -(_fd.x * ax.x + _fd.z * ax.z) / sinT : 0;   // +1: the leg on the low side
+      legC[i] = clamp(comp + FOOT_R * sinT * low, 0, TDN.stroke); });
+    setLegComp(legC); setLegs(legT);
+    tvc.rotation.x *= 0.92; tvc.rotation.z *= 0.92;
+  }
   function lowestPoint() {
     _up.set(0, 1, 0).applyQuaternion(ship.quaternion);
     return Math.min(ship.position.y + _up.y * NOSE, ship.position.y - _up.y * (TAIL + BELL));
@@ -1454,7 +1498,7 @@ export async function initLanding(step) {
   }
   // Frames for the replay (ground scene only)
   function record() {
-    frames.push({ t: simClock, p: ship.position.clone(), q: ship.quaternion.clone(), g: tvc.rotation.clone(), legK, legT, thr: curThr(), eng: state === 'flight' ? flight.s.eng : 0, vis: ship.visible });
+    frames.push({ t: simClock, p: ship.position.clone(), q: ship.quaternion.clone(), g: tvc.rotation.clone(), legK, legT, legC: legC.slice(), thr: curThr(), eng: state === 'flight' ? flight.s.eng : state === 'landed' && land ? landPlume().n : 0, vis: ship.visible });
     while (frames.length && frames[0].t < simClock - 4) frames.shift();
   }
   function playReplay(dt) {
@@ -1463,11 +1507,13 @@ export async function initLanding(step) {
     let i = fr.findIndex(f => f.t >= replay.t); if (i < 1) i = 1;
     const a = fr[i - 1], b = fr[Math.min(i, fr.length - 1)], k = b.t > a.t ? clamp((replay.t - a.t) / (b.t - a.t), 0, 1) : 0;
     ship.position.lerpVectors(a.p, b.p, k); ship.quaternion.slerpQuaternions(a.q, b.q, k);
-    tvc.rotation.copy(b.g); setLegs(b.legT); ship.visible = true;
+    tvc.rotation.copy(b.g); setLegs(b.legT); setLegComp(b.legC || legC.fill(0)); ship.visible = true;
     setPlume(b.thr, simClock, 99, b.eng || 0);
     if (replay.t >= replay.end) endReplay();
   }
-  const curThr = () => state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr * ignK(flipT()) : 0;
+  // After contact: the last engine runs on for TDN.cut s, then shuts down (n = -1: every engine off, so the plume stutters out)
+  const landPlume = () => { const t = simClock - land.t0; return t < TDN.cut ? { thr: land.thr, n: 1 } : t < TDN.cut + 0.8 ? { thr: land.thr, n: -1 } : { thr: 0, n: 0 }; };
+  const curThr = () => state === 'landed' && land ? landPlume().thr : state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr * ignK(flipT()) : 0;
 
   // ---------- Camera ----------
   // Ground scene: follows the ship rigidly (it moves at 300+ m/s) and smooths only the offset; a change of shot cuts.
@@ -1967,7 +2013,7 @@ export async function initLanding(step) {
     const thr = orb ? (state === 'deorbit' ? vacLevel(et).reduce((x, y) => x + y) / 3 : 0) : curThr();
     $('lndThr').style.width = `${clamp(thr, 0, 1) * 100}%`;
     $('lndThrV').textContent = `${Math.round(clamp(thr, 0, 1) * 100)}%`;
-    { const fs = flight.s, n = state === 'flight' ? (fs.phase === 'tvc' ? fs.eng : fs.phase === 'flip' ? 3 : 0) : state === 'falling' ? 3 : 0;   // engines lit, webcast style
+    { const fs = flight.s, n = state === 'landed' && land ? Math.max(0, landPlume().n) : state === 'flight' ? (fs.phase === 'tvc' ? fs.eng : fs.phase === 'flip' ? 3 : 0) : state === 'falling' ? 3 : 0;   // engines lit, webcast style
       engDots.forEach((d, i) => d.classList.toggle('on', i < n)); }
     $('lndLegs').classList.toggle('on', state !== 'orbit' && state !== 'deorbit' && state !== 'entry' && legT >= LEGS_DONE);
     const dp = orb ? null : flight.drift;
@@ -2058,6 +2104,12 @@ export async function initLanding(step) {
       } else rcsOn = false;
       rcsSide = 0;
     } else { rcsSide = 0; rcsOn = false; rcsK = 0; lastUp.copy(_up); }
+    // Landed: tank vents puff white from the aft skirt for a few seconds
+    if (state === 'landed' && land && !paused) { const t = simClock - land.t0;
+      if (t > 1 && t < 7 && Math.random() < 0.3 * (1 - t / 7)) { const a = rnd(0, Math.PI * 2), p = _pv.copy(ship.position).addScaledVector(_up, -TAIL + rnd(4, 9));
+        p.x += Math.cos(a) * R; p.z += Math.sin(a) * R;
+        for (let i = 0; i < 3; i++) dust.emit({ x: p.x, y: p.y, z: p.z, vx: Math.cos(a) * rnd(2, 6), vy: rnd(-1, 2), vz: Math.sin(a) * rnd(2, 6),
+          life: rnd(1, 2.2), s0: 1, s1: rnd(5, 9), a: 0.35, drag: 1.2, rgb: [1, 1, 1] }); } }
     // Legs: a gas puff at each hinge as its latch lets go, a jolt as each one hits its lock
     if (state === 'flight' && legT > 0 && legEv < 8) for (let i = 0; i < 4; i++) {
       const t = legT - i * LEGS.stag, s = flight.s;
@@ -2139,8 +2191,9 @@ export async function initLanding(step) {
       while (acc >= L.DT) { acc -= L.DT; simStep(); }
       if (!paused) fallStep(sdt);
       if (state === 'replay' && !paused) playReplay(dt);
+      else if (state === 'landed' && land) { placeShip(); const lp = landPlume(); setPlume(lp.thr, simClock, 99, lp.n); }
       else { placeShip(); setPlume(state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr : 0, simClock, state === 'flight' ? flipT() : 99, state === 'flight' && flight.s.phase === 'tvc' ? flight.s.eng : 0); }
-      if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < 0.6)) record();
+      if (state === 'flight' || state === 'falling' || state === 'tipping' || (ended() && state !== 'replay' && simClock - (frames.at(-1)?.t ?? 0) < (land ? 1.4 : 0.6))) record();
       if (!paused) effects(sdt);
       if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 0.8; } else fadeAmt = 0;
       padLights.forEach((m, i) => { m.visible = Math.floor(simClock * 2 + i / 3) % 2 === 0 || state === 'landed'; });
