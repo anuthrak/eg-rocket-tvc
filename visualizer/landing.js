@@ -60,21 +60,40 @@ export async function initLanding(step) {
   scene.add(sun, sun.target);
   const hemi = new THREE.HemisphereLight(0xe8b08a, 0x2a140a, 0.5); scene.add(hemi);
 
-  // Sky dome: zenith → mid → horizon glow from the active look, a sun halo, a dust band just above the horizon
+  // Sky dome (section 13): butterscotch horizon → darker brownish-pink zenith (darker still from height), the blue glow
+  // round a small Mars sun, thin high water-ice clouds drifting, dust layers on the horizon (thicker toward the sun), Phobos
   const skyU = { uSun: { value: SUN }, uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uHor: { value: new THREE.Color() },
-    uSunCol: { value: new THREE.Color() }, uDust: { value: 0.3 } };
+    uSunCol: { value: new THREE.Color() }, uDust: { value: 0.3 }, uT: { value: 0 }, uAlt: { value: 0 }, uCirrus: { value: 1 } };
   {
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(150000, 48, 24), new THREE.ShaderMaterial({
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(150000, 64, 32), new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyU,
       vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); vec4 p = projectionMatrix*modelViewMatrix*vec4(position,1.0); gl_Position = p.xyww; }`,
-      fragmentShader: `uniform vec3 uSun, uZen, uMid, uHor, uSunCol; uniform float uDust; varying vec3 vD;
+      fragmentShader: `uniform vec3 uSun, uZen, uMid, uHor, uSunCol; uniform float uDust, uT, uAlt, uCirrus; varying vec3 vD;
+        float sh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float sn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(sh(i), sh(i + vec2(1, 0)), f.x), mix(sh(i + vec2(0, 1)), sh(i + vec2(1, 1)), f.x), f.y); }
+        float sf(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * sn(p); p = p * 2.07 + 3.1; a *= 0.5; } return s; }
         void main(){ vec3 d = normalize(vD); float h = clamp(d.y, -0.3, 1.0);
-          vec3 c = mix(uHor, uMid, smoothstep(0.0, 0.22, h));
-          c = mix(c, uZen, smoothstep(0.18, 0.85, h));
-          float s = max(dot(d, normalize(uSun)), 0.0);
-          c = mix(c, vec3(0.32, 0.5, 0.85) * (0.6 + 0.6 * h), pow(s, 14.0) * 0.6);                // Mars: dust scatters blue round the sun
-          c += uSunCol * (pow(s, 900.0) * 30.0 + pow(s, 60.0) * 0.6 + pow(s, 6.0) * 0.12);     // disc (blooms), halo, wide glow
-          c = mix(c, uHor * 1.08, uDust * exp(-abs(h - 0.03) * 22.0));                          // dust band hugging the horizon
+          float up = smoothstep(500.0, 9000.0, uAlt);                                           // higher → darker, thinner sky
+          vec3 zen = uZen * mix(1.0, 0.55, up), mid = uMid * mix(1.0, 0.75, up);
+          vec3 c = mix(uHor, mid, smoothstep(0.0, 0.2, h));
+          c = mix(c, zen, smoothstep(0.15, 0.8, h));
+          vec3 sd = normalize(uSun); float s = max(dot(d, sd), 0.0);
+          c = mix(c, vec3(0.34, 0.52, 0.86) * (0.65 + 0.5 * h), pow(s, 16.0) * 0.55 + pow(s, 120.0) * 0.25);   // blue aureole round the sun
+          c += uSunCol * (smoothstep(0.999992, 0.999997, s) * 40.0 + pow(s, 2200.0) * 3.0 + pow(s, 90.0) * 0.35 + pow(s, 6.0) * 0.1);   // small disc, halo, glow
+          // Thin water-ice cirrus high up: streaky noise on a far plane, lit from the sun side, drifting
+          if (h > 0.02) { vec2 p = d.xz / (h + 0.06) * 1.6; p.x += uT * 0.004;
+            float w = sf(vec2(p.x * 0.7 + p.y * 0.3, (p.y - p.x * 0.4) * 3.2)); float ci = smoothstep(0.52, 0.8, w) * smoothstep(0.02, 0.25, h) * (1.0 - 0.6 * up);
+            c = mix(c, vec3(1.0, 0.94, 0.88) * (0.75 + 0.6 * pow(s, 4.0)), ci * 0.32 * uCirrus); }
+          // Phobos: a small, dim, lumpy moon low in the east, lit from the sun's side
+          vec3 ph = normalize(vec3(0.82, 0.16, 0.55)); float pd = acos(clamp(dot(d, ph), -1.0, 1.0));
+          if (pd < 0.006) { vec3 t1 = normalize(cross(ph, vec3(0, 1, 0))), t2 = cross(t1, ph); vec2 q = vec2(dot(d - ph, t1), dot(d - ph, t2)) / 0.0045;
+            float r = length(q * vec2(1.0, 1.25)) + 0.12 * (sn(q * 3.0 + 4.0) - 0.5);
+            if (r < 1.0) { float lit = clamp(0.35 + 0.8 * dot(normalize(vec3(q, 0.6)), normalize(vec3(dot(sd, t1), dot(sd, t2), 0.4))), 0.0, 1.0);
+              c = mix(c, vec3(0.62, 0.55, 0.5) * lit + c * 0.3, smoothstep(1.0, 0.85, r)); } }
+          // Dust layers hugging the horizon, thicker toward the sun
+          float band = exp(-abs(h - 0.02) * 26.0) + 0.5 * exp(-abs(h - 0.075) * 40.0);
+          c = mix(c, uHor * (1.06 + 0.25 * pow(s, 3.0)), clamp(uDust * band * (1.0 + 0.8 * pow(max(dot(normalize(d.xz), normalize(sd.xz)), 0.0), 2.0)), 0.0, 1.0));
           c = mix(c, uHor * 0.8, smoothstep(0.0, -0.25, h));
           gl_FragColor = vec4(c, 1.0); }`,
     }));
@@ -82,7 +101,22 @@ export async function initLanding(step) {
     scene.add(sky);
   }
 
-  // ---------- Terrain: craters, dunes and noise on a grid that gets coarser with distance ----------
+  // ---------- Terrain (section 13): the floor of an old, large crater ----------
+  // The base sits on a broad, smooth plain 14 km west of the crater's centre. The crater wall (eroded, ~1.9 km high)
+  // rings the horizon 16–44 km out, with a gap in the north-west where an old river fan spills onto the floor. In the
+  // middle stands a big layered mound (Mount Sharp-like): east of the pad, behind the ship from the site camera. Layered
+  // buttes stand 3–10 km out, a dark crescent-dune field lies to the south-west, wind-carved ridges (yardangs) to the
+  // north-west, and craters (fresh with bright rays, old ones worn and sand-filled) trail dust streaks downwind.
+  const TERRAIN = {
+    crater: { x: 14000, z: 0, R: 30000, wall: 1900 },
+    mound: { H: 3200, rx: 7000, rz: 10500, band: 46 },
+    wind: [0.6, 0.8],               // the way the wind blows (dunes' horns and the streaks point this way)
+    gap: 2.55,                      // rim gap (rad round the crater centre) for the river fan
+    dunes: { x: -5200, z: -6400, r: 3600 }, yardangs: { x: -8600, z: 3800, r: 3400 },
+    buttes: [[3800, -2900, 430, 140], [5600, 2300, 620, 190], [-3400, 4400, 380, 120], [-4700, -2300, 300, 95], [2700, 5300, 360, 110], [8300, -1100, 820, 260], [9900, 3700, 520, 180]],
+    baseR: 900,                     // gentle ground round the pad, kept for the base (section 14)
+  };
+  const GRADE = [];                 // flattened footprints ({ x, z, r }), filled by the base (section 14)
   const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
   function vnoise(x, y) {
     const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
@@ -91,122 +125,185 @@ export async function initLanding(step) {
     return lerp(lerp(a, b, u), lerp(c, d, u), v) * 2 - 1;
   }
   const fbm = (x, y) => { let s = 0, a = 1, f = 1; for (let i = 0; i < 5; i++) { s += a * vnoise(x * f, y * f); a *= 0.5; f *= 2.03; } return s; };
-  const craters = [], mesas = [];
+  const ridged = (x, y) => { let s = 0, a = 1, f = 1; for (let i = 0; i < 4; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f)); s += a * n * n; a *= 0.5; f *= 2.1; } return s / 1.875; };
+  const WX = TERRAIN.wind[0], WZ = TERRAIN.wind[1];
+  const terrace = (h, band, sharp = 0.25) => band * (Math.floor(h / band) + sstep(sharp, 1, h / band - Math.floor(h / band)));   // benches
+  const craters = [];
   { let seed = 11; const r01 = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let i = 0; i < 420; i++) {   // power-law sizes 20 m … ~800 m radius; depth 0.35–1 (worn → fresh)
-      const R = 20 + Math.pow(r01(), 4) * 780, d = 400 + R + Math.pow(r01(), 1.1) * 13000, a = r01() * Math.PI * 2;
-      craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 0.35 + 0.65 * r01()]);
+    for (let i = 0; i < 420; i++) {   // power-law sizes 20 m … ~800 m radius; f: 0.35 worn … 1 fresh
+      const R = 20 + Math.pow(r01(), 4) * 780, d = 400 + R + Math.pow(r01(), 1.1) * 13000, a = r01() * Math.PI * 2, f = 0.35 + 0.65 * r01(), x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (d < TERRAIN.baseR + R * 2 && R > 8) continue;   // keep the base ground clear
+      craters.push([x, z, R, f, r01() * 6.28]);
     }
-    // A few eroded mesas / scarps near the site: flat lit tops, layered steep edges
-    for (let i = 0; i < 7; i++) { const a = r01() * 6.28, d = 1800 + r01() * 4500; mesas.push([Math.cos(a) * d, Math.sin(a) * d, 300 + r01() * 600, 50 + r01() * 110]); }
-    for (let i = 0; i < 160; i++) {   // small ones near the pad, for scale
-      const R = 3 + Math.pow(r01(), 2) * 30, d = 70 + R + Math.pow(r01(), 0.8) * 650, a = r01() * Math.PI * 2;
-      craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 1]);
+    for (let i = 0; i < 120; i++) {   // small ones near the pad, for scale
+      const R = 3 + Math.pow(r01(), 2) * (i < 60 ? 6 : 26), d = 90 + R + Math.pow(r01(), 0.8) * (i < 60 ? 800 : 1400), a = r01() * Math.PI * 2;
+      if (i >= 60 && d < TERRAIN.baseR + R) continue;
+      craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 0.8 + 0.2 * r01(), r01() * 6.28]);
     }
   }
-  const ridged = (x, y) => { let s = 0, a = 1, f = 1; for (let i = 0; i < 4; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f)); s += a * n * n; a *= 0.5; f *= 2.1; } return s / 1.875; };
+  // Returns [height, rim brightness, tone offset, dark sand 0..1]
   function terrain(x, z) {
-    const dist = Math.hypot(x, z);
-    let h = 20 * fbm(x / 2600, z / 2600) + 1.8 * fbm(x / 420, z / 420) + 0.25 * fbm(x / 22, z / 22);   // smooth plains: broad swells only
-    let far = 0, tone = 0;
-    if (dist > 4000) {
-      // Out to the horizon: ridged mountain ranges, flat-topped mesas, a canyon, and the planet's curve
-      const kf = sstep(5000, 22000, dist);
-      const mtn = 1900 * Math.pow(ridged(x / 14000 + 3.1, z / 14000 - 1.7), 2.2) * kf;
-      const m = fbm(x / 6000 + 11, z / 6000 - 4), mesa = 520 * sstep(0.18, 0.26, m) * sstep(4000, 12000, dist);
-      const cy = z - 26000 - 6000 * Math.sin(x / 17000), canyon = -700 * Math.exp(-((cy / 2600) ** 2)) * sstep(9000, 20000, Math.abs(x) + 8000);
-      far = mtn + mesa + canyon + 60 * fbm(x / 900, z / 900) * kf;
-      tone = (mtn > 300 ? -0.06 : 0) + (mesa > 260 ? 0.05 : 0) + (canyon < -200 ? -0.08 : 0);
+    const dist = Math.hypot(x, z), T = TERRAIN;
+    let h = 16 * fbm(x / 2600, z / 2600) + 1.6 * fbm(x / 420, z / 420) + 0.25 * fbm(x / 22, z / 22);   // smooth floor: broad swells
+    let tone = 0, sand = 0, rimBright = 0;
+    // Crater wall: rises over the outer 16% of the radius, eroded into spurs and gullies, a gap for the fan; plateau outside
+    const cx = x - T.crater.x, cz = z - T.crater.z, cd = Math.hypot(cx, cz), q = cd / T.crater.R;
+    if (q > 0.78) {
+      let ga = Math.atan2(cz, cx) - T.gap; ga = Math.atan2(Math.sin(ga), Math.cos(ga));
+      const gapK = Math.exp(-((ga / 0.07) ** 2)), ero = 0.62 + 0.55 * ridged(x / 3200 + 7, z / 3200 - 2);
+      const wall = q < 1 ? Math.pow(sstep(0.84, 1, q), 1.5) : Math.exp(-(q - 1) * 10) * 0.75 + 0.25 + 0.08 * fbm(x / 5000, z / 5000);
+      h += T.crater.wall * wall * ero * (1 - 0.85 * gapK) + 220 * sstep(0.95, 1.0, q) * fbm(x / 900, z / 900);
+      tone += 0.05 * sstep(0.85, 1, q);
     }
-    h += far - dist * dist / (2 * 3389.5e3);
-    h += 0.5 * Math.sin((x * 0.8 + z * 0.6) / 18 + 2 * vnoise(x / 90, z / 90)) * sstep(0.1, 0.6, vnoise(x / 400 + 5, z / 400));   // dune ripples
-    let rimBright = 0;
-    for (const [mx, mz, mr, mh] of mesas) {   // eroded mesa: warped outline, flat top, terraced steep edge
-      const dx = x - mx, dz = z - mz; if (Math.abs(dx) > mr * 1.6 || Math.abs(dz) > mr * 1.6) continue;
-      const q = Math.hypot(dx, dz) / mr + 0.35 * fbm(x / 260 + mx, z / 260);
-      const k = sstep(1.05, 0.85, q), terr = Math.floor(k * 4) / 4 * 0.35 + k * 0.65;
-      h += mh * terr; tone += 0.03 * k;
+    // River fan: a low lobe spreading from the gap onto the floor, a meandering channel cut into it
+    { const gx = T.crater.x + T.crater.R * Math.cos(T.gap), gz = T.crater.z + T.crater.R * Math.sin(T.gap), fx = x - gx, fz = z - gz, fr = Math.hypot(fx, fz);
+      if (fr < 9000) { const ix = -Math.cos(T.gap), iz = -Math.sin(T.gap), s = fx * ix + fz * iz, t = fx * iz - fz * ix;
+        if (s > -500) { const lobe = Math.max(0, 1 - fr / 8500) * sstep(-500, 600, s) * Math.exp(-((t / (Math.max(s, 300) * 0.9 + 400)) ** 2));
+          h += 70 * Math.pow(lobe, 1.4); tone += 0.06 * lobe;
+          const t0 = 380 * Math.sin(s / 1400) + 160 * Math.sin(s / 520 + 1), ch = Math.exp(-(((t - t0) / 55) ** 2)) * sstep(-400, 300, s) * sstep(8000, 5000, s);
+          h -= 16 * ch; sand = Math.max(sand, 0.7 * ch); } } }
+    // The layered mound in the middle: elongated, concave flanks, terraced in rock bands, eroded canyons, buttes round its foot
+    { const mx = cx / T.mound.rx, mz = cz / T.mound.rz, mq = Math.hypot(mx, mz);
+      if (mq < 1.6) { const w = mq + 0.12 * fbm(x / 2200 + 3, z / 2200 - 5);
+        let hm = T.mound.H * Math.pow(Math.max(0, 1 - w), 1.45) * (0.88 + 0.16 * ridged(x / 4200 - 4, z / 4200 + 9));
+        hm = lerp(hm, terrace(hm, T.mound.band, 0.35), 0.6);
+        const foot = sstep(0.62, 0.74, fbm(x / 1400 + 5, z / 1400)) * sstep(1.45, 1.0, w) * sstep(0.85, 1.0, w) * 160;
+        h += hm + terrace(foot, 23); tone += 0.04 * sstep(1.0, 0.6, w); } }
+    // Layered buttes: warped outlines, benched sides, rubble aprons; the big ones split into pillars
+    for (const [bx, bz, br, bh] of T.buttes) {
+      const dx = x - bx, dz = z - bz; if (Math.abs(dx) > br * 1.8 || Math.abs(dz) > br * 1.8) continue;
+      const bq = Math.hypot(dx, dz) / br + 0.3 * fbm(x / 240 + bx, z / 240);
+      const k = sstep(1.05, 0.82, bq), split = br > 500 ? 1 - 0.75 * sstep(0.35, 0.15, Math.abs(vnoise(x / 300 + 1.7, z / 300 - 2.3))) : 1;
+      h += lerp(bh * k * split, terrace(bh * k * split, 13, 0.35), 0.65) + bh * 0.22 * sstep(1.55, 1.0, bq) * (1 - k); tone += 0.03 * k;
     }
-    for (const [cx, cz, R, f] of craters) {
-      const dx = x - cx, dz = z - cz; if (Math.abs(dx) > R * 1.8 || Math.abs(dz) > R * 1.8) continue;
-      const q = Math.hypot(dx, dz) / R;
-      if (q < 1) { h -= 0.18 * f * R * (1 - q * q); tone -= 0.04 * f * sstep(0.9, 0.4, q); }   // darker floors
-      const rim = Math.exp(-(((q - 1) / 0.3) ** 2)); h += 0.06 * f * R * rim; rimBright = Math.max(rimBright, rim * f);
+    // Yardangs: long streamlined ridges lined up with the wind
+    { const dx = x - T.yardangs.x, dz = z - T.yardangs.z, yr = Math.hypot(dx, dz) / T.yardangs.r;
+      if (yr < 1.1) { const u = dx * WX + dz * WZ, v = dx * WZ - dz * WX, env = sstep(1.1, 0.6, yr);
+        const r = 1 - Math.abs(Math.sin(v / 85 + 1.6 * vnoise(u / 700, v / 380))), len = sstep(0.05, 0.5, vnoise(u / 520 + 3, v / 170));
+        h += 32 * Math.pow(r, 5) * len * env; tone += 0.04 * Math.pow(r, 5) * len * env; } }
+    // Crescent (barchan) dunes of dark basalt sand: gentle upwind slope, steep slip face, horns pointing downwind
+    { const dx = x - T.dunes.x, dz = z - T.dunes.z, dr = Math.hypot(dx, dz) / T.dunes.r;
+      if (dr < 1.15) { const env = sstep(1.15, 0.7, dr), u = dx * WX + dz * WZ, v = dx * WZ - dz * WX;
+        sand = Math.max(sand, 0.55 * env);
+        const CU = 430, CV = 320, iu = Math.floor(u / CU), iv = Math.floor(v / CV), r1 = hash(iu, iv), r2 = hash(iu + 17, iv - 3);
+        if (r1 < 0.78) { const sc = 0.6 + 0.6 * r2, lu = u - (iu + 0.5) * CU - (r2 - 0.5) * 120, lv = v - (iv + 0.5) * CV - (r1 - 0.5) * 80;
+          const W = 120 * sc, Ld = 70 * sc, du = lu - 0.9 * lv * lv / W;
+          const prof = du < 0 ? 1 - (du / (Ld * 1.7)) ** 2 : 1 - (du / (Ld * 0.32)) ** 2, across = 1 - (lv / W) ** 2;
+          const hd = 19 * sc * Math.max(0, prof) * Math.pow(Math.max(0, across), 0.7) * env;
+          h += hd; sand = Math.max(sand, Math.min(1, 0.55 * env + hd / 10)); } } }
+    // Craters: bowl, raised rim, debris apron; fresh ones get bright rays, old ones fill with sand; dust streaks downwind
+    for (const [ccx, ccz, R, f, sd] of craters) {
+      const dx = x - ccx, dz = z - ccz, big = R > 60, ext = R * (big ? 7.5 : 2.2);
+      if (Math.abs(dx) > ext || Math.abs(dz) > ext) continue;
+      const cq = Math.hypot(dx, dz) / R;
+      if (cq < 1) { h -= 0.18 * f * R * (1 - cq * cq) * (f < 0.55 ? 0.55 : 1); tone -= 0.04 * f * sstep(0.9, 0.4, cq); if (f < 0.55) sand = Math.max(sand, 0.6 * sstep(0.8, 0.3, cq)); }
+      const rim = Math.exp(-(((cq - 1) / 0.3) ** 2)); h += 0.06 * f * R * rim; rimBright = Math.max(rimBright, rim * f);
+      if (f > 0.85 && cq > 1 && cq < 3.2) { const ray = Math.pow(Math.abs(Math.sin(Math.atan2(dz, dx) * 7 + sd)), 10) * Math.exp(-(cq - 1) / 0.9);
+        h += 0.02 * R * Math.exp(-(((cq - 1.3) / 0.6) ** 2)); tone += 0.07 * ray; }
+      if (big && cq > 1) { const tu = (dx * WX + dz * WZ) / R, tv = (dx * WZ - dz * WX) / R;
+        if (tu > 0.8 && tu < 7) tone += 0.05 * Math.exp(-((tv / 0.8) ** 2)) * (1 - (tu - 0.8) / 6.2) * f; }
     }
-    const flat = sstep(40, 110, dist);                 // the landing zone is graded flat
-    return [h * flat, rimBright * flat, tone];
+    // Ground kept gentle round the pad for the base, graded footprints, the flat landing zone
+    h *= lerp(0.4, 1, sstep(250, T.baseR, dist));
+    for (const g of GRADE) { const gd = Math.hypot(x - g.x, z - g.z); if (gd < g.r + 60) h = lerp(h, g.h ?? 0, sstep(g.r + 60, g.r, gd)); }
+    h -= dist * dist / (2 * 3389.5e3);   // the planet's curve
+    const flat = sstep(40, 110, dist);
+    return [h * flat, rimBright * flat, tone, sand * flat];
   }
   const heightAt = (x, z) => terrain(x, z)[0];
   const groundU = { uGShadow: { value: new THREE.Color() }, uGMid: { value: new THREE.Color() }, uGLit: { value: new THREE.Color() },
-    uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() } };
-  {
+    uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() }, uSunDir: { value: SUN }, uTime: { value: 0 } };
+  const buildGround = () => {
     const N = 480, geo = new THREE.PlaneGeometry(2, 2, N, N); geo.rotateX(-Math.PI / 2);
-    const P = geo.attributes.position, uv = geo.attributes.uv, col = new Float32Array(P.count * 3);
+    const P = geo.attributes.position, uv = geo.attributes.uv, col = new Float32Array(P.count * 3), N1 = N + 1;
     const warp = u => Math.sign(u) * (160 * Math.abs(u) + 1400 * u * u + 108000 * Math.abs(u) ** 6);   // 0.7 m at the pad … 110 km out
-    const tones = new Float32Array(P.count);
+    const tones = new Float32Array(P.count), sandA = new Float32Array(P.count), H = new Float32Array(P.count);
     for (let i = 0; i < P.count; i++) {
-      const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone] = terrain(x, z);
-      P.setXYZ(i, x, h, z);
+      const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone, sand] = terrain(x, z);
+      P.setXYZ(i, x, h, z); H[i] = h;
       tones[i] = 0.55 + 0.12 * fbm(x / 500 + 9, z / 500) + 0.3 * rim + 0.18 * fbm(x / 3000, z / 3000) + tone * 3;   // soft dust mottling
-      uv.setXY(i, x / 16, z / 16);
+      sandA[i] = sand; uv.setXY(i, x / 7, z / 7);
     }
     geo.computeVertexNormals();
-    // Vertex colour carries palette coordinates, not colours: r = lightness (shadow → mid → lit → highlight),
-    // g = slope (steep = rock), b = distance (fine detail fades into the haze). The shader maps them to the look.
-    const N_ = geo.attributes.normal;
+    // Baked light: long terrain shadows from the low sun (each vertex looks toward the sun over the height grid for the
+    // steepest horizon; soft-edged) and a little darkening in hollows. Free at run time.
+    const ws = new Float32Array(N1); for (let i = 0; i < N1; i++) ws[i] = warp(-1 + 2 * i / N);
+    const inv = v => { let lo = 0, hi = N; if (v <= ws[0]) return 0; if (v >= ws[N]) return N; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ws[m] <= v) lo = m; else hi = m; } return lo + (v - ws[lo]) / (ws[hi] - ws[lo]); };
+    const LUT = 8192, XM = 120000, invT = new Float32Array(LUT + 1); for (let i = 0; i <= LUT; i++) { const v = (i / LUT) ** 2 * XM; invT[i] = inv(v) - N / 2; }
+    const gi = v => { const a = Math.abs(v), t = Math.sqrt(Math.min(a, XM) / XM) * LUT, i0 = Math.floor(t), f = t - i0, g = invT[i0] + (invT[Math.min(i0 + 1, LUT)] - invT[i0]) * f; return N / 2 + Math.sign(v) * g; };
+    const hAt = (x, z) => { const fx = clamp(gi(x), 0, N - 1e-3), fz = clamp(gi(z), 0, N - 1e-3), ix = fx | 0, iz = fz | 0, tx = fx - ix, tz = fz - iz, o = iz * N1 + ix;
+      return (H[o] * (1 - tx) + H[o + 1] * tx) * (1 - tz) + (H[o + N1] * (1 - tx) + H[o + N1 + 1] * tx) * tz; };
+    const sl = Math.hypot(SUN.x, SUN.z), sx = SUN.x / sl, sz = SUN.z / sl, tanE = SUN.y / sl, shade = new Float32Array(P.count);
     for (let i = 0; i < P.count; i++) {
-      const d = Math.hypot(P.getX(i), P.getZ(i));
+      const x = P.getX(i), z = P.getZ(i), h0 = H[i] + 0.5; let m = -1;
+      for (let k = 0, d = 4; k < 52 && d < 40000; k++, d *= 1.19) { const s = (hAt(x + sx * d, z + sz * d) - h0) / d + d / (2 * 3389.5e3); if (s > m) m = s; }
+      const lit = 1 - sstep(-0.025, 0.035, m - tanE);
+      const ix = i % N1, iz = (i / N1) | 0, a = Math.max(ix - 3, 0), b = Math.min(ix + 3, N), c = Math.max(iz - 3, 0), e = Math.min(iz + 3, N);
+      const span = Math.max(1, (Math.abs(ws[b] - ws[a]) + Math.abs(ws[e] - ws[c])) / 2);
+      const conc = ((H[iz * N1 + a] + H[iz * N1 + b] + H[c * N1 + ix] + H[e * N1 + ix]) / 4 - H[i]) / span;
+      shade[i] = lit; col[i * 3 + 1] = clamp(1 - 1.8 * Math.max(0, conc), 0.55, 1);   // AO parked in col.g until packed below
+    }
+    // Vertex colour carries palette coordinates, not colours: r = lightness, g = slope (steep = rock), b = distance.
+    const N_ = geo.attributes.normal, ao = new Float32Array(P.count);
+    for (let i = 0; i < P.count; i++) {
+      ao[i] = col[i * 3 + 1]; const d = Math.hypot(P.getX(i), P.getZ(i));
       col.set([clamp(tones[i], 0, 1), clamp((1 - N_.getY(i)) * 4, 0, 1), sstep(2000, 30000, d)], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    // Regolith detail: pebbly grey noise tiled every 16 m, as colour and bump (the scale cue up close)
+    const extra = new Float32Array(P.count * 3); for (let i = 0; i < P.count; i++) extra.set([sandA[i], shade[i], ao[i]], i * 3);
+    geo.setAttribute('aG', new THREE.BufferAttribute(extra, 3));   // x: dark sand, y: sun (baked terrain shadow), z: hollow darkening
+    return geo;
+  };
+  {
+    const geo = buildGround();
+    // Fine relief: a bump of plain noise (no blobs, so the 7 m tile doesn't show); colour detail is procedural in the shader
     const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
     const img = g.createImageData(512, 512);
     for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) {
-      const v = 175 + 45 * (vnoise(x / 11, y / 11) * 0.55 + vnoise(x / 3, y / 3) * 0.45) + 16 * (Math.random() - 0.5), o = (y * 512 + x) * 4;
-      img.data[o] = img.data[o + 1] = img.data[o + 2] = v; img.data[o + 3] = 255;
+      const tx = x / 512 * Math.PI * 2, ty = y / 512 * Math.PI * 2;   // tileable: sample on a torus
+      const v = 128 + 60 * (0.55 * fbm(Math.cos(tx) * 3 + 9, Math.sin(tx) * 3 + Math.cos(ty) * 2) + 0.45 * fbm(Math.sin(ty) * 9, Math.cos(tx) * 9 + 4)) + 10 * (Math.random() - 0.5), o = (y * 512 + x) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = clamp(v, 0, 255); img.data[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
-    for (let i = 0; i < 260; i++) {   // rocks (wrapped so the tile is seamless)
-      const r = 1 + Math.pow(Math.random(), 3) * 9, cx = Math.random() * 512, cy = Math.random() * 512;
-      for (const ox of [-512, 0, 512]) for (const oy of [-512, 0, 512]) {
-        const gr = g.createRadialGradient(cx + ox - r * 0.3, cy + oy - r * 0.3, r * 0.1, cx + ox, cy + oy, r);
-        gr.addColorStop(0, 'rgba(230,230,230,.6)'); gr.addColorStop(0.7, 'rgba(90,90,90,.5)'); gr.addColorStop(1, 'rgba(60,60,60,0)');
-        g.fillStyle = gr; g.beginPath(); g.arc(cx + ox, cy + oy, r, 0, 7); g.fill();
-      }
-    }
-    const detail = new THREE.CanvasTexture(c); detail.wrapS = detail.wrapT = THREE.RepeatWrapping; detail.anisotropy = 8; detail.colorSpace = THREE.SRGBColorSpace;
     const bump = new THREE.CanvasTexture(c); bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.anisotropy = 8;
-    const gMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: bump, bumpScale: 2.6, roughness: 1, metalness: 0 });
+    const gMat = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: bump, bumpScale: 2.2, roughness: 1, metalness: 0 });
     gMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, groundU);
-      sh.vertexShader = 'varying vec3 vGW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz;');
-      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock; varying vec3 vGW;
+      sh.vertexShader = 'attribute vec3 aG; varying vec3 vGW; varying vec3 vAG;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz; vAG = aG;');
+      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock, uSunDir; uniform float uTime; varying vec3 vGW; varying vec3 vAG;
         float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(gh(i), gh(i + vec2(1, 0)), f.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), f.x), f.y); }
         float gf(vec2 p){ return 0.5 * gn(p) + 0.25 * gn(p * 2.03) + 0.125 * gn(p * 4.1) + 0.125 * gn(p * 8.3); }\n` + sh.fragmentShader
-        .replace('#include <map_fragment>', `#ifdef USE_MAP
-            vec4 sampledDiffuseColor = texture2D(map, vMapUv);
-            diffuseColor *= mix(sampledDiffuseColor * 2.2, vec4(1.0), vColor.b);   // detail (averages ~0.45 linear, so x2.2), fading out with distance
-          #endif`)
         .replace('#include <color_fragment>', `
-          float t = vColor.r, sl = vColor.g;
+          float t = vColor.r, sl = vColor.g, far = vColor.b; vec2 w = vGW.xz; float camD = distance(cameraPosition, vGW);
+          // Three ground types: bright ochre dust (flat), dark basalt sand (dunes, hollows, channels), tan layered rock (slopes)
           vec3 base = mix(uGShadow, uGMid, smoothstep(0.0, 0.42, t));
           base = mix(base, uGLit, smoothstep(0.42, 0.82, t));
           base = mix(base, uGHigh, smoothstep(0.86, 1.0, t) * 0.55);
-          base = mix(base, uGRock, smoothstep(0.2, 0.65, sl) * 0.8);
-          // Bold shapes that read from altitude: dark basalt dune fields with crest/lee stripes, bright dust and
-          // wind streaks, kept off the landing site
-          vec2 w = vGW.xz;
-          float away = smoothstep(1200.0, 3500.0, length(w));
-          float field = smoothstep(0.52, 0.66, gf(w / 9000.0 + 3.0)) * away;
-          float crest = 0.5 + 0.5 * sin(dot(w, vec2(0.8, 0.6)) / 70.0 + 6.0 * gf(w / 900.0));
-          base = mix(base, uGRock * mix(0.85, 1.3, crest), field * 0.3);
-          float streak = smoothstep(0.55, 0.8, gf(vec2(w.x * 0.8 + w.y * 0.6, (w.y * 0.8 - w.x * 0.6) * 4.0) / 5000.0));
-          base = mix(base, uGHigh * 0.9, streak * (1.0 - field) * 0.25 * away);
-          base *= 0.8 + 0.4 * gf(w / 2500.0 + 7.0);   // broad tone variation
-          diffuseColor.rgb *= base;`);
+          float band = (0.5 + 0.5 * sin(vGW.y / 9.0 + 2.0 * gf(w / 900.0))) * (0.75 + 0.25 * sin(vGW.y / 2.7 + 1.3));   // rock strata, level across buttes
+          vec3 rock = mix(mix(uGRock, uGMid, 0.45) * 1.25, mix(uGMid, uGHigh, 0.5) * 0.95, 0.15 + 0.7 * band);
+          base = mix(base, rock, smoothstep(0.3, 0.75, sl) * 0.75);
+          vec3 sandC = mix(uGRock, uGShadow, 0.4) * 1.35 * vec3(0.92, 0.95, 1.05);
+          base = mix(base, sandC, clamp(vAG.x, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.7, sl)) * 0.85);
+          base *= 0.86 + 0.28 * gf(w / 2500.0 + 7.0);                                           // broad tone variation
+          // Near the camera: 2 m and 25 cm mottling, pebbles, sand ripples in the low sandy spots (fade with distance)
+          float nk = 1.0 - smoothstep(60.0, 1600.0, camD), fk = 1.0 - smoothstep(8.0, 160.0, camD);
+          base *= mix(1.0, 0.84 + 0.32 * gf(w / 2.0), nk) * mix(1.0, 0.88 + 0.24 * gn(w / 0.25), fk);
+          base *= mix(1.0, 0.62, smoothstep(0.83, 0.9, gn(w / 0.35 + 3.0)) * fk * (1.0 - vAG.x));      // pebbles
+          float rip = sin(dot(w, vec2(0.8, -0.6)) / 0.55 + 3.0 * gn(w / 6.0));   // crests across the wind
+          base *= 1.0 + 0.07 * rip * fk * clamp(vAG.x * 1.6 - 0.1, 0.0, 1.0);   // only where there is loose sand
+          // Baked light: terrain shadow on the sun term, hollows a little darker; drifting cloud shadows
+          float sunL = mix(0.42, 1.0, vAG.y) * vAG.z;
+          float cs = smoothstep(0.56, 0.78, gf((w + uTime * vec2(7.0, 5.0)) / 2800.0));
+          diffuseColor.rgb *= base * sunL * (1.0 - 0.17 * cs);`)
+        .replace('#include <fog_fragment>', `#ifdef USE_FOG
+            vec3 vdir = normalize(vGW - cameraPosition);
+            float fd = fogDensity * (0.78 + 0.42 * exp(-max(vGW.y, 0.0) / 500.0));               // thicker in the low ground
+            float fogF = 1.0 - exp(-fd * fd * vFogDepth * vFogDepth);
+            float sunw = pow(max(dot(vdir, normalize(uSunDir)), 0.0), 3.0);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * mix(vec3(1.0), vec3(1.2, 1.08, 0.94), sunw * 0.7), fogF);
+          #endif`);
     };
     const ground = new THREE.Mesh(geo, gMat);
     ground.receiveShadow = true;
@@ -270,36 +367,67 @@ export async function initLanding(step) {
   // Sun lens flare (landing-look.js), parked far along the sun direction each frame
   const flare = createFlare(); scene.add(flare.lf);
 
-  // Rocks: a few noise-displaced low-poly shapes, instanced. Dense near the pad and the landing views, none on the pad.
+  // Rocks (section 13): six shapes (angular dark basalt, flat layered slabs), partly buried, sized on a power law,
+  // clustered on crater rims and aprons near the site, sparse on the open plain, none on the pad or graded ground
   const rocks = [];
   {
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, flatShading: true });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, flatShading: true });
     rockMat.onBeforeCompile = sh => { Object.assign(sh.uniforms, { uGRock: groundU.uGRock, uGMid: groundU.uGMid });
-      sh.fragmentShader = 'uniform vec3 uGRock, uGMid;\n' + sh.fragmentShader.replace('#include <color_fragment>', 'diffuseColor.rgb *= mix(uGRock, uGMid, 0.35) * 1.1;'); };
+      sh.fragmentShader = 'uniform vec3 uGRock, uGMid;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= mix(uGRock, uGMid, 0.35) * 1.1;'); };
     let seed = 3; const r01 = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    const MAX = 4200;
-    for (let v = 0; v < 3; v++) {
-      const g = new THREE.IcosahedronGeometry(1, 1), P = g.attributes.position;
-      for (let i = 0; i < P.count; i++) {
-        const x = P.getX(i), y = P.getY(i), z = P.getZ(i), k = 0.7 + 0.45 * vnoise(x * 2.1 + v * 7, z * 2.1 + y * 1.7);
-        P.setXYZ(i, x * k, y * k * 0.6, z * k);
-      }
-      g.computeVertexNormals();
-      const m = new THREE.InstancedMesh(g, rockMat, MAX); m.castShadow = m.receiveShadow = true; m.frustumCulled = false;
-      const o = new THREE.Object3D();
-      for (let i = 0; i < MAX; i++) {
-        const a = r01() * Math.PI * 2, d = L.PAD_R + 12 + Math.pow(r01(), 1.8) * 1400;
-        const x = Math.cos(a) * d, z = Math.sin(a) * d, big = r01() < 0.04;
-        const sz = big ? 2.5 + r01() * 4 : 0.25 + Math.pow(r01(), 2.2) * 2.2;
-        o.position.set(x, heightAt(x, z) - sz * 0.25, z);
-        o.rotation.set(r01() * 0.6, r01() * 6.28, r01() * 0.6);
-        o.scale.set(sz * (0.8 + r01() * 0.6), sz * (0.6 + r01() * 0.6), sz * (0.8 + r01() * 0.6));
-        o.updateMatrix(); m.setMatrixAt(i, o.matrix);
-      }
-      scene.add(m); rocks.push(m);
+    const shapes = [];
+    for (let v = 0; v < 3; v++) {   // basalt: lumpy, angular
+      const g = new THREE.IcosahedronGeometry(1, v === 2 ? 0 : 1), P = g.attributes.position;
+      for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i), k = 0.68 + 0.5 * vnoise(x * 2.3 + v * 7, z * 2.3 + y * 1.9);
+        P.setXYZ(i, x * k, y * k * (0.55 + 0.12 * v), z * k * (0.85 + 0.2 * v)); }
+      g.computeVertexNormals(); shapes.push([g, 'basalt']);
     }
+    for (let v = 0; v < 3; v++) {   // slabs: flat, layered, broken edges
+      const g = new THREE.BoxGeometry(1.7, 0.42 + 0.12 * v, 1.1 + 0.3 * v, 3, 2, 3), P = g.attributes.position;
+      for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i), k = 1 + 0.18 * vnoise(x * 3 + v * 5, z * 3 - v);
+        P.setXYZ(i, x * k, y + 0.08 * vnoise(x * 4 + 2, z * 4), z * k); }
+      g.computeVertexNormals(); shapes.push([g, 'slab']);
+    }
+    const pts = [];   // [x, z, size]
+    const ok = (x, z) => Math.hypot(x, z) > L.PAD_R + 12 && !GRADE.some(g => Math.hypot(x - g.x, z - g.z) < g.r + 4);
+    for (const [cx, cz, R, f] of craters) {   // rim and apron clusters (the nearer craters)
+      const d = Math.hypot(cx, cz); if (d > 1800 || R < 3) continue;
+      const n = Math.min(90, Math.round(R * 2.2 * f));
+      for (let i = 0; i < n; i++) { const a = r01() * 6.28, rr = R * (0.85 + Math.pow(r01(), 1.6) * 1.6); pts.push([cx + Math.cos(a) * rr, cz + Math.sin(a) * rr, (0.2 + Math.pow(r01(), 2.6) * 1.6) * Math.min(1.6, 0.5 + R / 25)]); }
+    }
+    while (pts.length < 11000) {   // the open plain: sparse, a few big ones
+      const a = r01() * 6.28, d = L.PAD_R + 12 + Math.pow(r01(), 1.7) * 1600, big = r01() < 0.03;
+      pts.push([Math.cos(a) * d, Math.sin(a) * d, big ? 2 + r01() * 3.5 : 0.18 + Math.pow(r01(), 2.4) * 1.8]);
+    }
+    const per = Math.ceil(pts.length / shapes.length), o = new THREE.Object3D(), col = new THREE.Color();
+    shapes.forEach(([g, kind], si) => {
+      const m = new THREE.InstancedMesh(g, rockMat, per); m.castShadow = m.receiveShadow = true; m.frustumCulled = false;
+      let n = 0;
+      for (let i = si; i < pts.length; i += shapes.length) { const [x, z, sz] = pts[i]; if (!ok(x, z)) continue;
+        o.position.set(x, heightAt(x, z) - sz * (0.22 + 0.28 * r01()), z);   // partly buried
+        o.rotation.set((r01() - 0.5) * (kind === 'slab' ? 0.3 : 0.7), r01() * 6.28, (r01() - 0.5) * (kind === 'slab' ? 0.3 : 0.7));
+        o.scale.set(sz * (0.8 + r01() * 0.6), sz * (0.6 + r01() * 0.6), sz * (0.8 + r01() * 0.6)); o.updateMatrix(); m.setMatrixAt(n, o.matrix);
+        const f = kind === 'basalt' ? 0.55 + 0.2 * r01() : 1.15 + 0.25 * r01(); m.setColorAt(n, col.setRGB(f, f * (kind === 'slab' ? 0.95 : 0.98), f * (kind === 'slab' ? 0.86 : 0.97)));
+        n++; }
+      m.userData.n = n; m.count = n; scene.add(m); rocks.push(m);
+    });
   }
-  const setRockDensity = k => rocks.forEach(m => { m.count = Math.round(4200 * k); });
+  const setRockDensity = k => rocks.forEach(m => { m.count = Math.round(m.userData.n * k); });
+  // Dust devils (section 13): two thin swirling columns far out on the plain, drifting downwind
+  const devils = [];
+  { const mat = () => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uT: { value: 0 }, uC: { value: new THREE.Color(0.85, 0.6, 0.42) } },
+      vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float uT; uniform vec3 uC; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5); }
+        float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+        void main(){ float y = vUv.y, sw = n(vec2(vUv.x * 12.0 + y * 6.0 - uT * 1.8, y * 9.0 - uT * 0.6)) * 0.7 + n(vec2(vUv.x * 30.0 - uT * 3.0, y * 20.0)) * 0.3;
+          float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.5);
+          float a = edge * (0.25 + 0.75 * sw) * smoothstep(1.0, 0.3, y) * smoothstep(0.0, 0.04, y) * 0.3;
+          gl_FragColor = vec4(uC * (0.85 + 0.3 * y), a); }` });
+    const geo = new THREE.CylinderGeometry(55, 9, 1, 24, 8, true).translate(0, 0.5, 0);
+    for (const [x, z, H] of [[4600, 2700, 700], [-1600, -3900, 480]]) { const m = new THREE.Mesh(geo, mat()); m.scale.y = H; m.position.set(x, heightAt(x, z), z);
+      m.userData = { x0: x, z0: z, ph: Math.random() * 6 }; m.renderOrder = 4; scene.add(m); devils.push(m); }
+  }
 
   // Landing pad: a painted disc, edge lights
   const PAD = new THREE.Group(); scene.add(PAD);
@@ -807,7 +935,7 @@ export async function initLanding(step) {
       pool.position.set(gx, heightAt(gx, gz) + 0.3, gz); pool.scale.setScalar(lerp(PLUME.sheetR[0], PLUME.sheetR[1], near) * (0.7 + 0.3 * Math.sqrt(nk)));
       pool.material.uniforms.uT.value = t; pool.material.uniforms.uK.value = near * near * (0.35 + 0.65 * te) * Math.min(1, nk * 1.5) * 2.0 * PLUME.vis;
       poolLight.position.set(gx, heightAt(gx, gz) + 10, gz);
-      poolLight.intensity = 900 * near * near * (0.3 + 0.7 * te) * nk * (1 + 0.1 * Math.sin(t * 41));
+      poolLight.intensity = 420 * near * near * (0.3 + 0.7 * te) * nk * (1 + 0.1 * Math.sin(t * 41));   // kept low: hot specular spots on the steel otherwise
     } else poolLight.intensity = 0;
     Object.assign(plumeFx, { on: P, len: maxLen, w: 1.5 + 2 * te, k: P ? Math.min(1, nOn / 2) * (0.35 + 0.35 * te) : 0, near: P ? near : 0, nk, te });
     plumeFx.exit.copy(_px); plumeFx.dir.copy(_pd); if (P && dG < 1e8) plumeFx.g.set(_px.x + _pd.x * dG, gH, _px.z + _pd.z * dG);
@@ -949,7 +1077,9 @@ export async function initLanding(step) {
     blendLooks(lookTarget, a, b ?? a, clamp(k ?? 0, 0, 1));
     easeLook(look, lookTarget, 1 - Math.exp(-dt / 0.7));
     skyU.uZen.value.copy(look.zen); skyU.uMid.value.copy(look.mid); skyU.uHor.value.copy(look.hor);
-    skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust;
+    skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust; skyU.uT.value = simClock; skyU.uAlt.value = camera.position.y; groundU.uTime.value = simClock;
+    { const orb = inOrbit(); M.steel.roughness = orb ? 0.3 : 0.5; M.steel.metalness = orb ? 0.85 : 0.74; M.steel.envMapIntensity = orb ? 1.1 : 0.95; }   // ground scene: a broader, softer sun streak on the steel
+    devils.forEach(m => m.material.uniforms.uC.value.copy(look.gHigh).lerp(look.hor, 0.5));
     scene.fog.color.copy(look.hor).lerp(_fogCool, 0.25); scene.fog.density = look.fog * lerp(1, 0.4, sstep(300, 7000, camera.position.y));   // crisper from height
     sun.color.copy(look.sun); sun.intensity = look.sunI;
     hemi.color.copy(look.hemiSky); hemi.groundColor.copy(look.hemiGnd); hemi.intensity = look.hemiI;
@@ -975,7 +1105,7 @@ export async function initLanding(step) {
     try { localStorage.setItem('tvc-landing-quality', name); } catch {}
     setRockDensity(q.rocks);
     details.visible = name !== 'low'; legDetail.forEach(m => { m.visible = name !== 'low'; });
-    envLow = name === 'low';
+    envLow = name === 'low'; devils.forEach(m => { m.visible = name !== 'low'; }); skyU.uCirrus.value = name === 'low' ? 0.5 : 1;
     orbit.setQuality(name === 'high' ? 8 : name === 'medium' ? 6 : 5, Math.min(devicePixelRatio, q.pr));
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
@@ -2250,12 +2380,12 @@ export async function initLanding(step) {
       const k = plumeFx.near, g = plumeFx.g, gy = g.y, f = dt * 60, D = PLUME.dust * (envLow ? 0.5 : 1) * (0.4 + 0.6 * plumeFx.nk) * (0.5 + 0.5 * plumeFx.te);
       const lit = DUST.map((c, i) => c + ([1, 0.78, 0.55][i] - c) * 0.4 * k), bx = plumeFx.dir.x * 30, bz = plumeFx.dir.z * 30;
       const em = (n, fn) => { for (let i = 0, m = Math.round(n * f + Math.random()); i < m; i++) fn(rnd(0, Math.PI * 2)); };
-      em((5 + 38 * k * k) * D, a => { const v = rnd(35, 75) * (0.5 + 0.5 * k);   // the ring, hugging the ground
+      em((5 + 38 * k * k) * D, a => { const v = rnd(26, 52) * (0.5 + 0.5 * k);   // the ring, hugging the ground (stops ~70 m out, short of the pad cam)
         dust.emit({ x: g.x + Math.cos(a) * 3, y: gy + 0.5, z: g.z + Math.sin(a) * 3, vx: Math.cos(a) * v + bx, vy: rnd(0.2, 2), vz: Math.sin(a) * v + bz,
-          life: rnd(0.7, 1.6), s0: 2, s1: rnd(8, 16) * (0.6 + 0.6 * k), a: 0.3 + 0.22 * k, drag: 0.9, rgb: lit }); });
-      em(5 * k * k * D, a => { const r = lerp(10, 40, k) * rnd(0.8, 1.1);        // the curtain rising at its edge
+          life: rnd(0.7, 1.4), s0: 2, s1: rnd(8, 16) * (0.6 + 0.6 * k), a: 0.28 + 0.2 * k, drag: 1.1, rgb: lit }); });
+      em(5 * k * k * D, a => { const r = lerp(10, 32, k) * rnd(0.8, 1.1);        // the curtain rising at its edge
         dust.emit({ x: g.x + Math.cos(a) * r, y: gy + rnd(0.5, 3), z: g.z + Math.sin(a) * r, vx: Math.cos(a) * rnd(4, 12), vy: rnd(4, 12), vz: Math.sin(a) * rnd(4, 12),
-          life: rnd(2.5, 4.5), s0: 6, s1: rnd(22, 38), a: 0.2, drag: 0.35, rgb: lit }); });
+          life: rnd(2.5, 4.5), s0: 6, s1: rnd(16, 28), a: 0.12, drag: 0.35, rgb: lit }); });
       if (k > 0.35) em(3 * k * D, a => { const r = rnd(2, 8), v = rnd(25, 60);      // gravel in arcs
         dust.emit({ x: g.x + Math.cos(a) * r, y: gy + 0.4, z: g.z + Math.sin(a) * r, vx: Math.cos(a) * v, vy: rnd(6, 18), vz: Math.sin(a) * v,
           life: rnd(1, 2.2), s0: 0.5, s1: 0.7, a: 0.9, drag: 0.05, g: L.G, rgb: [0.17, 0.12, 0.09] }); });
@@ -2263,6 +2393,9 @@ export async function initLanding(step) {
         dust.emit({ x: sp.x + Math.cos(a) * r, y: gy + rnd(0.3, 2), z: sp.z + Math.sin(a) * r, vx: -Math.sin(a) * 12 + Math.cos(a) * 4, vy: rnd(1, 4), vz: Math.cos(a) * 12 + Math.sin(a) * 4,
           life: rnd(1.5, 3), s0: 3, s1: 12, a: 0.28, drag: 0.4, rgb: lit }); });
     }
+    devils.forEach(m => { const u = m.userData, t = simClock;   // dust devils wander downwind, swaying
+      m.position.x = u.x0 + WX * t * 2 + 40 * Math.sin(t * 0.07 + u.ph); m.position.z = u.z0 + WZ * t * 2 + 40 * Math.cos(t * 0.05 + u.ph);
+      m.position.y = heightAt(m.position.x, m.position.z); m.rotation.z = 0.06 * Math.sin(t * 0.3 + u.ph); m.material.uniforms.uT.value = t; });
     if (stormT > 0) {   // the cloud keeps rolling out after touchdown
       stormT -= dt; const s = flight.s;
       for (let i = 0; i < 8; i++) { const a = rnd(0, Math.PI * 2), v = rnd(6, 20);
