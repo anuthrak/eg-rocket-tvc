@@ -101,19 +101,18 @@ export async function initLanding(step) {
     scene.add(sky);
   }
 
-  // ---------- Terrain (section 13): the floor of an old, large crater ----------
-  // The base sits on a broad, smooth plain 14 km west of the crater's centre. The crater wall (eroded, ~1.9 km high)
-  // rings the horizon 16–44 km out, with a gap in the north-west where an old river fan spills onto the floor. In the
-  // middle stands a big layered mound (Mount Sharp-like): east of the pad, behind the ship from the site camera. Layered
-  // buttes stand 3–10 km out, a dark crescent-dune field lies to the south-west, wind-carved ridges (yardangs) to the
-  // north-west, and craters (fresh with bright rays, old ones worn and sand-filled) trail dust streaks downwind.
+  // ---------- Terrain (section 13): open plains with layered mesas ----------
+  // The base sits on a broad, smooth plain. Big flat-topped mesas (benched cliffs in rock bands, embayed edges, rubble
+  // aprons, detached buttes) stand 6–15 km out, the largest due east behind the ship from the site camera; smaller layered
+  // buttes 3–10 km out; ridged mountain ranges, a field of far mesas and a canyon out to the horizon. A dark crescent-dune
+  // field lies to the south-west, wind-carved ridges (yardangs) to the north-west, and craters (fresh with bright rays,
+  // old ones worn and sand-filled) trail dust streaks downwind.
   const TERRAIN = {
-    crater: { x: 14000, z: 0, R: 30000, wall: 1900 },
-    mound: { H: 3200, rx: 7000, rz: 10500, band: 46 },
     wind: [0.6, 0.8],               // the way the wind blows (dunes' horns and the streaks point this way)
-    gap: 2.55,                      // rim gap (rad round the crater centre) for the river fan
     dunes: { x: -5200, z: -6400, r: 3600 }, yardangs: { x: -8600, z: 3800, r: 3400 },
-    buttes: [[3800, -2900, 430, 140], [5600, 2300, 620, 190], [-3400, 4400, 380, 120], [-4700, -2300, 300, 95], [2700, 5300, 360, 110], [8300, -1100, 820, 260], [9900, 3700, 520, 180]],
+    // [x, z, radius, height]: big mesas, then smaller buttes (the big ones split into pillars at their edges)
+    mesas: [[11500, 600, 2700, 420], [8600, -4200, 1300, 270], [14500, 5600, 1900, 360], [-9800, -8000, 2300, 300], [-13000, 6800, 1700, 280], [3200, -11500, 2000, 340], [6200, 12500, 2400, 380]],
+    buttes: [[3800, -2900, 430, 140], [5600, 2300, 620, 190], [-3400, 4400, 380, 120], [-4700, -2300, 300, 95], [2700, 5300, 360, 110], [7000, 900, 520, 180], [9200, 3900, 420, 150]],
     baseR: 900,                     // gentle ground round the pad, kept for the base (section 14)
   };
   const GRADE = [];                 // flattened footprints ({ x, z, r }), filled by the base (section 14)
@@ -146,35 +145,24 @@ export async function initLanding(step) {
     const dist = Math.hypot(x, z), T = TERRAIN;
     let h = 16 * fbm(x / 2600, z / 2600) + 1.6 * fbm(x / 420, z / 420) + 0.25 * fbm(x / 22, z / 22);   // smooth floor: broad swells
     let tone = 0, sand = 0, rimBright = 0;
-    // Crater wall: rises over the outer 16% of the radius, eroded into spurs and gullies, a gap for the fan; plateau outside
-    const cx = x - T.crater.x, cz = z - T.crater.z, cd = Math.hypot(cx, cz), q = cd / T.crater.R;
-    if (q > 0.78) {
-      let ga = Math.atan2(cz, cx) - T.gap; ga = Math.atan2(Math.sin(ga), Math.cos(ga));
-      const gapK = Math.exp(-((ga / 0.07) ** 2)), ero = 0.62 + 0.55 * ridged(x / 3200 + 7, z / 3200 - 2);
-      const wall = q < 1 ? Math.pow(sstep(0.84, 1, q), 1.5) : Math.exp(-(q - 1) * 10) * 0.75 + 0.25 + 0.08 * fbm(x / 5000, z / 5000);
-      h += T.crater.wall * wall * ero * (1 - 0.85 * gapK) + 220 * sstep(0.95, 1.0, q) * fbm(x / 900, z / 900);
-      tone += 0.05 * sstep(0.85, 1, q);
+    // Out to the horizon: ridged mountain ranges, a field of far mesas (benched), a canyon
+    if (dist > 4000) {
+      const kf = sstep(5000, 22000, dist);
+      const mtn = 1900 * Math.pow(ridged(x / 14000 + 3.1, z / 14000 - 1.7), 2.2) * kf * sstep(16000, 30000, dist);
+      const m = fbm(x / 6000 + 11, z / 6000 - 4), mesaF = terrace(520 * sstep(0.18, 0.26, m) * sstep(16000, 24000, dist), 40, 0.35);
+      const cy = z - 26000 - 6000 * Math.sin(x / 17000), canyon = -700 * Math.exp(-((cy / 2600) ** 2)) * sstep(9000, 20000, Math.abs(x) + 8000);
+      h += mtn + mesaF + canyon + 60 * fbm(x / 900, z / 900) * kf;
+      tone += (mtn > 300 ? -0.06 : 0) + (mesaF > 260 ? 0.05 : 0) + (canyon < -200 ? -0.08 : 0);
     }
-    // River fan: a low lobe spreading from the gap onto the floor, a meandering channel cut into it
-    { const gx = T.crater.x + T.crater.R * Math.cos(T.gap), gz = T.crater.z + T.crater.R * Math.sin(T.gap), fx = x - gx, fz = z - gz, fr = Math.hypot(fx, fz);
-      if (fr < 9000) { const ix = -Math.cos(T.gap), iz = -Math.sin(T.gap), s = fx * ix + fz * iz, t = fx * iz - fz * ix;
-        if (s > -500) { const lobe = Math.max(0, 1 - fr / 8500) * sstep(-500, 600, s) * Math.exp(-((t / (Math.max(s, 300) * 0.9 + 400)) ** 2));
-          h += 70 * Math.pow(lobe, 1.4); tone += 0.06 * lobe;
-          const t0 = 380 * Math.sin(s / 1400) + 160 * Math.sin(s / 520 + 1), ch = Math.exp(-(((t - t0) / 55) ** 2)) * sstep(-400, 300, s) * sstep(8000, 5000, s);
-          h -= 16 * ch; sand = Math.max(sand, 0.7 * ch); } } }
-    // The layered mound in the middle: elongated, concave flanks, terraced in rock bands, eroded canyons, buttes round its foot
-    { const mx = cx / T.mound.rx, mz = cz / T.mound.rz, mq = Math.hypot(mx, mz);
-      if (mq < 1.6) { const w = mq + 0.12 * fbm(x / 2200 + 3, z / 2200 - 5);
-        let hm = T.mound.H * Math.pow(Math.max(0, 1 - w), 1.45) * (0.88 + 0.16 * ridged(x / 4200 - 4, z / 4200 + 9));
-        hm = lerp(hm, terrace(hm, T.mound.band, 0.35), 0.6);
-        const foot = sstep(0.62, 0.74, fbm(x / 1400 + 5, z / 1400)) * sstep(1.45, 1.0, w) * sstep(0.85, 1.0, w) * 160;
-        h += hm + terrace(foot, 23); tone += 0.04 * sstep(1.0, 0.6, w); } }
-    // Layered buttes: warped outlines, benched sides, rubble aprons; the big ones split into pillars
-    for (const [bx, bz, br, bh] of T.buttes) {
+    // Mesas and buttes: warped, embayed outlines, flat tops, cliffs benched in rock bands, rubble aprons; the big ones
+    // break up at their edges into detached buttes and pillars
+    for (const list of [TERRAIN.mesas, TERRAIN.buttes]) for (const [bx, bz, br, bh] of list) {
       const dx = x - bx, dz = z - bz; if (Math.abs(dx) > br * 1.8 || Math.abs(dz) > br * 1.8) continue;
-      const bq = Math.hypot(dx, dz) / br + 0.3 * fbm(x / 240 + bx, z / 240);
-      const k = sstep(1.05, 0.82, bq), split = br > 500 ? 1 - 0.75 * sstep(0.35, 0.15, Math.abs(vnoise(x / 300 + 1.7, z / 300 - 2.3))) : 1;
-      h += lerp(bh * k * split, terrace(bh * k * split, 13, 0.35), 0.65) + bh * 0.22 * sstep(1.55, 1.0, bq) * (1 - k); tone += 0.03 * k;
+      const big = br > 1000, bq = Math.hypot(dx, dz) / br + (big ? 0.22 * fbm(x / 1400 + bx, z / 1400) + 0.12 * fbm(x / 380, z / 380 + bz) : 0.3 * fbm(x / 240 + bx, z / 240));
+      const k = sstep(1.05, big ? 0.95 : 0.82, bq);
+      const edge = big ? sstep(0.8, 1.05, bq) : 1, split = (big || br > 500) ? 1 - 0.8 * edge * sstep(0.32, 0.12, Math.abs(vnoise(x / (big ? 420 : 300) + 1.7, z / (big ? 420 : 300) - 2.3))) : 1;
+      const top = bh * k * split * (1 + (big ? 0.04 * fbm(x / 700, z / 700) : 0));
+      h += lerp(top, terrace(top, Math.max(13, bh / 14), 0.35), 0.7) + bh * 0.22 * sstep(1.55, 1.0, bq) * (1 - k); tone += 0.03 * k;
     }
     // Yardangs: long streamlined ridges lined up with the wind
     { const dx = x - T.yardangs.x, dz = z - T.yardangs.z, yr = Math.hypot(dx, dz) / T.yardangs.r;
