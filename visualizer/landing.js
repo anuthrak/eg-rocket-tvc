@@ -101,18 +101,22 @@ export async function initLanding(step) {
     scene.add(sky);
   }
 
-  // ---------- Terrain (section 13): open plains with layered mesas ----------
-  // The base sits on a broad, smooth plain. Big flat-topped mesas (benched cliffs in rock bands, embayed edges, rubble
-  // aprons, detached buttes) stand 6–15 km out, the largest due east behind the ship from the site camera; smaller layered
-  // buttes 3–10 km out; ridged mountain ranges, a field of far mesas and a canyon out to the horizon. A dark crescent-dune
-  // field lies to the south-west, wind-carved ridges (yardangs) to the north-west, and craters (fresh with bright rays,
-  // old ones worn and sand-filled) trail dust streaks downwind.
+  // ---------- Terrain (section 13): a broad valley between two mesa walls ----------
+  // The base sits on the floor of a valley ~4 km wide running north–south (the approach comes down it). Two long mesa
+  // walls (260–310 m, cliffs broken by side canyons, loose buttes off their edges, rubble fans at their feet) close it on
+  // either side; the valley floor rolls, a dry riverbed winds down it east of the pad, low outcrops and small buttes stand
+  // on it, a dark crescent-dune field lies to the south. On the plateaus: big layered mesas 6–15 km out (the largest due
+  // east, behind the ship from the site camera, which stands on the west rim), wind-carved ridges to the north-west; then
+  // ridged ranges, a field of far mesas and a canyon to the horizon. Craters (fresh: bright rays; old: worn, sand-filled)
+  // trail dust streaks downwind.
   const TERRAIN = {
     wind: [0.6, 0.8],               // the way the wind blows (dunes' horns and the streaks point this way)
-    dunes: { x: -5200, z: -6400, r: 3600 }, yardangs: { x: -8600, z: 3800, r: 3400 },
-    // [x, z, radius, height]: big mesas, then smaller buttes (the big ones split into pillars at their edges)
-    mesas: [[11500, 600, 2700, 420], [8600, -4200, 1300, 270], [14500, 5600, 1900, 360], [-9800, -8000, 2300, 300], [-13000, 6800, 1700, 280], [3200, -11500, 2000, 340], [6200, 12500, 2400, 380]],
-    buttes: [[3800, -2900, 430, 140], [5600, 2300, 620, 190], [-3400, 4400, 380, 120], [-4700, -2300, 300, 95], [2700, 5300, 360, 110], [7000, 900, 520, 180], [9200, 3900, 420, 150]],
+    west: { x: -1850, wan: 380, h: 260, seed: 3.3, canyon: 620 }, east: { x: 2050, wan: 420, h: 310, seed: 8.1, canyon: 780 },   // valley walls: edge x, wander, height, canyon spacing
+    river: [650, 300, 2600, 120, 800],   // dry riverbed: x = a + b·sin(z/c) + d·sin(z/e + 1)
+    dunes: { x: 300, z: -7600, r: 1500 }, yardangs: { x: -6500, z: 2500, r: 2500 },
+    // [x, z, radius, height]: big mesas on the plateaus, then small buttes on the valley floor
+    mesas: [[11500, 600, 2700, 420], [8600, -5200, 1300, 270], [14500, 5600, 1900, 360], [-9800, -8000, 2300, 300], [-13000, 6800, 1700, 280], [6200, 12500, 2400, 380]],
+    buttes: [[-900, 2600, 160, 60], [1100, -3400, 200, 75], [700, 5200, 140, 55], [-1100, -6000, 220, 80], [-600, 9000, 260, 90], [400, -11000, 300, 95]],
     baseR: 900,                     // gentle ground round the pad, kept for the base (section 14)
   };
   const GRADE = [];                 // flattened footprints ({ x, z, r }), filled by the base (section 14)
@@ -140,11 +144,47 @@ export async function initLanding(step) {
       craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 0.8 + 0.2 * r01(), r01() * 6.28]);
     }
   }
-  // Returns [height, rim brightness, tone offset, dark sand 0..1]
+  // The valley walls: [height, talus 0..1]. Each edge wanders and is cut back by side canyons; loose buttes stand off it
+  const WALLS = [[-1, TERRAIN.west], [1, TERRAIN.east]].map(([s, W]) => {   // the parts that depend on z only, tabled every 8 m
+    const n = 30001, e = new Float32Array(n), H = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const z = (i - 15000) * 8; e[i] = W.x + W.wan * fbm(z / 3800 + W.seed, W.seed) + 140 * fbm(z / 700 + W.seed * 2, 3.1); H[i] = W.h * (0.75 + 0.35 * fbm(z / 5000 + W.seed, 7)); }
+    return { s, W, e, H };
+  });
+  const wz = (A, z) => { const f = clamp(z / 8 + 15000, 0, 29999.999), i = f | 0, t = f - i; return A[i] + (A[i + 1] - A[i]) * t; };
+  function wallAt(x, z) {
+    let h = 0, tal = 0;
+    for (const { s, W, e: E, H: HH } of WALLS) {
+      const e = wz(E, z), sx = s * (x - e);   // > 0: plateau side
+      if (sx < -1200) continue;
+      const notch = sx < 1800 ? Math.pow(Math.max(0, 1 - Math.abs(Math.sin(z / W.canyon + 1.7 * fbm(x / 900, z / 900 + W.seed)))), 14) * sstep(1800, 300, sx) * 850 : 0;
+      const H = wz(HH, z);
+      const cliff = sstep(-120, 120, sx - notch);
+      const butte = sx > -900 && sx < -100 && cliff < 1 ? sstep(0.6, 0.7, fbm(x / 420 + W.seed, z / 420)) * sstep(-900, -200, sx) * (1 - cliff) : 0;
+      const t = sstep(-520, -60, sx) * (1 - cliff) * (1 - butte);
+      h += H * (cliff + 0.85 * butte) * (cliff + butte > 0.01 ? 1 + 0.05 * fbm(x / 600, z / 600) : 1) + H * 0.2 * Math.pow(t, 1.5);
+      tal = Math.max(tal, t);
+    }
+    return [h, tal];
+  }
+  // Craters binned on a 1 km grid (each listed in every cell its reach overlaps), so a point only checks its own cell
+  const CB = 1000, CG = 34, cbin = Array.from({ length: CG * CG }, () => []);
+  for (const c of craters) { const ext = c[2] * (c[2] > 60 ? 7.5 : 2.2);
+    for (let i = Math.max(0, Math.floor((c[0] - ext) / CB) + CG / 2); i <= Math.min(CG - 1, Math.floor((c[0] + ext) / CB) + CG / 2); i++)
+      for (let j = Math.max(0, Math.floor((c[1] - ext) / CB) + CG / 2); j <= Math.min(CG - 1, Math.floor((c[1] + ext) / CB) + CG / 2); j++) cbin[j * CG + i].push(c); }
+  const NOC = [];
+  // Returns [height, rim brightness, tone offset, dark sand 0..1, talus 0..1]
   function terrain(x, z) {
     const dist = Math.hypot(x, z), T = TERRAIN;
-    let h = 16 * fbm(x / 2600, z / 2600) + 1.6 * fbm(x / 420, z / 420) + 0.25 * fbm(x / 22, z / 22);   // smooth floor: broad swells
-    let tone = 0, sand = 0, rimBright = 0;
+    const nearK = dist < 20000;   // fine detail only where it can be seen
+    let h = 16 * fbm(x / 2600, z / 2600) + 26 * fbm(x / 1300 + 4, z / 1300)
+      + (nearK ? 9 * Math.pow(ridged(x / 700, z / 1100), 3) + 1.6 * fbm(x / 420, z / 420) + (dist < 3000 ? 0.25 * fbm(x / 22, z / 22) : 0) : 0);   // rolling floor: rises, swales, low ridges
+    let tone = 0, sand = 0, rimBright = 0, talus = 0;
+    { const [wh, wt] = wallAt(x, z); h += wh; talus = wt; tone += 0.04 * wt; }
+    // Dry riverbed winding down the valley east of the pad: a sandy bed between low banks
+    { const R = T.river, dxr = x - (R[0] + R[1] * Math.sin(z / R[2]) + R[3] * Math.sin(z / R[4] + 1));
+      if (Math.abs(dxr) < 300) { h += -9 * Math.exp(-((dxr / 45) ** 2)) + 1.8 * Math.exp(-((dxr / 110) ** 2)); sand = Math.max(sand, 0.85 * Math.exp(-((dxr / 60) ** 2))); } }
+    // Low rock outcrops on the floor (none near the pad)
+    if (dist > 500 && dist < 12000) { const o = sstep(0.68, 0.8, fbm(x / 220 + 9, z / 220 - 4)) * sstep(500, 900, dist); h += 7 * o; tone -= 0.03 * o; }   // (sand/dust patches and streaks: in the ground shader)
     // Out to the horizon: ridged mountain ranges, a field of far mesas (benched), a canyon
     if (dist > 4000) {
       const kf = sstep(5000, 22000, dist);
@@ -162,7 +202,7 @@ export async function initLanding(step) {
       const k = sstep(1.05, big ? 0.95 : 0.82, bq);
       const edge = big ? sstep(0.8, 1.05, bq) : 1, split = (big || br > 500) ? 1 - 0.8 * edge * sstep(0.32, 0.12, Math.abs(vnoise(x / (big ? 420 : 300) + 1.7, z / (big ? 420 : 300) - 2.3))) : 1;
       const top = bh * k * split * (1 + (big ? 0.04 * fbm(x / 700, z / 700) : 0));
-      h += lerp(top, terrace(top, Math.max(13, bh / 14), 0.35), 0.7) + bh * 0.22 * sstep(1.55, 1.0, bq) * (1 - k); tone += 0.03 * k;
+      h += lerp(top, terrace(top, Math.max(13, bh / 14), 0.35), 0.7 * sstep(5000, 2500, dist)) + bh * 0.22 * sstep(1.55, 1.0, bq) * (1 - k); tone += 0.03 * k;   // geometric benches only up close (far away they alias: the strata come from colour)
     }
     // Yardangs: long streamlined ridges lined up with the wind
     { const dx = x - T.yardangs.x, dz = z - T.yardangs.z, yr = Math.hypot(dx, dz) / T.yardangs.r;
@@ -180,7 +220,8 @@ export async function initLanding(step) {
           const hd = 19 * sc * Math.max(0, prof) * Math.pow(Math.max(0, across), 0.7) * env;
           h += hd; sand = Math.max(sand, Math.min(1, 0.55 * env + hd / 10)); } } }
     // Craters: bowl, raised rim, debris apron; fresh ones get bright rays, old ones fill with sand; dust streaks downwind
-    for (const [ccx, ccz, R, f, sd] of craters) {
+    const ci = Math.floor(x / CB) + CG / 2, cj = Math.floor(z / CB) + CG / 2;
+    for (const [ccx, ccz, R, f, sd] of (ci >= 0 && ci < CG && cj >= 0 && cj < CG ? cbin[cj * CG + ci] : NOC)) {
       const dx = x - ccx, dz = z - ccz, big = R > 60, ext = R * (big ? 7.5 : 2.2);
       if (Math.abs(dx) > ext || Math.abs(dz) > ext) continue;
       const cq = Math.hypot(dx, dz) / R;
@@ -196,18 +237,18 @@ export async function initLanding(step) {
     for (const g of GRADE) { const gd = Math.hypot(x - g.x, z - g.z); if (gd < g.r + 60) h = lerp(h, g.h ?? 0, sstep(g.r + 60, g.r, gd)); }
     h -= dist * dist / (2 * 3389.5e3);   // the planet's curve
     const flat = sstep(40, 110, dist);
-    return [h * flat, rimBright * flat, tone, sand * flat];
+    return [h * flat, rimBright * flat, tone, sand * flat, talus];
   }
   const heightAt = (x, z) => terrain(x, z)[0];
   const groundU = { uGShadow: { value: new THREE.Color() }, uGMid: { value: new THREE.Color() }, uGLit: { value: new THREE.Color() },
     uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() }, uSunDir: { value: SUN }, uTime: { value: 0 } };
   const buildGround = () => {
-    const N = 480, geo = new THREE.PlaneGeometry(2, 2, N, N); geo.rotateX(-Math.PI / 2);
+    const N = 560, geo = new THREE.PlaneGeometry(2, 2, N, N); geo.rotateX(-Math.PI / 2);
     const P = geo.attributes.position, uv = geo.attributes.uv, col = new Float32Array(P.count * 3), N1 = N + 1;
-    const warp = u => Math.sign(u) * (160 * Math.abs(u) + 1400 * u * u + 108000 * Math.abs(u) ** 6);   // 0.7 m at the pad … 110 km out
-    const tones = new Float32Array(P.count), sandA = new Float32Array(P.count), H = new Float32Array(P.count);
+    const warp = u => { const a = Math.abs(u); return Math.sign(u) * (200 * a + 3000 * a * a + 30000 * a ** 3 + 77000 * a ** 8); };   // 0.7 m at the pad, ~50 m at 2 km, ~120 m at 6 km … 110 km out
+    const tones = new Float32Array(P.count), sandA = new Float32Array(P.count), talA = new Float32Array(P.count), H = new Float32Array(P.count);
     for (let i = 0; i < P.count; i++) {
-      const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone, sand] = terrain(x, z);
+      const x = warp(P.getX(i)), z = warp(P.getZ(i)), [h, rim, tone, sand, tal] = terrain(x, z); talA[i] = tal;
       P.setXYZ(i, x, h, z); H[i] = h;
       tones[i] = 0.55 + 0.12 * fbm(x / 500 + 9, z / 500) + 0.3 * rim + 0.18 * fbm(x / 3000, z / 3000) + tone * 3;   // soft dust mottling
       sandA[i] = sand; uv.setXY(i, x / 7, z / 7);
@@ -224,7 +265,7 @@ export async function initLanding(step) {
     const sl = Math.hypot(SUN.x, SUN.z), sx = SUN.x / sl, sz = SUN.z / sl, tanE = SUN.y / sl, shade = new Float32Array(P.count);
     for (let i = 0; i < P.count; i++) {
       const x = P.getX(i), z = P.getZ(i), h0 = H[i] + 0.5; let m = -1;
-      for (let k = 0, d = 4; k < 52 && d < 40000; k++, d *= 1.19) { const s = (hAt(x + sx * d, z + sz * d) - h0) / d + d / (2 * 3389.5e3); if (s > m) m = s; }
+      for (let k = 0, d = 4; k < 44 && d < 40000; k++, d *= 1.23) { const s = (hAt(x + sx * d, z + sz * d) - h0) / d + d / (2 * 3389.5e3); if (s > m) m = s; }
       const lit = 1 - sstep(-0.025, 0.035, m - tanE);
       const ix = i % N1, iz = (i / N1) | 0, a = Math.max(ix - 3, 0), b = Math.min(ix + 3, N), c = Math.max(iz - 3, 0), e = Math.min(iz + 3, N);
       const span = Math.max(1, (Math.abs(ws[b] - ws[a]) + Math.abs(ws[e] - ws[c])) / 2);
@@ -238,8 +279,8 @@ export async function initLanding(step) {
       col.set([clamp(tones[i], 0, 1), clamp((1 - N_.getY(i)) * 4, 0, 1), sstep(2000, 30000, d)], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    const extra = new Float32Array(P.count * 3); for (let i = 0; i < P.count; i++) extra.set([sandA[i], shade[i], ao[i]], i * 3);
-    geo.setAttribute('aG', new THREE.BufferAttribute(extra, 3));   // x: dark sand, y: sun (baked terrain shadow), z: hollow darkening
+    const extra = new Float32Array(P.count * 4); for (let i = 0; i < P.count; i++) extra.set([sandA[i], shade[i], ao[i], talA[i]], i * 4);
+    geo.setAttribute('aG', new THREE.BufferAttribute(extra, 4));   // x: dark sand, y: sun (baked terrain shadow), z: hollow darkening, w: talus (boulder fields)
     return geo;
   };
   {
@@ -257,8 +298,8 @@ export async function initLanding(step) {
     const gMat = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: bump, bumpScale: 2.2, roughness: 1, metalness: 0 });
     gMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, groundU);
-      sh.vertexShader = 'attribute vec3 aG; varying vec3 vGW; varying vec3 vAG;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz; vAG = aG;');
-      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock, uSunDir; uniform float uTime; varying vec3 vGW; varying vec3 vAG;
+      sh.vertexShader = 'attribute vec4 aG; varying vec3 vGW; varying vec4 vAG;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz; vAG = aG;');
+      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock, uSunDir; uniform float uTime; varying vec3 vGW; varying vec4 vAG;
         float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(gh(i), gh(i + vec2(1, 0)), f.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), f.x), f.y); }
@@ -269,11 +310,17 @@ export async function initLanding(step) {
           vec3 base = mix(uGShadow, uGMid, smoothstep(0.0, 0.42, t));
           base = mix(base, uGLit, smoothstep(0.42, 0.82, t));
           base = mix(base, uGHigh, smoothstep(0.86, 1.0, t) * 0.55);
-          float band = (0.5 + 0.5 * sin(vGW.y / 9.0 + 2.0 * gf(w / 900.0))) * (0.75 + 0.25 * sin(vGW.y / 2.7 + 1.3));   // rock strata, level across buttes
-          vec3 rock = mix(mix(uGRock, uGMid, 0.45) * 1.25, mix(uGMid, uGHigh, 0.5) * 0.95, 0.15 + 0.7 * band);
+          float camD0 = distance(cameraPosition, vGW);
+          float band = (0.5 + 0.5 * sin(vGW.y / 9.0 + 2.0 * gf(w / 900.0))) * (1.0 - 0.25 * (1.0 - smoothstep(300.0, 1500.0, camD0)) * (0.5 - 0.5 * sin(vGW.y / 2.7 + 1.3)));   // rock strata, level across buttes (fine layers only up close)
+          vec3 rock = mix(mix(uGRock, uGMid, 0.55) * 1.3, mix(uGMid, uGHigh, 0.5) * 0.95, 0.3 + 0.35 * band);   // gentle strata, not stripes
           base = mix(base, rock, smoothstep(0.3, 0.75, sl) * 0.75);
           vec3 sandC = mix(uGRock, uGShadow, 0.4) * 1.35 * vec3(0.92, 0.95, 1.05);
-          base = mix(base, sandC, clamp(vAG.x, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.7, sl)) * 0.85);
+          // Big patches that read from height: dark sand sheets, bright dust, wind streaks
+          float sandP = max(vAG.x, 0.45 * smoothstep(0.5, 0.68, gf(w / 1700.0 + vec2(2.0, -6.0))));
+          base *= 1.0 + 0.16 * smoothstep(0.45, 0.7, gf(w / 2200.0 + vec2(-3.0, 5.0))) * (1.0 - sandP);
+          vec2 wuv = vec2(dot(w, vec2(0.6, 0.8)) / 5000.0, dot(w, vec2(0.8, -0.6)) / 500.0);
+          base *= 1.0 + 0.12 * smoothstep(0.62, 0.82, gf(wuv + 1.0));
+          base = mix(base, sandC, clamp(sandP, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.7, sl)) * 0.85);
           base *= 0.86 + 0.28 * gf(w / 2500.0 + 7.0);                                           // broad tone variation
           // Near the camera: 2 m and 25 cm mottling, pebbles, sand ripples in the low sandy spots (fade with distance)
           float nk = 1.0 - smoothstep(60.0, 1600.0, camD), fk = 1.0 - smoothstep(8.0, 160.0, camD);
@@ -281,6 +328,8 @@ export async function initLanding(step) {
           base *= mix(1.0, 0.62, smoothstep(0.83, 0.9, gn(w / 0.35 + 3.0)) * fk * (1.0 - vAG.x));      // pebbles
           float rip = sin(dot(w, vec2(0.8, -0.6)) / 0.55 + 3.0 * gn(w / 6.0));   // crests across the wind
           base *= 1.0 + 0.07 * rip * fk * clamp(vAG.x * 1.6 - 0.1, 0.0, 1.0);   // only where there is loose sand
+          // Boulder fields at the foot of the cliffs: dark speckle that reads from afar (real rocks up close)
+          base *= 1.0 - 0.38 * vAG.w * smoothstep(0.55, 0.75, gn(w / 7.0)) - 0.12 * vAG.w;
           // Baked light: terrain shadow on the sun term, hollows a little darker; drifting cloud shadows
           float sunL = mix(0.42, 1.0, vAG.y) * vAG.z;
           float cs = smoothstep(0.56, 0.78, gf((w + uTime * vec2(7.0, 5.0)) / 2800.0));
@@ -383,7 +432,10 @@ export async function initLanding(step) {
       const n = Math.min(90, Math.round(R * 2.2 * f));
       for (let i = 0; i < n; i++) { const a = r01() * 6.28, rr = R * (0.85 + Math.pow(r01(), 1.6) * 1.6); pts.push([cx + Math.cos(a) * rr, cz + Math.sin(a) * rr, (0.2 + Math.pow(r01(), 2.6) * 1.6) * Math.min(1.6, 0.5 + R / 25)]); }
     }
-    while (pts.length < 11000) {   // the open plain: sparse, a few big ones
+    for (let i = 0, n = 0; i < 40000 && n < 3600; i++) {   // boulder fields at the foot of the valley walls (fallen from the cliffs)
+      const x = (r01() < 0.5 ? -1 : 1) * (1300 + r01() * 1500), z = (r01() - 0.5) * 9000, t = wallAt(x, z)[1];
+      if (t > 0.3 && r01() < t) { pts.push([x, z, 0.4 + Math.pow(r01(), 2.2) * 4.5]); n++; } }
+    while (pts.length < 14600) {   // the open floor: sparse, a few big ones
       const a = r01() * 6.28, d = L.PAD_R + 12 + Math.pow(r01(), 1.7) * 1600, big = r01() < 0.03;
       pts.push([Math.cos(a) * d, Math.sin(a) * d, big ? 2 + r01() * 3.5 : 0.18 + Math.pow(r01(), 2.4) * 1.8]);
     }
@@ -2051,10 +2103,13 @@ export async function initLanding(step) {
   // (× frame height, keeps it above the HUD), pad/padY: how much the aim holds the pad area (wide), aim: pan easing rate
   const TVC_CAM = {
     wideH: 1000, teleH: 250, padH: 40,
-    siteT: { x: -2200, z: 350, h: 400, fov: 12, drop: 0.1, aim: 4 },
-    siteW: { x: -2200, z: 350, h: 400, fov: 32, drop: 0, padK: 0, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
+    siteT: { x: -2900, z: 350, h: 25, fov: 12, drop: 0.1, aim: 4 },   // on the west rim of the valley
+    siteW: { x: -2900, z: 350, h: 25, fov: 30, drop: 0, padK: 0, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
     tele: { x: -330, z: 60, h: 2, fov: 25, drop: 0.14, aim: 4 },
   };
+  { const e = wz(WALLS[0].e, TVC_CAM.siteT.z); let bx = e - 70, bh = -1e9;   // stand just back from the west rim's edge, on its highest point
+    for (let x = e - 260; x <= e - 40; x += 10) { const hh = heightAt(x, TVC_CAM.siteT.z); if (hh > bh) { bh = hh; bx = x; } }
+    TVC_CAM.siteT.x = TVC_CAM.siteW.x = bx; }
   const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3();
 
 
