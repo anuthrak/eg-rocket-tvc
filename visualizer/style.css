@@ -723,23 +723,20 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 @keyframes lnd-dig-out { to { opacity: 0; } }
 .lnd-prompt.now { color: #fff; }   /* eases amber → white once and holds */
 .lnd-prompt.bad { color: var(--warn); }   /* loss of control, tipping over, legs collapsed */
-.lnd-inset { position: absolute; left: clamp(12px, 2.4vw, 30px); bottom: 150px; width: clamp(150px, 15vw, 210px); aspect-ratio: 1;
-  border: 1px solid rgba(255,255,255,.2); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
-  transition: border-color .6s ease, box-shadow .6s ease; animation: lnd-fade-in .6s ease-out both; }
+.lnd-inset { position: absolute; left: clamp(12px, 2.4vw, 30px); bottom: 162px; width: clamp(120px, 11vw, 160px); aspect-ratio: 1;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 8px; pointer-events: none;
+  transition: opacity .4s ease; animation: lnd-fade-in .4s ease-out both; }
+.lnd-inset.out { opacity: 0; }
 @keyframes lnd-fade-in { from { opacity: 0; } }
 .lnd-inset[hidden] { display: none; }
-.lnd-inset.cue { border-color: rgba(245,166,35,.75); }   /* one soft fade to amber, held */
-.lnd-inset.push { border-color: rgba(255,150,80,.5); box-shadow: 0 0 0 1px rgba(0,0,0,.35), inset 0 0 14px rgba(255,138,61,.18); }
-.lnd-inset-l { position: absolute; left: 8px; top: 6px; font: 600 10px var(--label); letter-spacing: .14em; color: rgba(255,255,255,.75); }
+.lnd-inset-l { position: absolute; left: 8px; right: 6px; top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 9px var(--label); letter-spacing: .12em; color: rgba(255,255,255,.75); }
 .lnd-inset.live .lnd-inset-l { color: var(--ok); }
-.lnd-inset-k { position: absolute; left: 8px; right: 8px; bottom: 6px; display: flex; justify-content: space-between; font: 500 10px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.lnd-inset-k { position: absolute; left: 8px; right: 8px; bottom: 6px; display: flex; justify-content: space-between; white-space: nowrap; font: 500 9px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
 .lnd-inset-k .p b { color: var(--pitch); } .lnd-inset-k .y b { color: var(--yaw); }
-.lnd-tag { position: absolute; transform: translate(0, -50%); padding: 5px 9px; border-left: 2px solid var(--ok); background: rgba(10,12,16,.55);
-  font: 600 14px var(--cond); letter-spacing: .1em; color: #fff; white-space: nowrap; pointer-events: none; animation: lnd-tag .4s ease-out both; transition: opacity .4s; }
-.lnd-tag.out { opacity: 0; }
-.lnd-tag[hidden] { display: none; }
-.lnd-tag.warn { border-color: var(--amber); } .lnd-tag.bad { border-color: var(--warn); color: var(--warn); }
-@keyframes lnd-tag { from { opacity: 0; transform: translate(-8px, -50%); } }
+.lnd-push { min-height: 15px; margin-top: 5px; font: 600 12px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: #fff; white-space: nowrap;
+  opacity: 0; transition: opacity .6s; }   /* push result under the TVC dial; fades out */
+.lnd-push.on { opacity: 1; }
+.lnd-push b { color: var(--ok); } .lnd-push.warn b { color: var(--amber); } .lnd-push.bad { color: var(--warn); }
 #landing .lnd-feed { display: none; }   /* pushes now show as a tag beside the ship (and in the result card) */
 
 @media (max-width: 760px) {
@@ -774,9 +771,6 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 .lnd-warp { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid var(--amber); border-radius: 4px;
   font: 600 11px var(--cond); letter-spacing: .2em; text-transform: uppercase; color: var(--amber); }
 .lnd-warp[hidden] { display: none; }
-.lnd-replay { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); padding: 4px 14px; border: 1px solid rgba(255,255,255,.5);
-  border-radius: 4px; background: rgba(0,0,0,.45); font: 600 13px var(--cond); letter-spacing: .3em; color: #fff; text-shadow: none; }
-.lnd-replay[hidden] { display: none; }
 .lnd-paused { display: none; position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); padding: 10px 28px;
   border: 1px solid rgba(255,255,255,.6); border-radius: 8px; background: rgba(0,0,0,.4); backdrop-filter: blur(4px);
   font: 700 26px var(--cond); letter-spacing: .4em; color: #fff; text-shadow: none; }
