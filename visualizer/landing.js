@@ -327,7 +327,7 @@ export async function initLanding(step) {
   // ---------- The ship: a Starship-style upper stage, 50 m x 9 m, built in code ----------
   // Stainless body with a black tiled heat shield on the belly (+x side), forward and aft flaps on the ±z sides that
   // move in the belly flop, three gimballed sea-level engines in the middle (the TVC) and three fixed vacuum bells.
-  const R = L.SHIP.D / 2, LEN = L.SHIP.L, BARREL = 37;    // body radius, length, where the nose starts (m from the tail)
+  const R = L.SHIP.D / 2, LEN = L.SHIP.L, BARREL = 33;    // body radius, length, where the nose starts (m from the tail)
   const TAIL = 0.4 * LEN, NOSE = LEN - TAIL;              // CG above the tail / below the nose tip
   const BELL = 2.6;                                       // sea-level bell length below the engine plane
   const ship = new THREE.Group(); ship.rotation.order = 'XZY'; scene.add(ship);
@@ -377,43 +377,87 @@ export async function initLanding(step) {
     dark: new THREE.MeshStandardMaterial({ color: 0x1a1a1d, metalness: 0.5, roughness: 0.5 }),
     window: new THREE.MeshStandardMaterial({ color: 0x0b0d12, metalness: 0.9, roughness: 0.1 }),
   };
-  // Body profile: barrel, then an ogive to a blunt tip
+  // Body profile (section 3 model): the barrel with the aft skirt hanging 1 m below the engine plane, then a tangent ogive
+  // (17 m) cut where it narrows to ~1.1 m and closed with a flat elliptical cap: the blunt tiled tip
+  const SKIRT = 1.0, NOSE_L = LEN - BARREL;
   const prof = [];
-  for (let i = 0; i <= 12; i++) prof.push(new THREE.Vector2(R, BARREL * i / 12));
-  for (let i = 1; i <= 24; i++) { const u = i / 24; prof.push(new THREE.Vector2(Math.max(R * Math.pow(1 - Math.pow(u, 2.1), 0.62), 0.05), BARREL + (LEN - BARREL) * u)); }
-  const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 72, Math.PI, Math.PI), M.steel);   // the back (-x) half
-  const shield = new THREE.Mesh(new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x + 0.04, p.y)), 72, 0, Math.PI), M.tiles);   // the belly (+x) half
-  const base = new THREE.Mesh(new THREE.CircleGeometry(R, 48), M.dark); base.rotation.x = Math.PI / 2;
-  [body, shield].forEach(m => { m.castShadow = true; m.receiveShadow = true; airframe.add(m); });
+  for (let i = 0; i <= 18; i++) prof.push(new THREE.Vector2(R, -SKIRT + (BARREL + SKIRT) * i / 18));
+  const RHO = (R * R + NOSE_L * NOSE_L) / (2 * R);
+  const noseR = y => y <= BARREL ? R : Math.max(0, Math.sqrt(Math.max(0, RHO * RHO - (y - BARREL) ** 2)) + R - RHO);   // radius at height y
+  { let yc = BARREL;
+    for (let i = 1; i <= 24; i++) { const y = BARREL + (NOSE_L - 0.7) * i / 24, r = noseR(y); prof.push(new THREE.Vector2(r, y)); yc = y; if (r < 1.1) break; }
+    const rc = prof[prof.length - 1].x, hc = LEN - yc;
+    for (let i = 1; i <= 6; i++) { const a = i / 6 * Math.PI / 2; prof.push(new THREE.Vector2(Math.max(rc * Math.cos(a), 0.02), yc + hc * Math.sin(a))); } }
+  const vByY = (g, k = 1) => { const p = g.attributes.position, uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setY(i, (p.getY(i) + SKIRT) / (LEN + SKIRT) * k); return g; };
+  const scaleUV = (g, su, sv) => { const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv); return g; };
+  // Tiles: the windward half and ~9° further round each side, the edge ragged (alpha steps per tile row); the steel runs
+  // under that ragged band so it shows through the gaps
+  const SH0 = -0.15, SHL = Math.PI + 0.3, EDGE = 0.12;
+  M.shield = M.tiles.clone(); M.shield.emissive = M.tiles.emissive;
+  M.shield.alphaMap = (() => { const W = 512, H = 128, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#000'; const e = EDGE / SHL * W;
+    for (let r = 0; r < H; r++) { g.fillRect(0, r, Math.round(Math.random() * e), 1); const b = Math.round(Math.random() * e); g.fillRect(W - b, r, b, 1); }
+    return new THREE.CanvasTexture(c); })();
+  M.shield.alphaTest = 0.5;
+  M.tilesS = M.tiles.clone(); M.tilesS.emissive = M.tiles.emissive; M.tilesS.side = THREE.DoubleSide;   // tiles on small parts: uv in metres
+  M.tilesS.map = M.tiles.map.clone(); M.tilesS.map.repeat.set(0.42, 0.42); M.tilesS.map.needsUpdate = true;
+  const TILE_MATS = [M.tiles, M.shield, M.tilesS];
+  const body = new THREE.Mesh(vByY(new THREE.LatheGeometry(prof, 96, Math.PI + 0.03, Math.PI - 0.06)), M.steel);   // leeward steel
+  const shield = new THREE.Mesh(vByY(new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x + 0.04, p.y)), 96, SH0, SHL)), M.shield);
+  const tipGeo = new THREE.LatheGeometry(prof.filter(p => p.y >= LEN - 2.6).map(p => new THREE.Vector2(p.x + 0.045, p.y)), 48);
+  const tip = new THREE.Mesh(scaleUV(tipGeo, 9, 2.6), M.tilesS);                                                    // the tiled tip, all round
+  const base = new THREE.Mesh(new THREE.CircleGeometry(R - 0.02, 48), M.dark); base.rotation.x = Math.PI / 2; base.position.y = 0.6;   // aft heat shield
+  [body, shield, tip].forEach(m => { m.castShadow = true; m.receiveShadow = true; airframe.add(m); });
   airframe.add(base);
-  // A row of windows near the nose, on the steel side
-  for (let i = 0; i < 6; i++) {
-    const w = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.5, 2.2), M.window);
-    w.position.set(-R * Math.cos(0.35) - 0.02, BARREL - 1 - i * 1.15, R * Math.sin(0.35)); w.rotation.y = -0.35; airframe.add(w);
-  }
-  // Flaps: a hinge along the body at each side (±z), the panel sticking out sideways. Deflection is about that hinge.
-  function flapGeo(root0, root1, span, tip0, tip1) {
-    const sh = new THREE.Shape(); sh.moveTo(0, root0); sh.lineTo(0, root1); sh.lineTo(span, tip1); sh.lineTo(span, tip0); sh.closePath();
-    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.4, bevelEnabled: false }); g.translate(0, 0, -0.2); return g;
+  // Flaps: hinged along the body on the leeward side of the beam (forward ~108°, aft ~100° from the belly), the panel sticking
+  // out; tiles on the windward face, a fairing over each hinge. Forward: small and swept, the root following the nose.
+  function flapGeo(pts, depth = 0.35) {
+    const sh = new THREE.Shape(); sh.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(p => sh.lineTo(p[0], p[1])); sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: false }); g.translate(0, 0, -depth / 2); return { g, sh };
   }
   const flaps = [];
   for (const [side, fwd] of [[1, true], [-1, true], [1, false], [-1, false]]) {
-    const hinge = new THREE.Group();
-    hinge.position.set(0.35, 0, side * R * 0.98);
-    hinge.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;   // local +x points out of the side
-    const geo = fwd ? flapGeo(BARREL - 1.5, BARREL + 7, 4.4, BARREL + 0.5, BARREL + 4.8) : flapGeo(1.2, 13, 6.6, 0.4, 7.8);
-    const m = new THREE.Mesh(geo, M.flap); m.castShadow = true;
-    const pivot = new THREE.Group(); pivot.add(m); hinge.add(pivot); airframe.add(hinge);
+    const phi = side * (fwd ? 108 : 100) * DEG, y0 = fwd ? BARREL + 1 : 1.0, y1 = fwd ? BARREL + 8.5 : 14;
+    const Rh = noseR(y0) - 0.05, ax = noseR(y0) - Rh, bx = noseR(y1) - Rh;
+    const pts = fwd ? [[ax, y0], [bx, y1], [bx + 1.1, y1 - 0.5], [bx + 2.6, y1 - 2.6], [ax + 3.7, y0 + 1.7], [ax + 3.5, y0 + 0.4], [ax + 2.8, y0 - 0.2]]
+      : [[0, y0], [0, y1], [1.5, y1 - 0.4], [3.6, y1 - 1.8], [5.5, y1 - 4.2], [6.5, y1 - 6.5], [6.8, y1 - 9.2], [6.5, 1.4], [5.6, 0.5], [3, 0.4]];
+    const hinge = new THREE.Group(); hinge.position.set(Math.cos(phi) * Rh, 0, Math.sin(phi) * Rh); hinge.rotation.y = -phi;
+    const { g, sh } = flapGeo(pts);
+    const m = new THREE.Mesh(g, M.flap); m.castShadow = true;
+    const plate = new THREE.Mesh(new THREE.ShapeGeometry(sh), M.tilesS); plate.position.z = -side * 0.19;   // windward face
+    const pivot = new THREE.Group(); pivot.add(m, plate); hinge.add(pivot);
+    const len = Math.hypot(bx - ax, y1 - y0), fair = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, len, 10), M.steel);
+    fair.position.set((ax + bx) / 2, (y0 + y1) / 2, 0); fair.rotation.z = Math.asin(-(bx - ax) / len); fair.castShadow = true; hinge.add(fair);
+    airframe.add(hinge);
     flaps.push({ pivot, side, fwd });
   }
   // Flap deflection (rad, + = toward the belly), about each flap's hinge line (the body's long axis)
   function setFlaps(fwd, aft) { for (const f of flaps) f.pivot.rotation.y = f.side * (f.fwd ? fwd : aft); }
-  // Engines: three gimballed sea-level bells in the middle (on the TVC gimbal) and three fixed vacuum bells outside
-  function bell(r0, r1, h) {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, 28, 1, true), M.engine); b.position.y = -h / 2; b.castShadow = true;
+  // Details (dropped on Quality Low): cable raceway down the leeward side, chines along the aft flaps' line, two chopstick
+  // catch pins under the forward flaps, the payload door outline
+  const details = new THREE.Group(); airframe.add(details);
+  const atAz = (o, az, r, y) => { const g = new THREE.Group(); g.position.set(Math.cos(az) * r, y, Math.sin(az) * r); g.rotation.y = -az; g.add(o); details.add(g); return g; };
+  { const race = new THREE.Mesh(new THREE.BoxGeometry(0.3, BARREL - 1.5, 0.6), M.steel); race.castShadow = true; atAz(race, Math.PI, R + 0.1, (BARREL - 1.5) / 2 + 0.5);
+    for (const sd of [1, -1]) {
+      const ch = new THREE.Mesh(new THREE.BoxGeometry(0.7, 15, 0.22), M.dark); ch.castShadow = true; atAz(ch, sd * 100 * DEG, R + 0.3, 22.5);
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.34, 1.0, 10), M.dark); pin.rotation.z = -Math.PI / 2; pin.castShadow = true;
+      atAz(pin, sd * 122 * DEG, R + 0.45, BARREL - 2.2);
+    }
+    const dc = document.createElement('canvas'); dc.width = 128; dc.height = 256; const g = dc.getContext('2d');
+    g.strokeStyle = 'rgba(28,28,32,0.85)'; g.lineWidth = 3; g.strokeRect(6, 6, 116, 244); g.fillStyle = 'rgba(28,28,32,0.6)'; g.fillRect(8, 30, 112, 2);
+    const door = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.02, R + 0.02, 9, 12, 1, true, 1.5 * Math.PI - 0.38, 0.76),
+      new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(dc), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, roughness: 0.6, metalness: 0.5 }));
+    door.position.y = 25; details.add(door); }
+  // Engines: three gimballed sea-level bells in the middle (on the TVC gimbal) and three vacuum bells set up into the skirt
+  M.engine.side = THREE.FrontSide;
+  const bellIn = new THREE.MeshStandardMaterial({ color: 0x17130f, metalness: 0.6, roughness: 0.7, side: THREE.BackSide });   // sooty inside
+  function bell(r0, r1, h, inner = true) {
+    const g = new THREE.Group(), geo = new THREE.CylinderGeometry(r0, r1, h, 28, 1, true);
+    const b = new THREE.Mesh(geo, M.engine); b.position.y = -h / 2; b.castShadow = true;
     const p = new THREE.Mesh(new THREE.CylinderGeometry(r0 * 0.8, r0, 0.8, 16), M.dark); p.position.y = 0.3;
-    g.add(b, p); return g;
+    g.add(b, p);
+    if (inner) { const i = new THREE.Mesh(geo, bellIn); i.position.y = -h / 2; g.add(i); }
+    return g;
   }
   const cbells = [];
   for (let i = 0; i < 3; i++) { const a = (90 + 120 * i) * DEG, e = bell(0.42, 0.7, BELL); e.position.set(Math.cos(a) * 1.0, 0, Math.sin(a) * 1.0); tvc.add(e); cbells.push(e); }
@@ -421,34 +465,93 @@ export async function initLanding(step) {
   const rvacMat = new THREE.MeshStandardMaterial({ color: 0x55575e, metalness: 0.9, roughness: 0.3, side: THREE.DoubleSide, emissive: new THREE.Color(1, 0.32, 0.08), emissiveIntensity: 0 });
   const rvacs = [];
   for (let i = 0; i < 3; i++) {
-    const a = (30 + 120 * i) * DEG, e = bell(0.55, 1.15, 3.4); e.children[0].material = rvacMat;
-    e.position.set(Math.cos(a) * 2.9, 0.5, Math.sin(a) * 2.9); airframe.add(e); rvacs.push(e);
+    const a = (30 + 120 * i) * DEG, e = bell(0.55, 1.15, 3.4, false); e.children[0].material = rvacMat;
+    e.position.set(Math.cos(a) * 2.9, 1.9, Math.sin(a) * 2.9); airframe.add(e); rvacs.push(e);
   }
+  // Soot on the aft end (builds through the landing burn) and frost where the tanks' last propellant sits (the webcast look)
+  const shellMat = (color, alpha) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, transparent: true, opacity: 0, alphaMap: alpha, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+  const grad = (frost) => { const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#000'); gr.addColorStop(frost ? 0.25 : 0.1, frost ? '#bbb' : '#000'); gr.addColorStop(1, '#fff');
+    g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+    for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '0,0,0' : '255,255,255'},${Math.random() * 0.35})`; g.fillRect(Math.random() * 256, Math.random() * 128, 2 + Math.random() * (frost ? 6 : 14), 1 + Math.random() * 4); }
+    const t = new THREE.CanvasTexture(c); t.wrapS = THREE.RepeatWrapping; t.repeat.set(frost ? 3 : 2, 1); return t; };
+  const soot = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.06, R + 0.06, 6, 64, 1, true), shellMat(0x0d0b0a, grad(false)));
+  soot.position.y = -SKIRT + 3; airframe.add(soot);
+  const frostMat = shellMat(0xeef3f8, grad(true)), frost = [[1.2, 5.5], [16, 19.5]].map(([a, b]) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.055, R + 0.055, b - a, 48, 1, true, Math.PI + 0.15, Math.PI - 0.3), frostMat);
+    m.position.y = (a + b) / 2; airframe.add(m); return m; });
+  function shipFx(sootK, frostK) { soot.material.opacity = sootK; frostMat.opacity = frostK; soot.visible = sootK > 0.01; frost.forEach(m => { m.visible = frostK > 0.01; }); }
+  shipFx(0, 0);
 
-  // Landing legs: 4 struts that swing down from the tail
-  const legs = [];
-  const LEG = 9.5, HINGE = 6, FOOT = LEG * Math.cos(36 * DEG) - HINGE + BELL;   // deployed feet reach FOOT below the tail, past the bells
-  { const geo = new THREE.CylinderGeometry(0.22, 0.3, LEG, 10); geo.translate(0, -LEG / 2, 0);
-    const footGeo = new THREE.CylinderGeometry(1.0, 1.2, 0.35, 20);
-    for (let i = 0; i < 4; i++) {
-      const az = (45 + 90 * i) * DEG, hinge = new THREE.Group();
-      hinge.position.set(Math.cos(az) * (R + 0.15), HINGE, Math.sin(az) * (R + 0.15));
-      hinge.rotation.y = -az;
-      const pivot = new THREE.Group(); hinge.add(pivot);
-      const strut = new THREE.Mesh(geo, M.dark); strut.castShadow = true; pivot.add(strut);
-      const foot = new THREE.Mesh(footGeo, M.dark); foot.position.y = -LEG; foot.castShadow = true; pivot.add(foot);
-      airframe.add(hinge); legs.push(pivot);
-    }
+  // Landing legs (section 3 model): four bays built into the aft skirt on the diagonals. Stowed, each is a fairing door
+  // flush with the hull (tiled on the windward side); deployed, the door rides on the leg: an outer tube from a hinge at the
+  // top of the bay with a chrome piston that telescopes out (the shock absorber), an A-frame of side braces to the hull,
+  // a folding knee brace that snaps straight at the lock, and a dished pad on a ball joint that stays level.
+  const LG = { HT: 9.0, RH: R - 0.5, OT: 7.0, PL: 8.8, LS: 7.8, PADH: 0.6, open: 36, DOOR: 6.6 };
+  LG.LL = (3.6 + LG.HT - LG.PADH) / Math.cos(LG.open * DEG); LG.EXT = LG.LL - LG.LS;
+  const FOOT = LG.LL * Math.cos(LG.open * DEG) + LG.PADH - LG.HT;      // deployed pads reach FOOT below the tail (3.6 m)
+  const FOOT_R = LG.RH + LG.LL * Math.sin(LG.open * DEG);
+  M.legS = new THREE.MeshStandardMaterial({ color: 0xb4b1aa, metalness: 0.75, roughness: 0.35 });
+  M.chrome = new THREE.MeshStandardMaterial({ color: 0xe6eaef, metalness: 1, roughness: 0.12 });
+  M.pad = new THREE.MeshStandardMaterial({ color: 0x2b2825, metalness: 0.35, roughness: 0.75 });
+  const LGEO = {
+    outer: new THREE.CylinderGeometry(0.3, 0.34, LG.OT, 12).translate(0, -LG.OT / 2, 0),
+    pist: new THREE.CylinderGeometry(0.19, 0.19, LG.PL, 10).translate(0, LG.PL / 2, 0),
+    collar: new THREE.CylinderGeometry(0.42, 0.42, 0.35, 12).translate(0, -LG.OT, 0),
+    ball: new THREE.SphereGeometry(0.3, 12, 8),
+    pad: new THREE.LatheGeometry([[0.02, -0.14], [0.9, -0.14], [1.05, -0.06], [1.08, 0.04], [0.85, 0.12], [0.3, 0.2], [0.02, 0.22]].map(p => new THREE.Vector2(...p)), 28),
+    seg: new THREE.CylinderGeometry(0.11, 0.11, 1, 8).translate(0, 0.5, 0),
+    knee: new THREE.SphereGeometry(0.2, 8, 6),
+    door: scaleUV(new THREE.BoxGeometry(0.16, LG.DOOR, 1.5), 1.5, LG.DOOR),
+    recess: new THREE.BoxGeometry(0.04, LG.DOOR, 1.4),
+    hingeBox: new THREE.BoxGeometry(0.7, 0.6, 1.1),
+  };
+  const legDetail = [];
+  function makeLeg(az, parent) {
+    const hinge = new THREE.Group(); hinge.position.set(Math.cos(az) * LG.RH, LG.HT, Math.sin(az) * LG.RH); hinge.rotation.y = -az;
+    const pivot = new THREE.Group(); hinge.add(pivot);
+    const mk = (geo, mat, p = pivot) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; p.add(m); return m; };
+    mk(LGEO.outer, M.legS); mk(LGEO.collar, M.dark);
+    const door = mk(LGEO.door, Math.cos(az) > 0 ? M.tilesS : M.steel); door.position.set(R - LG.RH + 0.02, -LG.DOOR / 2 - 0.2, 0);
+    const pg = new THREE.Group(); pivot.add(pg);
+    mk(LGEO.pist, M.chrome, pg); mk(LGEO.ball, M.dark, pg);
+    const padG = new THREE.Group(); pg.add(padG); const pad = mk(LGEO.pad, M.pad, padG); pad.position.y = -(LG.PADH - 0.14);
+    const recess = mk(LGEO.recess, M.dark, hinge); recess.position.set(R - LG.RH + 0.03, -LG.DOOR / 2 - 0.2, 0); recess.visible = false;
+    mk(LGEO.hingeBox, M.dark, hinge).position.set(0.15, 0, 0);
+    const sideA = [mk(LGEO.seg, M.legS, hinge), mk(LGEO.seg, M.legS, hinge)], kneeA = mk(LGEO.seg, M.legS, hinge), kneeB = mk(LGEO.seg, M.legS, hinge), knee = mk(LGEO.knee, M.dark, hinge);
+    legDetail.push(...sideA);
+    parent.add(hinge);
+    const L = { hinge, pivot, pg, padG, recess, sideA, kneeA, kneeB, knee };
+    pivot.userData.leg = L; return L;
   }
-  const FOOT_R = R + LEG * Math.sin(36 * DEG);
-  // Deploy (section 9): stowed flat against the aft skirt; latches release one by one (stag s apart), each leg falls open
-  // (accelerating), swings past the lock by over° and bounces into it (damped). legT = s since the deploy started.
-  const LEGS = { stow: 179.5, open: 36, stag: 0.1, swing: 1.1, over: 7, bDecay: 0.12, bPer: 0.26, kick: 0.35, puff: 10 };
+  const _lgY = new THREE.Vector3(0, 1, 0), _lgA = new THREE.Vector3(), _lgB = new THREE.Vector3(), _lgD = new THREE.Vector3(), _lgM = new THREE.Vector3();
+  function legSeg(m, a, b) { _lgD.subVectors(b, a); const l = _lgD.length(); m.position.copy(a); m.quaternion.setFromUnitVectors(_lgY, _lgD.divideScalar(l || 1)); m.scale.set(1, l, 1); }
+  const KB = new THREE.Vector3(0.1, 0.9 - LG.HT, 0), KS = 3.0, KA = (() => { const s = Math.sin(LG.open * DEG), c = Math.cos(LG.open * DEG);
+    return Math.hypot(KS * s - KB.x, -KS * c - KB.y) / 2; })();   // knee brace half length: straight exactly at the lock
+  function poseLeg(L, th, ext, k, bk) {   // th: deg out from stowed, ext: piston out (m), k: deploy 0..1, bk: buckle 0..1
+    const s = Math.sin(th * DEG), c = Math.cos(th * DEG);
+    L.pivot.rotation.z = th * DEG; L.pg.position.y = -(LG.LS + ext);
+    L.padG.rotation.z = lerp(90, -th, k) * DEG;   // stowed: flat against the hull; out: level
+    L.recess.visible = k > 0.01;
+    _lgB.set(5.2 * s, -5.2 * c, 0);                // side braces: hull points either side of the bay → the outer tube
+    L.sideA.forEach((m, i) => legSeg(m, _lgA.set(0, 1.6 - LG.HT, i ? 0.75 : -0.75), _lgB));
+    _lgB.set(KS * s, -KS * c, 0);                  // knee brace: hull (bay bottom) → knee → tube; folds inward when stowed
+    const d = _lgB.distanceTo(KB), h = Math.sqrt(Math.max(0, KA * KA - d * d / 4)) + bk * 1.8;
+    _lgD.subVectors(_lgB, KB).normalize(); const sg = -_lgD.y < 0 ? 1 : -1;   // perpendicular, pointing inward (−x)
+    _lgM.addVectors(_lgB, KB).multiplyScalar(0.5).add(_lgA.set(-_lgD.y * sg, _lgD.x * sg, 0).multiplyScalar(h));
+    legSeg(L.kneeA, KB, _lgM); legSeg(L.kneeB, _lgM, _lgB); L.knee.position.copy(_lgM);
+  }
+  const legs = [45, 135, 225, 315].map(a => makeLeg(a * DEG, airframe).pivot);
+
+  // Deploy (section 9): stowed in the skirt bays; latches release one by one (stag s apart), each leg swings out
+  // (accelerating) as its piston telescopes, past the lock by over° and bounces into it (damped). legT = s since the deploy started.
+  const LEGS = { stow: 0, open: 36, stag: 0.1, swing: 1.1, over: 7, bDecay: 0.12, bPer: 0.26, kick: 0.35, puff: 10 };
   const LEGS_DONE = LEGS.swing + LEGS.stag * 3 + 0.5;   // all four locked and settled
   function legAng(t) {
     if (t <= 0) return LEGS.stow;
-    if (t < LEGS.swing) { const u = t / LEGS.swing; return LEGS.stow - (LEGS.stow - LEGS.open + LEGS.over) * u * u; }
-    const b = t - LEGS.swing; return LEGS.open - LEGS.over * Math.exp(-b / LEGS.bDecay) * Math.cos(2 * Math.PI * b / LEGS.bPer);
+    const dir = Math.sign(LEGS.open - LEGS.stow);
+    if (t < LEGS.swing) { const u = t / LEGS.swing; return LEGS.stow + (LEGS.open + dir * LEGS.over - LEGS.stow) * u * u; }
+    const b = t - LEGS.swing; return LEGS.open + dir * LEGS.over * Math.exp(-b / LEGS.bDecay) * Math.cos(2 * Math.PI * b / LEGS.bPer);
   }
 
   // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
@@ -462,9 +565,10 @@ export async function initLanding(step) {
     const lamp = new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }), red = new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false });
     // Parked ship: hull halves, base, flaps and legs cloned from the flying one, standing on its feet
     const pk = new THREE.Group(), pa = new THREE.Group(); pk.add(pa); pa.position.y = FOOT;
-    [body, shield, base].forEach(m => pa.add(m.clone()));
-    flaps.forEach(f => { const c = f.pivot.clone(); c.rotation.y = f.side * 0.3; pa.add(c); });
-    legs.forEach(p => { const h = p.parent.clone(); h.children[0].rotation.z = LEGS.open * DEG; pa.add(h); });   // same 4 legs, deployed
+    [body, shield, tip, base, details].forEach(m => pa.add(m.clone()));
+    rvacs.forEach(e => { const c = e.clone(); c.children[0].material = M.engine; pa.add(c); });
+    flaps.forEach(f => { const h = f.pivot.parent.clone(); h.children[f.pivot.parent.children.indexOf(f.pivot)].rotation.y = f.side * 0.3; pa.add(h); });
+    [45, 135, 225, 315].forEach(a => poseLeg(makeLeg(a * DEG, pa), LEGS.open, LG.EXT, 1, 0));   // the same four legs, out
     pk.rotation.y = 2.1; put(pk, ...BASE.parked);
     // Lattice masts (light steel so they read against the ground), cross bracing, a dish, beacons
     const steel = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, metalness: 0.5, roughness: 0.45 });
@@ -495,12 +599,16 @@ export async function initLanding(step) {
       put(p, BASE.solar[0] + c * 7, BASE.solar[1] + r * 6, 1.3); }
   }
   const legBk = [0, 0, 0, 0];   // extra splay (deg) of a buckled leg (crash)
-  const setLegs = t => legs.forEach((p, i) => { p.rotation.z = (legAng(t - i * LEGS.stag) + legBk[i]) * DEG; });
+  let legTc = 0;
+  function poseLegs() { legs.forEach((p, i) => { const t = legTc - i * LEGS.stag, u = clamp(t / LEGS.swing, 0, 1), th = legAng(t) + legBk[i];
+    const ext = LG.EXT * sstep(0.1, 0.85, u) - (legC[i] || 0) / Math.cos(Math.min(th, 80) * DEG);
+    poseLeg(p.userData.leg, th, Math.max(0, ext), sstep(0, 0.6, u), clamp(legBk[i] / 40, 0, 1)); }); }
+  const setLegs = t => { legTc = t; poseLegs(); };
   // Touchdown (section 10): each leg's shock absorber takes up to stroke m (vertical); perMs m per m/s of touchdown speed;
   // the last engine cuts cut s after contact; over hardVs m/s it is a hard landing even upright.
   const TDN = { stroke: 0.6, perMs: 0.13, cut: 0.3, hardVs: 3, rest: 0.75, comp: 0.15, bDecay: 0.15, bPer: 0.35, rock: 0.18, rockPer: 0.7 };
-  const legC = [0, 0, 0, 0], LEG_COS = Math.cos(LEGS.open * DEG);
-  function setLegComp(c) { legs.forEach((p, i) => { const d = (c[i] || 0) / LEG_COS; p.children[0].scale.y = (LEG - d) / LEG; p.children[1].position.y = -(LEG - d); }); }
+  const legC = [0, 0, 0, 0];
+  function setLegComp(c) { if (c !== legC) c.forEach((v, i) => { legC[i] = v; }); poseLegs(); }   // absorbers: the piston slides back in
 
   // Engine fire (RVacs), cinematic: a long bright core per engine (white-hot at the nozzle → blue-violet → faint pink),
   // glowing fire particles streaming along it (fireFx), a flare at each nozzle; startup stutters and over-expands, the
@@ -824,6 +932,7 @@ export async function initLanding(step) {
     qName = name; const q = QUALITY[name];
     try { localStorage.setItem('tvc-landing-quality', name); } catch {}
     setRockDensity(q.rocks);
+    details.visible = name !== 'low'; legDetail.forEach(m => { m.visible = name !== 'low'; });
     orbit.setQuality(name === 'high' ? 8 : name === 'medium' ? 6 : 5, Math.min(devicePixelRatio, q.pr));
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
@@ -1054,7 +1163,7 @@ export async function initLanding(step) {
     shipScene.add(ship); ship.position.set(0, 0, 0);
     $('lndResult').hidden = true; $('lndFeed').textContent = ''; fadeAmt = 0;
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
-    legBk.fill(0); setLegs(0); legC.fill(0); setLegComp(legC);
+    legBk.fill(0); legC.fill(0); setLegs(0); shipFx(0, 0);
     wreck.forEach(d => { d.m.visible = false; }); scorch.visible = false; crashT = 0; fireLight.intensity = 0; blasts.length = 0;
     refresh();
   }
@@ -1067,7 +1176,7 @@ export async function initLanding(step) {
   function cutToGround() {   // inside the cloud deck: swap the orbit scene for the ground scene
     state = 'flight';
     scene.add(ship);
-    plasma.visible = false; wake.visible = false; shock.visible = false; M.tiles.emissiveIntensity = 0; glow.clear();
+    plasma.visible = false; wake.visible = false; shock.visible = false; TILE_MATS.forEach(m => { m.emissiveIntensity = 0; }); glow.clear();
     ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; burnEl.hidden = true; heatPanel(false);
     fadeOut = 0.8; tBreak = null; trk = null;
     buildWisps({ high: 1, medium: 0.6, low: 0.3 }[qName] ?? 1, flight.s.x ?? 0, flight.s.z ?? 0);
@@ -1338,7 +1447,7 @@ export async function initLanding(step) {
     shockMat.uniforms.uI.value = I * 1.3 * (1 - 0.6 * Hq); shockMat.uniforms.uT.value = simClock; shockMat.uniforms.uH.value = Hq;
     shock.scale.set(8.2, 31, 8.6).multiplyScalar(1.12 - 0.12 * I);   // the shock hugs closer as the heating rises
     const tt = state === 'entry' ? tileT : 0;                         // tiles: dull red → orange → yellow, with lag
-    M.tiles.emissive.setRGB(1, 0.18 + 0.5 * tt, 0.06 + 0.2 * tt * tt); M.tiles.emissiveIntensity = tt * 1.8;
+    M.tiles.emissive.setRGB(1, 0.18 + 0.5 * tt, 0.06 + 0.2 * tt * tt); TILE_MATS.forEach(m => { m.emissiveIntensity = tt * 1.8; });
     plasmaLight.intensity = I * 420; plasmaLight.color.setRGB(1, 0.4 + 0.35 * Hq, 0.2 + 0.2 * Hq);
     wakeMat.uniforms.uI.value = I * 0.6; wakeMat.uniforms.uT.value = simClock; wakeMat.uniforms.uH.value = Hq;
     const gam = (4 + 36 * ent.u) * DEG;                       // flight path angle below horizontal
@@ -1513,6 +1622,7 @@ export async function initLanding(step) {
       }
     });
     setLegs(legT);
+    if (s.phase === 'tvc') { const tt = s.t - s.tPh; shipFx(0.65 * sstep(0, 10, tt), 0.8 * sstep(1, 8, tt)); }   // soot builds, tanks frost
   }
   // On the ground: the first leg's absorber takes the hit, the ship rocks down onto the others (a little overshoot) and
   // settles level, the absorbers spring back part way (crush cores keep TDN.rest of the stroke); the bells re-centre.
@@ -2217,7 +2327,11 @@ export async function initLanding(step) {
         this.at(3); const s = flight.s; if (state !== 'flight') return;
         td = { tilt: kind === 'tip' ? 18 : 2, vs: kind === 'tip' ? 1.5 : 7, miss: flight.drift }; s.h = groundUnder(); startTip(kind === 'collapse');
       },
-      shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },   // freeze idle shot i at t seconds
+      shot(i, t = 4) { idleI = i; idleT = t; idleHold = true; },
+      view(dx = 30, dy = 10, dz = -40, ty = 0) {   // freeze the camera at an offset from the ship (pause first), looking at it
+        camMode = 'still'; controls.enabled = false; const p = ship.position; camera.position.set(p.x + dx, p.y + dy, p.z + dz); camera.lookAt(p.x, p.y + ty, p.z);
+      },
+      pause() { if (!paused) pauseBtn.click(); },   // freeze idle shot i at t seconds
       cam() { const s = flight.s; return { shot: shotName, side: apSide, z: Math.round(s.z), eng: s.eng, fov: +camera.fov.toFixed(1), h: Math.round(s.h - groundUnder()), t: +(s.t - s.tPh).toFixed(1), phase: s.phase, state, tag: tagEl.classList.contains('on') }; },   // TVC-scene state
     };
   }
