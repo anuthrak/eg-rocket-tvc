@@ -659,80 +659,111 @@ export async function initLanding(step) {
     });
     engLight.intensity = (k[0] + k[1] + k[2]) / 3 * 180 * (1 + 0.15 * Math.sin(t * 53));
   }
-  // ---------- Landing plumes (section 7): one per centre engine ----------
-  // Methalox, same family as the deorbit fire: a short white-hot core with Mach diamonds (discrete nodes fading down the
-  // jet), and a wide, soft, under-expanded outer plume (Mars air is thin all the way down). Below ~60 m the jet meets
-  // the ground: it shortens, spreads into a hot disc, and the dust it lights tints the plume orange.
-  const lPlumeMat = core => new THREE.ShaderMaterial({
+  // ---------- Landing plumes (section 12): Raptor in thin Mars air, cinematic ----------
+  // Per engine: a small white-blue exit glow (the only part that blooms) and a short translucent inner jet with a couple of
+  // faint shock cells. Around all three: one shared, soft, bell-shaped envelope of nested shells with turbulence flowing
+  // downstream (it follows the mean gimbal and shrinks as engines go out). Relights run orange-rich and rough for a moment;
+  // shutdowns collapse with an orange puff. Near the ground the jet stops, the envelope flares out and a glowing sheet
+  // spreads over the surface. Every layer is capped so the frame never whites out, and fades close to the camera.
+  const PLUME = {
+    vis: 1.35,                    // overall visibility (1 = realistic-ish; higher = more cinematic)
+    jetLen: [7, 13], jetW: 1,     // inner jet length (m) at low / full throttle
+    envLen: [34, 64], envW: [7.5, 12],   // envelope length / end radius near the ground / high up (m)
+    jetK: 0.4, envK: 0.11, capJ: 0.32, capE: 0.14,   // brightness and per-layer cap (linear, under the bloom threshold)
+    exit: 1.0, hot: 0.35,         // exit glow strength; how long a relight stays orange-rich (s)
+    groundAt: 80, sheetR: [6, 34], dust: 1,
+  };
+  const NOISE = `float h3(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+    float n3(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+                 mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }`;
+  const plumeVS = `uniform float uG; varying float vU; varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vD; varying vec3 vA;
+    void main(){ vU = -position.y; vec3 p = position; p.xz *= 1.0 + uG * smoothstep(0.5, 1.0, vU) * 1.8;   // flares out on the ground
+      vP = p; vec4 mv = modelViewMatrix * vec4(p, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vD = -mv.z; vA = normalize(normalMatrix * vec3(0.0, 1.0, 0.0));
+      gl_Position = projectionMatrix * mv; }`;
+  const plumeMat = jet => new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-    uniforms: { uK: { value: 0 }, uT: { value: 0 }, uDia: { value: 0 }, uWarm: { value: 0 }, uFl: { value: 0 }, uSeed: { value: 0 } },
-    vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec3 vP;
-      void main(){ vY = position.y; vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uK, uT, uDia, uWarm, uFl, uSeed; varying float vY; varying vec3 vN; varying vec3 vV; varying vec3 vP;
-      void main(){ float a = clamp(1.0 + vY, 0.0, 1.0);                     // 1 at the nozzle, 0 at the tip
-        float edge = pow(abs(dot(normalize(vN), normalize(vV))), ${core ? '1.3' : '2.2'});
-        float ang = atan(vP.z, vP.x);
-        float fl = 1.0 + uFl * 0.5 * sin(uT * 89.0 + uSeed) + 0.05 * sin(uT * 53.0 + vY * 13.0 + uSeed);
-        ${core ? `
-        float x = (1.0 - a) * 5.0;                                            // diamond nodes along the core
-        float fx = fract(x + 0.5) - 0.5, nd = exp(-fx * fx * 70.0) * exp(-x * 0.45) * smoothstep(0.35, 0.8, x);
-        vec3 c = mix(vec3(1.0, 0.5, 0.8), vec3(0.5, 0.5, 1.0), smoothstep(0.0, 0.5, a));
-        c = mix(c, vec3(1.0, 0.97, 0.95), smoothstep(0.55, 0.95, a));
-        float I = pow(a, 5.0) * 2.4 + pow(a, 1.3) * 0.5 + nd * uDia * 1.6;
-        c = mix(c, vec3(1.0, 0.6, 0.3), uWarm * (1.0 - a) * 0.6);` : `
-        float turb = 0.75 + 0.25 * sin(vY * 9.0 - uT * 14.0 + ang * 3.0 + uSeed) * sin(vY * 4.0 + uT * 6.0 - ang * 2.0);
-        vec3 c = mix(vec3(0.42, 0.5, 1.0), vec3(0.75, 0.55, 1.0), 1.0 - a);
-        c = mix(c, vec3(1.0, 0.55, 0.25), uWarm * (1.0 - 0.5 * a));
-        float I = (pow(a, 2.2) * 0.5 + 0.08) * turb;`}
-        gl_FragColor = vec4(c * I * edge * uK * fl, 1.0); }`,
+    uniforms: { uK: { value: 0 }, uT: { value: 0 }, uHot: { value: 0 }, uWarm: { value: 0 }, uSeed: { value: 0 }, uLen: { value: 10 }, uCap: { value: 0.4 }, uG: { value: 0 } },
+    vertexShader: plumeVS,
+    fragmentShader: `uniform float uK, uT, uHot, uWarm, uSeed, uLen, uCap; varying float vU; varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vD; varying vec3 vA;
+      ${NOISE}
+      void main(){ float u = clamp(vU, 0.0, 1.0);
+        float edge = pow(abs(dot(normalize(vN), normalize(vV))), ${jet ? '1.2' : '1.5'});   // soft silhouette, no hard rim
+        vec3 q = vec3(vP.x * 0.45, vP.y * uLen * ${jet ? '0.35' : '0.09'} + uT * ${jet ? '9.0' : '2.6'} + uSeed, vP.z * 0.45);
+        float turb = 0.55 + 0.45 * n3(q) + 0.25 * (n3(q * 2.3 + 7.0) - 0.5);
+        ${jet ? `
+        float I = pow(1.0 - u, 2.0) + 0.28 * exp(-pow((u - 0.22) * 14.0, 2.0)) + 0.16 * exp(-pow((u - 0.43) * 12.0, 2.0));
+        vec3 c = mix(vec3(0.9, 0.93, 1.0), vec3(0.45, 0.55, 1.0), smoothstep(0.0, 0.45, u));` : `
+        float I = pow(1.0 - u, 1.5) * smoothstep(0.0, 0.06, u);
+        vec3 c = mix(vec3(0.42, 0.52, 1.0), vec3(0.62, 0.38, 1.0), u);
+        c = mix(c, vec3(1.0, 0.62, 0.36), uWarm * smoothstep(0.3, 1.0, u));`}
+        c = mix(c, vec3(1.15, 0.58, 0.26), uHot);                              // orange-rich at a (re)light
+        float near = smoothstep(3.0, 22.0, vD);                                // fade where the camera is inside it
+        near *= 1.0 - 0.8 * smoothstep(0.55, 0.97, abs(dot(normalize(vA), normalize(vV))));   // seen end-on the layers pile up: thin it
+        gl_FragColor = vec4(min(c * I * edge * turb * uK * near, vec3(uCap)), 1.0); }`,
   });
-  const lCoreGeo = new THREE.CylinderGeometry(0.62, 1.05, 1, 24, 1, true); lCoreGeo.translate(0, -0.5, 0);
-  const lOuterGeo = new THREE.CylinderGeometry(0.72, 4.2, 1, 28, 1, true); lOuterGeo.translate(0, -0.5, 0);
+  const latheU = (r, n = 24, seg = 28) => { const pts = []; for (let i = 0; i <= n; i++) { const u = i / n; pts.push(new THREE.Vector2(r(u), -u)); } return new THREE.LatheGeometry(pts, seg); };
+  const jetGeo = latheU(u => 0.66 + 0.95 * Math.sqrt(u));                                        // m; length scaled per frame
+  const ENV_R = 6.5, envGeo = latheU(u => 1.9 + (ENV_R - 1.9) * (1 - Math.pow(1 - u, 2.4)), 28, 36);
   const BELL_AZ = [90, 210, 330].map(a => a * DEG);
   const ENG = cbells.map((e, i) => {
     const g = new THREE.Group(); g.position.y = -BELL; g.visible = false; e.add(g);
-    const core = new THREE.Mesh(lCoreGeo, lPlumeMat(true)), outer = new THREE.Mesh(lOuterGeo, lPlumeMat(false));
-    core.material.uniforms.uSeed.value = outer.material.uniforms.uSeed.value = i * 2.1;
-    g.add(outer, core);
-    return { e, g, core, outer, lvl: 0, gx: 0, gz: 0, tau: [0.03, 0.045, 0.06][i] };
+    const jet = new THREE.Mesh(jetGeo, plumeMat(true)); jet.material.uniforms.uSeed.value = i * 2.1; jet.material.uniforms.uCap.value = PLUME.capJ; g.add(jet);
+    return { e, g, jet, lvl: 0, gx: 0, gz: 0, want: 0, tau: [0.03, 0.045, 0.06][i] };
   });
-  // Lights: a short cool light under the nozzles (skirt, bells, aft flaps; not the whole hull) and a warm pool where the
-  // exhaust meets the ground, which also lights the ship from below as it gets close
+  const env = new THREE.Group(); env.position.y = -BELL - 0.2; env.visible = false; tvc.add(env);
+  const envShells = [[1, 1], [0.8, 0.86], [0.6, 0.7]].map(([w, l], i) => { const m = new THREE.Mesh(envGeo, plumeMat(false)); m.userData.wl = [w, l];
+    m.material.uniforms.uSeed.value = 3 + i * 5.3; m.material.uniforms.uCap.value = PLUME.capE; env.add(m); return m; });
+  // Lights: a short cool light under the nozzles (skirt, bells, legs, aft flaps), and a warm one off the lit ground near the end
   const nozLight = new THREE.PointLight(0xb8c8ff, 0, 45, 2); nozLight.position.y = -BELL - 3; tvc.add(nozLight);
   const poolLight = new THREE.PointLight(0xffa060, 0, 170, 2); scene.add(poolLight);
-  const poolTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
-    const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,245,235,1)'); gr.addColorStop(0.18, 'rgba(255,200,150,0.75)');
-    gr.addColorStop(0.5, 'rgba(255,120,50,0.25)'); gr.addColorStop(1, 'rgba(255,90,30,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
-  const pool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: poolTex, transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, fog: false }));
+  // Ground sheet: the jet stopped by the ground, spread into a hot swirling disc (blue-white centre, dust-lit warm edge)
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, polygonOffset: true, polygonOffsetFactor: -4,
+    uniforms: { uK: { value: 0 }, uT: { value: 0 } },
+    vertexShader: `varying vec2 vXZ; void main(){ vXZ = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uK, uT; varying vec2 vXZ; ${NOISE}
+      void main(){ float r = length(vXZ); if (r > 1.0) discard; float a = atan(vXZ.y, vXZ.x);
+        float sw = n3(vec3(cos(a + r * 2.0 - uT * 1.5) * 3.0, sin(a + r * 2.0 - uT * 1.5) * 3.0, r * 4.0 - uT * 2.0));
+        float I = pow(1.0 - r, 1.6) * (0.55 + 0.6 * sw);
+        vec3 c = mix(vec3(0.85, 0.88, 1.0), vec3(1.0, 0.6, 0.32), smoothstep(0.05, 0.55, r));
+        gl_FragColor = vec4(min(c * I * uK, vec3(0.85)), 1.0); }` }));
   pool.visible = false; scene.add(pool);
-  const _px = new THREE.Vector3(), _pd = new THREE.Vector3();
-  const plumeFx = { on: false, exit: new THREE.Vector3(), dir: new THREE.Vector3(0, -1, 0), len: 0, w: 0, k: 0 };   // for the shimmer
-  let plT = 0, outT = 0, engOut = false, engT = 9, lastN = 3;
+  const _px = new THREE.Vector3(), _pd = new THREE.Vector3(), _pe = new THREE.Vector3();
+  const plumeFx = { on: false, exit: new THREE.Vector3(), dir: new THREE.Vector3(0, -1, 0), len: 0, w: 0, k: 0, near: 0, g: new THREE.Vector3() };   // shimmer + dust
+  let plT = 0, outT = 0, engOut = false, engT = 9, lastN = 3, envLow = false;
   // thr: the sim's throttle (fraction of three engines) · ft: time into the flip (relight stagger; 99 = all lit)
-  function setPlume(thr, t, ft = 99, neng = 0) {   // neng: engines lit (sim's 3 → 2 → 1); 0 = by throttle
+  function setPlume(thr, t, ft = 99, neng = 0) {   // neng: engines lit (sim's 3 → 2 → 1); 0 = by throttle; -1 = all off
     const dt = clamp(t - plT, 0, 0.1); plT = t;
     // Engine-out: below ~35% throttle for 0.5 s the two outer centre engines shut down one after the other; back over 50% they relight
     outT = thr > 0.01 && thr < 0.35 ? outT + dt : 0; engT += dt;
     if (!engOut && outT > 0.5) { engOut = true; engT = 0; }
     if (engOut && (thr > 0.5 || thr < 0.01)) { engOut = false; engT = 0; }
     if (neng && neng !== lastN) { engT = 0; lastN = neng; }
-    let nOn = 0;
+    let nOn = 0, hot = 0;
     ENG.forEach((E, i) => {
       const want = neng ? (i < neng ? 1 : 0) : i === 0 || !engOut ? 1 : engT > (i === 2 ? 0.15 : 0) ? 0 : 1;
+      if (E.want && !want && E.lvl > 0.3 && ship.visible) {   // shutdown: an orange puff out of the bell
+        E.e.updateWorldMatrix(true, false); _pe.set(0, -BELL, 0).applyMatrix4(E.e.matrixWorld); const s = flight.s;
+        for (let n = 0; n < 14; n++) fire.emit({ x: _pe.x, y: _pe.y, z: _pe.z, vx: _pd.x * rnd(8, 25) + rnd(-3, 3) + (s.vx || 0), vy: _pd.y * rnd(8, 25) + rnd(-3, 3) + (s.vh || 0), vz: _pd.z * rnd(8, 25) + rnd(-3, 3) + (s.vz || 0),
+          life: rnd(0.25, 0.6), s0: 1.2, s1: rnd(3, 6), a: 0.55, drag: 3, fire: true }); }
+      E.want = want;
       E.lvl += (want - E.lvl) * (1 - Math.exp(-dt * (want ? 10 : 14)));
       const ig = ft >= 99 ? 1 : sstep(IGN[i], IGN[i] + 0.18, ft);
       const dying = !want && E.lvl > 0.04 ? stutter(engT * 1.7, i + 5) : 1;
       E.k = thr > 0.01 ? E.lvl * ig * dying : 0; nOn += E.k;
+      const lit = ft < 99 ? ft - IGN[i] : 99;   // s since this engine relit in the flip
+      E.hot = Math.max(lit >= 0 && lit < 99 ? 1 - sstep(0, PLUME.hot, lit) : 0, want && E.lvl < 0.9 ? 0.6 : 0, !want ? 0.5 : 0);
       E.f = Math.max(ft < 99 ? ignRough(ft) : 0, want && E.lvl < 0.9 ? 0.7 : 0);   // rough at a (re)light
+      hot = Math.max(hot, E.hot * (E.k > 0.05 ? 1 : 0));
     });
     const te = nOn > 0.01 ? clamp(thr * 3 / Math.max(nOn, 1), 0, 1) : 0;          // each lit engine's own throttle
     // Height of the exits and where the averaged exhaust meets the ground
     tvc.updateWorldMatrix(true, false);
     _pd.set(0, -1, 0).transformDirection(tvc.matrixWorld); _px.set(0, -BELL, 0).applyMatrix4(tvc.matrixWorld);
     const gH = heightAt(_px.x, _px.z), dG = _pd.y < -0.2 ? (_px.y - gH) / -_pd.y : 1e9, h = _px.y - gH;
-    const hiK = sstep(60, 300, h), warm = 1 - sstep(8, 150, h);
+    const hiK = sstep(60, 400, h), warm = 1 - sstep(10, 160, h), V = PLUME.vis;
+    const near = dG < PLUME.groundAt ? 1 - dG / PLUME.groundAt : 0;
     let maxLen = 0;
     ENG.forEach((E, i) => {
       const k = E.k; E.g.visible = k > 0.01;
@@ -743,32 +774,43 @@ export async function initLanding(step) {
         E.gz - tvc.rotation.z + jit * Math.sin(t * 6.1 + i * 3) + Math.sin(BELL_AZ[i]) * roll);
       const fl = cFlares[i];
       if (!E.g.visible) { if (!(ft < 99 && ft - IGN[i] > 0 && ft - IGN[i] < 1.5)) fl.visible = false; return; }
-      const st = 1 + E.f * 0.35 * Math.sin(t * 97 + i);
-      let lc = (5 + 9 * te) * st * (0.9 + 0.2 * hiK), lo = (20 + 34 * te) * (0.8 + 0.35 * hiK) * st;
-      const wc = (1 + 0.25 * te) * (1 + 0.5 * E.f), wo = (0.85 + 0.45 * te) * (0.85 + 0.3 * hiK) * (1 + 0.4 * E.f);
-      if (dG < lo) { lo = Math.max(dG + 2, 3); lc = Math.min(lc, Math.max(dG + 1, 2)); }   // ground effect: the jet is stopped
-      E.core.scale.set(wc, lc, wc); E.outer.scale.set(wo * (dG < 40 ? 1 + (1 - dG / 40) * 0.8 : 1), lo, wo * (dG < 40 ? 1 + (1 - dG / 40) * 0.8 : 1));
-      for (const m of [E.core, E.outer]) { const u = m.material.uniforms; u.uT.value = t; u.uFl.value = E.f; u.uWarm.value = warm;
-        u.uK.value = k * (m === E.core ? 1.15 + 0.25 * (1 - hiK) : 0.8 + 0.5 * te); u.uDia.value = te * (0.5 + 0.5 * (1 - hiK)); }
-      // Nozzle flare: a hard flash at each flip relight, then a steady glow with the engine
-      const d = ft - IGN[i], flash = ft < 99 && d > 0 ? Math.exp(-d * 5) : 0;
-      fl.visible = true; fl.material.opacity = Math.min(1, 0.3 * k * (0.5 + te) + flash); fl.scale.setScalar(2.5 + 2 * te * k + 14 * flash + Math.random() * 0.8);
-      maxLen = Math.max(maxLen, lo);
+      const st = 1 + E.f * 0.3 * Math.sin(t * 97 + i);
+      let len = lerp(PLUME.jetLen[0], PLUME.jetLen[1], te) * (0.35 + 0.65 * E.lvl) * st * (0.9 + 0.15 * hiK);
+      if (dG < len) len = Math.max(dG, 1.5);                       // stopped by the ground
+      const w = PLUME.jetW * (1 + 0.3 * E.f) * (1 + 0.25 * near);
+      E.jet.scale.set(w, len, w);
+      const u = E.jet.material.uniforms; u.uT.value = t; u.uHot.value = E.hot; u.uLen.value = len; u.uK.value = k * PLUME.jetK * V * (0.7 + 0.5 * te) * (1 + 0.8 * near);
+      // Exit glow: a small hard light in the bell (blooms); a short flash at each flip relight
+      const d = ft - IGN[i], flash = ft < 99 && d > 0 ? Math.exp(-d * 6) : 0;
+      fl.visible = true; fl.material.color.setRGB(1, 1 - 0.35 * E.hot, 1 - 0.6 * E.hot);
+      fl.material.opacity = Math.min(1, PLUME.exit * k * (0.45 + 0.4 * te) + flash); fl.scale.setScalar(1.6 + 1.2 * te * k + 6 * flash + Math.random() * 0.4);
+      maxLen = Math.max(maxLen, len);
     });
-    const P = nOn > 0.01 && ship.visible;
+    // Shared envelope: follows the mean gimbal, sized by height (wider and longer up high) and by the engines lit
+    const P = nOn > 0.01 && ship.visible, nk = nOn / 3;
+    env.visible = P; envShells.forEach((m, i) => { m.visible = P && !(envLow && i > 0); });
+    if (P) {
+      let L = lerp(PLUME.envLen[0], PLUME.envLen[1], hiK) * (0.55 + 0.45 * te) * (0.6 + 0.4 * Math.sqrt(nk)) * V;
+      const W = lerp(PLUME.envW[0], PLUME.envW[1], hiK) * (0.55 + 0.45 * Math.sqrt(nk)) * (0.85 + 0.15 * te), gk = dG < L ? 1 : near * 0.5;
+      if (dG < L) L = Math.max(dG + 0.5, 2);
+      envShells.forEach(m => { const [ws, ls] = m.userData.wl, u = m.material.uniforms;
+        m.scale.set(W / ENV_R * ws, L * ls, W / ENV_R * ws);
+        u.uT.value = t; u.uHot.value = hot; u.uWarm.value = Math.max(warm, near); u.uLen.value = L * ls; u.uG.value = gk;
+        u.uK.value = PLUME.envK * V * Math.min(1, nk * 1.4) * (0.6 + 0.5 * te) * (1 + 0.4 * hot) * (1 + 0.7 * (1 - hiK)); });   // brighter low down, against the ground
+      maxLen = Math.max(maxLen, L);
+    }
     nozLight.intensity = P ? 60 * nOn * (0.4 + te) * (1 + 0.08 * Math.sin(t * 53)) : 0;
-    // Ground pool: where the exhaust lands, bigger and brighter as it closes in
-    const near = P && dG < 180 ? 1 - dG / 180 : 0;
-    pool.visible = poolLight.intensity > 0 || near > 0;
-    if (near > 0) {
+    // Ground sheet + warm light off the lit dust, growing as it closes in
+    pool.visible = P && near > 0;
+    if (pool.visible) {
       const gx = _px.x + _pd.x * dG, gz = _px.z + _pd.z * dG;
-      pool.position.set(gx, heightAt(gx, gz) + 0.25, gz); pool.scale.setScalar(10 + 46 * near * (0.6 + 0.4 * te));
-      pool.material.opacity = Math.min(0.9, near * near * (0.4 + 0.6 * te) * nOn / 2);
+      pool.position.set(gx, heightAt(gx, gz) + 0.3, gz); pool.scale.setScalar(lerp(PLUME.sheetR[0], PLUME.sheetR[1], near) * (0.7 + 0.3 * Math.sqrt(nk)));
+      pool.material.uniforms.uT.value = t; pool.material.uniforms.uK.value = near * near * (0.35 + 0.65 * te) * Math.min(1, nk * 1.5) * 2.0 * PLUME.vis;
       poolLight.position.set(gx, heightAt(gx, gz) + 10, gz);
-      poolLight.intensity = 900 * near * near * (0.3 + 0.7 * te) * (nOn / 3) * (1 + 0.1 * Math.sin(t * 41));
-    } else { poolLight.intensity = 0; pool.visible = false; }
-    Object.assign(plumeFx, { on: P, len: maxLen, w: 2 + 2.5 * te, k: P ? Math.min(1, nOn / 2) * (0.5 + 0.5 * te) : 0 });
-    plumeFx.exit.copy(_px); plumeFx.dir.copy(_pd);
+      poolLight.intensity = 900 * near * near * (0.3 + 0.7 * te) * nk * (1 + 0.1 * Math.sin(t * 41));
+    } else poolLight.intensity = 0;
+    Object.assign(plumeFx, { on: P, len: maxLen, w: 1.5 + 2 * te, k: P ? Math.min(1, nOn / 2) * (0.35 + 0.35 * te) : 0, near: P ? near : 0, nk, te });
+    plumeFx.exit.copy(_px); plumeFx.dir.copy(_pd); if (P && dG < 1e8) plumeFx.g.set(_px.x + _pd.x * dG, gH, _px.z + _pd.z * dG);
   }
 
 
@@ -808,7 +850,7 @@ export async function initLanding(step) {
       setScale(s) { mat.uniforms.uScale.value = s; },
     };
   }
-  const dust = createPoints(2800, false, scene), fire = createPoints(1000, true, scene);
+  const dust = createPoints(4500, false, scene), fire = createPoints(1000, true, scene);
   const DUST = [0.72, 0.5, 0.36], STREAK = [0.95, 0.85, 0.75];
   const debris = [];
   { for (let i = 0; i < 46; i++) {
@@ -933,6 +975,7 @@ export async function initLanding(step) {
     try { localStorage.setItem('tvc-landing-quality', name); } catch {}
     setRockDensity(q.rocks);
     details.visible = name !== 'low'; legDetail.forEach(m => { m.visible = name !== 'low'; });
+    envLow = name === 'low';
     orbit.setQuality(name === 'high' ? 8 : name === 'medium' ? 6 : 5, Math.min(devicePixelRatio, q.pr));
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     $('lndQual').querySelector('.lbl').textContent = 'Quality: ' + q.label;
@@ -2201,21 +2244,24 @@ export async function initLanding(step) {
           life: rnd(0.3, 0.7), s0: 0.6, s1: 3.5, a: 0.5, drag: 3, rgb: [1, 1, 1] }); }
       if (t > LEGS.swing && !calls['ll' + i]) { calls['ll' + i] = true; legEv++; shake = Math.max(shake, LEGS.kick); }
     }
-    // Dust blown off the ground where the exhaust (along the nozzle, so it follows the gimbal) meets it
-    if (plumeFx.on) {
-      tvc.updateWorldMatrix(true, false);
-      _nz.set(0, -1, 0).transformDirection(tvc.matrixWorld);            // exhaust direction
-      const exit = _ex.set(0, -BELL, 0).applyMatrix4(tvc.matrixWorld);
-      const g = heightAt(exit.x, exit.z), d = _nz.y < -0.3 ? (exit.y - g) / -_nz.y : 1e9;
-      if (d < 110) {
-        const k = 1 - d / 110, gx = exit.x + _nz.x * d, gz = exit.z + _nz.z * d, n = Math.round(30 * k * k + 3);
-        const bx = _nz.x * 40, bz = _nz.z * 40;                         // pushed the way the exhaust leans
-        for (let i = 0; i < n; i++) {
-          const a = rnd(0, Math.PI * 2), v = rnd(18, 52) * (0.4 + k);
-          dust.emit({ x: gx + Math.cos(a) * 3, y: g + 0.6, z: gz + Math.sin(a) * 3, vx: Math.cos(a) * v + bx, vy: rnd(0.4, 6), vz: Math.sin(a) * v + bz,
-            life: rnd(1, 3.2), s0: 2.5, s1: rnd(10, 22) * (0.6 + k), a: 0.4 + 0.3 * k, drag: 0.6, rgb: DUST });
-        }
-      }
+    // Ground interaction (section 12): a fast flat ring of dust racing out, a curtain rising at its edge, gravel thrown in
+    // arcs, and in the last metres dust swirling round the legs; all lit warm from below by the exhaust
+    if (plumeFx.on && plumeFx.near > 0 && !paused) {
+      const k = plumeFx.near, g = plumeFx.g, gy = g.y, f = dt * 60, D = PLUME.dust * (envLow ? 0.5 : 1) * (0.4 + 0.6 * plumeFx.nk) * (0.5 + 0.5 * plumeFx.te);
+      const lit = DUST.map((c, i) => c + ([1, 0.78, 0.55][i] - c) * 0.4 * k), bx = plumeFx.dir.x * 30, bz = plumeFx.dir.z * 30;
+      const em = (n, fn) => { for (let i = 0, m = Math.round(n * f + Math.random()); i < m; i++) fn(rnd(0, Math.PI * 2)); };
+      em((5 + 38 * k * k) * D, a => { const v = rnd(35, 75) * (0.5 + 0.5 * k);   // the ring, hugging the ground
+        dust.emit({ x: g.x + Math.cos(a) * 3, y: gy + 0.5, z: g.z + Math.sin(a) * 3, vx: Math.cos(a) * v + bx, vy: rnd(0.2, 2), vz: Math.sin(a) * v + bz,
+          life: rnd(0.7, 1.6), s0: 2, s1: rnd(8, 16) * (0.6 + 0.6 * k), a: 0.3 + 0.22 * k, drag: 0.9, rgb: lit }); });
+      em(5 * k * k * D, a => { const r = lerp(10, 40, k) * rnd(0.8, 1.1);        // the curtain rising at its edge
+        dust.emit({ x: g.x + Math.cos(a) * r, y: gy + rnd(0.5, 3), z: g.z + Math.sin(a) * r, vx: Math.cos(a) * rnd(4, 12), vy: rnd(4, 12), vz: Math.sin(a) * rnd(4, 12),
+          life: rnd(2.5, 4.5), s0: 6, s1: rnd(22, 38), a: 0.2, drag: 0.35, rgb: lit }); });
+      if (k > 0.35) em(3 * k * D, a => { const r = rnd(2, 8), v = rnd(25, 60);      // gravel in arcs
+        dust.emit({ x: g.x + Math.cos(a) * r, y: gy + 0.4, z: g.z + Math.sin(a) * r, vx: Math.cos(a) * v, vy: rnd(6, 18), vz: Math.sin(a) * v,
+          life: rnd(1, 2.2), s0: 0.5, s1: 0.7, a: 0.9, drag: 0.05, g: L.G, rgb: [0.17, 0.12, 0.09] }); });
+      if (sp.y - gy < TAIL + FOOT + 10) em(4 * D, a => { const r = rnd(8, 15);      // swirling round the legs
+        dust.emit({ x: sp.x + Math.cos(a) * r, y: gy + rnd(0.3, 2), z: sp.z + Math.sin(a) * r, vx: -Math.sin(a) * 12 + Math.cos(a) * 4, vy: rnd(1, 4), vz: Math.cos(a) * 12 + Math.sin(a) * 4,
+          life: rnd(1.5, 3), s0: 3, s1: 12, a: 0.28, drag: 0.4, rgb: lit }); });
     }
     if (stormT > 0) {   // the cloud keeps rolling out after touchdown
       stormT -= dt; const s = flight.s;
