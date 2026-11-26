@@ -45,6 +45,7 @@ visualizer/                      Web app (served by Vercel; see vercel.json)
 ├── landing-sim.js               Landing tab physics (belly flop, flip, TVC landing, gusts, push timer); no Three.js
 ├── landing-orbit.js             Landing tab: Mars from orbit (planet, clouds, atmosphere glow, stars)
 ├── landing-look.js              Landing tab: looks, bloom + grading, lens flare, quality levels
+├── landing-base.js              Landing tab: the outpost round the pad, laid out from one plan (PLAN), keep-out checks
 └── public/                      static assets: favicon, app icons, images
 cad/                             CadQuery models + drawing generators (Python)
 ├── lib/                         shared: sheet helpers, hidden-line removal, TVC assembly, paths

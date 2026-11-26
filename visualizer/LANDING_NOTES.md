@@ -22,6 +22,9 @@ CHANGELOG "Unreleased" lists every step. Read this file first in a new session.
 - `landing-orbit.js`: orbit planet (craters, canyon, caps for late southern spring: `POLE_TILT`, `SPIN`), clouds, atmosphere,
   stars, sun burst.
 - `landing-look.js`: looks A/B/C/space (palette now matches the orbit planet), grade shader, bloom, quality, flare.
+- `landing-base.js`: the outpost (PLAN: pads LZ-1/2/3, propellant plant, power, habitat district, comms, first ship; roads,
+  tracks, racks, cables, keep-outs). Footprints are levelled in `terrain()`; roads, tracks and blast scour are a ground map the
+  terrain shader reads; `?debug` + M shows the plan from above, keep-out breaks are logged as `Base plan:` warnings.
 - `landing-sim.js`: physics (`createFlight`, phases belly → flip → tvc), `ENTRY` timings (entry 20 s profile, warp ramps).
 
 ## Timeline (as built)

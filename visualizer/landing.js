@@ -12,6 +12,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as L from './landing-sim.js';
 import { createOrbitScene, R_MARS } from './landing-orbit.js';
 import { blendLooks, easeLook, newLook, createPost, createFlare, QUALITY, Q_ORDER } from './landing-look.js';
+import { PLAN, footprints, resolvePlan, onBase, makeBaseMap, MAP, padTexture, checkPlan, drawPlanMap, buildBase } from './landing-base.js';
 
 const $ = id => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -168,9 +169,7 @@ export async function initLanding(step) {
     baseR: 300,                     // craters kept this far from the pad (the ground is rough right up to it)
   };
   const GRADE = [];                 // levelled footprints ({ x, z, r, h }) for the base buildings, filled once terrain() exists
-  // The base round the pad (section 14): fixed spots, clear of the approach (it crosses along z over the pad) and of the
-  // pad cam's view up at the ship. Here so their footprints can be levelled into the terrain before the ground is built.
-  const BASE = { parked: [200, -270], masts: [[-175, 95, 120], [250, 180, 100]], tanks: [110, 250], habs: [-250, 280], dome: [-200, 330], solar: [-120, 380] };
+  // The base round the pad (section 14) is laid out in landing-base.js (PLAN); its footprints are levelled here
   const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
   function vnoise(x, y) {
     const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
@@ -347,13 +346,15 @@ export async function initLanding(step) {
     // west rim (~25 m up). Must match PAD_CAM and TVC_CAM (section: camera).
     const rimX = WALLS[0] ? wz(WALLS[0].e, 350) - 150 : -2000;
     for (const [cx, cz, ch] of [[-82, 98, 6], [-82, -98, 6], [-330, 60, 2], [rimX, 350, 25]]) SIGHT.push([cx, cz, terrain(cx, cz, true)[0] + ch]);
-    // Footprints, each levelled at the ground's mean height there: parked ship, masts, tank farm, habs, dome, solar field
-    const B = BASE, fp = [[...B.parked, 22], ...B.masts.map(([x, z]) => [x, z, 8]), [B.tanks[0] + 12, B.tanks[1] + 6, 24], [B.habs[0] + 5, B.habs[1] + 22, 55], [...B.dome, 26], [B.solar[0] + 38, B.solar[1] + 21, 48]];
-    for (const [gx, gz, r] of fp) { let m = 0; for (let k = 0; k < 9; k++) { const a = k / 9 * 6.283, rr = k ? r * 0.7 : 0; m += terrain(gx + Math.cos(a) * rr, gz + Math.sin(a) * rr)[0]; }
+    // Footprints (landing-base.js), each levelled at the ground's mean height there
+    for (const [gx, gz, r] of footprints()) { let m = 0; for (let k = 0; k < 9; k++) { const a = k / 9 * 6.283, rr = k ? r * 0.7 : 0; m += terrain(gx + Math.cos(a) * rr, gz + Math.sin(a) * rr)[0]; }
       GRADE.push({ x: gx, z: gz, r, h: m / 9 }); }
+    resolvePlan(heightAt);   // the comms mast's rise, its road
   }
+  let groundAt = heightAt;   // the drawn ground's height (bilinear on the mesh grid), set once the ground is built
   const groundU = { uGShadow: { value: new THREE.Color() }, uGMid: { value: new THREE.Color() }, uGLit: { value: new THREE.Color() },
-    uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() }, uSunDir: { value: SUN }, uTime: { value: 0 } };
+    uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() }, uSunDir: { value: SUN }, uTime: { value: 0 },
+    uBaseMap: { value: null }, uBaseRect: { value: new THREE.Vector2(MAP.min, MAP.size) } };   // the base's ground map (roads, tracks, scour): set once the base is built
   const buildGround = () => {
     const N = 560, geo = new THREE.PlaneGeometry(2, 2, N, N); geo.rotateX(-Math.PI / 2);
     const P = geo.attributes.position, uv = geo.attributes.uv, col = new Float32Array(P.count * 3), N1 = N + 1;
@@ -393,6 +394,7 @@ export async function initLanding(step) {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const extra = new Float32Array(P.count * 4); for (let i = 0; i < P.count; i++) extra.set([sandA[i], shade[i], ao[i], talA[i]], i * 4);
     geo.setAttribute('aG', new THREE.BufferAttribute(extra, 4));   // x: dark sand, y: sun (baked terrain shadow), z: hollow darkening, w: talus (boulder fields)
+    groundAt = (x, z) => hAt(x, z) - 0.05;
     return geo;
   };
   {
@@ -411,7 +413,7 @@ export async function initLanding(step) {
     gMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, groundU);
       sh.vertexShader = 'attribute vec4 aG; varying vec3 vGW; varying vec4 vAG;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGW = (modelMatrix * vec4(position, 1.0)).xyz; vAG = aG;');
-      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock, uSunDir; uniform float uTime; varying vec3 vGW; varying vec4 vAG;
+      sh.fragmentShader = `uniform vec3 uGShadow, uGMid, uGLit, uGHigh, uGRock, uSunDir; uniform float uTime; uniform sampler2D uBaseMap; uniform vec2 uBaseRect; varying vec3 vGW; varying vec4 vAG;
         float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(gh(i), gh(i + vec2(1, 0)), f.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), f.x), f.y); }
@@ -453,6 +455,12 @@ export async function initLanding(step) {
           base *= mix(1.0, 0.62, smoothstep(0.83, 0.9, gn(w / 0.35 + 3.0)) * fk * (1.0 - vAG.x));      // pebbles
           float rip = sin(dot(w, vec2(0.8, -0.6)) / 0.55 + 3.0 * gn(w / 6.0));   // crests across the wind
           base *= 1.0 + 0.07 * rip * (1.0 - smoothstep(0.8, 2.5, fp)) * (1.0 - smoothstep(8.0, 160.0, camD)) * clamp(vAG.x * 1.6 - 0.1, 0.0, 1.0);   // only where there is loose sand
+          // The base's ground map: graded roads and aprons (lighter, smoother), rover tracks and contact shade (darker), blast scour (dark grit)
+          { vec2 bu = (w - uBaseRect.x) / uBaseRect.y;
+            if (bu.x > 0.0 && bu.x < 1.0 && bu.y > 0.0 && bu.y < 1.0) { vec3 bm = texture2D(uBaseMap, bu).rgb;
+              base = mix(base, mix(uGLit, uGHigh, 0.35) * (0.92 + 0.1 * gn(w / 1.3)), bm.r * 0.62);
+              base = mix(base, mix(uGRock, uGShadow, 0.5) * 1.6, bm.b * 0.55);
+              base *= 1.0 - 0.5 * bm.g; } }
           // Boulder fields at the foot of the cliffs: dark speckle that reads from afar (real rocks up close)
           base *= 1.0 - 0.38 * vAG.w * mix(smoothstep(0.55, 0.75, gn(w / 7.0)), 0.3, smoothstep(2.0, 7.0, fp)) - 0.12 * vAG.w;
           // Baked light: terrain shadow on the sun term, hollows a little darker; drifting cloud shadows
@@ -545,7 +553,7 @@ export async function initLanding(step) {
       g.computeVertexNormals(); shapes.push([g, 'slab']);
     }
     const pts = [];   // [x, z, size]
-    const ok = (x, z) => Math.hypot(x, z) > L.PAD_R + 12 && !GRADE.some(g => Math.hypot(x - g.x, z - g.z) < g.r + 4);
+    const ok = (x, z) => Math.hypot(x, z) > L.PAD_R + 12 && !GRADE.some(g => Math.hypot(x - g.x, z - g.z) < g.r + 4) && !onBase(x, z);
     for (const [cx, cz, R, f] of craters) {   // rim and apron clusters (the nearer craters)
       const d = Math.hypot(cx, cz); if (d > 1800 || R < 3) continue;
       const n = Math.min(90, Math.round(R * 2.2 * f));
@@ -591,14 +599,14 @@ export async function initLanding(step) {
   // Landing pad: a painted disc, edge lights
   const PAD = new THREE.Group(); scene.add(PAD);
   {
-    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
-    g.fillStyle = '#6b6662'; g.beginPath(); g.arc(256, 256, 254, 0, 7); g.fill();
+    const tex = padTexture(THREE, 'LZ-1');
+    if (false) {
     for (let i = 0; i < 2600; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '60,30,15' : '255,255,255'},${Math.random() * 0.07})`; g.fillRect(Math.random() * 512, Math.random() * 512, 3, 3); }
     g.strokeStyle = '#ecebe6'; g.lineWidth = 14; g.beginPath(); g.arc(256, 256, 226, 0, 7); g.stroke();
     g.lineWidth = 6; g.beginPath(); g.arc(256, 256, 120, 0, 7); g.stroke();
     g.lineWidth = 18; g.beginPath(); g.moveTo(170, 170); g.lineTo(342, 342); g.moveTo(342, 170); g.lineTo(170, 342); g.stroke();
     g.fillStyle = '#f5a623'; for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; g.fillRect(256 + Math.cos(a) * 196 - 7, 256 + Math.sin(a) * 196 - 7, 14, 14); }
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+    }
     const disc = new THREE.Mesh(new THREE.CircleGeometry(L.PAD_R, 64), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }));
     disc.rotation.x = -Math.PI / 2; disc.position.y = 0.05; disc.receiveShadow = true; PAD.add(disc);
   }
@@ -843,49 +851,19 @@ export async function initLanding(step) {
 
   // The ship takes half the haze: realistic air would wash it out on the long-lens site cameras, and it is the subject
   ship.traverse(o => { if (o.material) [].concat(o.material).forEach(m => { m.defines = { ...(m.defines || {}), HAZE_K: '0.5' }; m.needsUpdate = true; }); });
-  // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
-  // A parked cargo Starship (same hull, legs out), two lattice masts (120/100 m), a propellant tank farm, bermed habs, a
-  // greenhouse dome and a solar field: light materials and lamps so they read from the site camera 2 km out.
-  // Their spots and levelled footprints: BASE and GRADE, in the terrain section.
-  {
-    const put = (o, x, z, dy = 0) => { o.position.set(x, heightAt(x, z) + dy, z); o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); scene.add(o); return o; };
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2eee8, metalness: 0.15, roughness: 0.55 }), berm = new THREE.MeshStandardMaterial({ color: 0x8a4a2c, roughness: 1 });
-    const lamp = new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }), red = new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false });
-    // Parked ship: hull halves, base, flaps and legs cloned from the flying one, standing on its feet
-    const pk = new THREE.Group(), pa = new THREE.Group(); pk.add(pa); pa.position.y = FOOT;
+  // ---------- The outpost round the pad (landing-base.js): built from the plan, the parked ships cloned from this one ----------
+  const parkedShip = ({ lean = 0, dusty = false } = {}) => {   // a ship standing on its legs; feet at y = 0
+    const g = new THREE.Group(), pk = new THREE.Group(), pa = new THREE.Group(); g.add(pk); pk.add(pa); pa.position.y = FOOT; pk.rotation.z = lean;
     [body, shield, tip, base, details].forEach(m => pa.add(m.clone()));
     rvacs.forEach(e => { const c = e.clone(); c.children[0].material = M.engine; pa.add(c); });
     flaps.forEach(f => { const h = f.pivot.parent.clone(); h.children[f.pivot.parent.children.indexOf(f.pivot)].rotation.y = f.side * 0.3; pa.add(h); });
     [45, 135, 225, 315].forEach(a => poseLeg(makeLeg(a * DEG, pa), LEGS.open, LG.EXT, 1, 0));   // the same four legs, out
-    pk.rotation.y = 2.1; put(pk, ...BASE.parked);
-    // Lattice masts (light steel so they read against the ground), cross bracing, a dish, beacons
-    const steel = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, metalness: 0.5, roughness: 0.45 });
-    BASE.masts.forEach(([mx, mz, MH]) => { const mast = new THREE.Group(), W = 4;
-      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, MH, 6), steel); l.position.set(sx * W / 2, MH / 2, sz * W / 2); mast.add(l); }
-      for (let y = 2; y < MH; y += 4) for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, Math.hypot(W, 4), 4), steel);
-        b.position.set(k < 2 ? 0 : (k === 2 ? 1 : -1) * W / 2, y + 2, k < 2 ? (k === 0 ? 1 : -1) * W / 2 : 0); b.rotation.set(k < 2 ? 0 : Math.atan2(W, 4) * (y % 8 ? 1 : -1), 0, k < 2 ? Math.atan2(W, 4) * (y % 8 ? 1 : -1) : 0); mast.add(b); }
-      const dish = new THREE.Mesh(new THREE.SphereGeometry(3.5, 16, 8, 0, Math.PI * 2, 0, 0.9), white); dish.position.set(2.8, MH - 6, 0); dish.rotation.z = -1.2; mast.add(dish);
-      for (const y of [MH + 0.8, MH * 0.5]) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 6), red); b.position.y = y; mast.add(b); }
-      put(mast, mx, mz); });
-    // Propellant tank farm: tall white tanks (methane/oxygen from the ISRU plant)
-    [[0, 0], [12, 0], [0, 12], [12, 12], [24, 6]].forEach(([dx, dz], i) => { const t = new THREE.Group(), h = i === 4 ? 22 : 32;
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, h, 24), white); c.position.y = h / 2; t.add(c);
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(4.5, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2), white); cap.position.y = h; t.add(cap);
-      const l = new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), lamp); l.position.set(0, h + 4.6, 0); t.add(l);
-      put(t, BASE.tanks[0] + dx, BASE.tanks[1] + dz); });
-    // Habs: white cylinders on their sides, half-buried in regolith berms, a lamp on each; a big greenhouse dome
-    [[0, 0, 0.2], [26, 8, -0.3], [-24, 14, 0.5], [6, 32, 1.4], [40, 30, 0.9], [-30, 44, -0.6]].forEach(([dx, dz, ry]) => { const h = new THREE.Group(); h.scale.setScalar(1.7);
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 12, 20), white); c.rotation.z = Math.PI / 2; c.position.y = 3.4; h.add(c);
-      const b = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), berm); b.scale.set(1.5, 0.45, 1); h.add(b);
-      const l = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 4), lamp); l.position.set(0, 7.6, 0); h.add(l);
-      h.rotation.y = ry; put(h, BASE.habs[0] + dx, BASE.habs[1] + dz); });
-    { const d = new THREE.Group(), g = new THREE.Mesh(new THREE.SphereGeometry(20, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcfe2e8, metalness: 0.6, roughness: 0.15, transparent: true, opacity: 0.85 }));
-      d.add(g); const ring = new THREE.Mesh(new THREE.TorusGeometry(20, 0.8, 6, 48), white); ring.rotation.x = Math.PI / 2; d.add(ring); put(d, ...BASE.dome); }
-    // Solar field: rows of dark tilted panels
-    const panel = new THREE.MeshStandardMaterial({ color: 0x3a5a86, metalness: 0.8, roughness: 0.2 });   // glints in the sun
-    for (let r = 0; r < 8; r++) for (let c = 0; c < 12; c++) { const p = new THREE.Mesh(new THREE.BoxGeometry(6, 0.15, 3), panel); p.rotation.x = -0.5;
-      put(p, BASE.solar[0] + c * 7, BASE.solar[1] + r * 6, 1.3); }
-  }
+    const dustC = new THREE.Color(0xa0603a), cache = new Map();
+    g.traverse(m => { if (!m.isMesh) return; m.castShadow = m.receiveShadow = true;
+      if (dusty) m.material = [].concat(m.material).map(mt => { if (!cache.has(mt)) { const c = mt.clone(); c.color?.lerp(dustC, 0.45); c.roughness = Math.min(1, (c.roughness ?? 0.5) + 0.35); c.metalness = (c.metalness ?? 0) * 0.5; if (c.emissive) c.emissive.setRGB(0, 0, 0); cache.set(mt, c); } return cache.get(mt); })[0]; });
+    return g;
+  };
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }), redMat = new THREE.MeshBasicMaterial({ color: 0xff4d5e, fog: false });
   const legBk = [0, 0, 0, 0];   // extra splay (deg) of a buckled leg (crash)
   let legTc = 0;
   function poseLegs() { legs.forEach((p, i) => { const t = legTc - i * LEGS.stag, u = clamp(t / LEGS.swing, 0, 1), th = legAng(t) + legBk[i];
@@ -1139,6 +1117,8 @@ export async function initLanding(step) {
     };
   }
   const dust = createPoints(4500, false, scene), fire = createPoints(1000, true, scene);
+  const outpost = buildBase({ THREE, scene, groundAt, heightAt, groundU, wind: TERRAIN.wind, parkedShip, dust, lamp: lampMat, red: redMat });
+  groundU.uBaseMap.value = makeBaseMap(THREE);   // drawn after the build: it includes the contact shade under each building
   const DUST = [0.72, 0.5, 0.36], STREAK = [0.95, 0.85, 0.75];
   const debris = [];
   { for (let i = 0; i < 46; i++) {
@@ -1497,6 +1477,7 @@ export async function initLanding(step) {
     clearTimeout(loopTimer); $('lndLoopNote').textContent = '';
     legBk.fill(0); legC.fill(0); setLegs(0); shipFx(0, 0);
     wreck.forEach(d => { d.m.visible = false; }); scorch.visible = false; crashT = 0; fireLight.intensity = 0; blasts.length = 0;
+    outpost.reset();
     refresh();
   }
   function begin() {
@@ -1566,7 +1547,7 @@ export async function initLanding(step) {
   function touchdown(tilt) {
     const s = flight.s, miss = flight.drift;
     td = { tilt, vs: -s.vh, miss };
-    s.h = groundUnder();
+    s.h = groundUnder(); outpost.onTouchdown(ship.position.clone().setY(groundUnder()));
     if (tilt > L.TIP_DEG || td.vs > CRASH.collapse) { startTip(td.vs > CRASH.collapse && tilt <= L.TIP_DEG); return; }
     const onPad = miss <= L.PAD_R, vs = Math.max(0, td.vs), clean = tilt <= L.LAND_OK_DEG && vs <= TDN.hardVs;
     land = { t0: simClock, vs, tx: s.cmd.x + s.big.tiltX, ty: s.cmd.y + s.big.tiltY, y0: ship.position.y, thr: Math.max(s.thr, 0.05), off: null,
@@ -2230,6 +2211,10 @@ export async function initLanding(step) {
   { const e = wz(WALLS[0].e, TVC_CAM.siteT.z); let bx = e - 70, bh = -1e9;   // stand just back from the west rim's edge, on its highest point
     for (let x = e - 260; x <= e - 40; x += 10) { const hh = heightAt(x, TVC_CAM.siteT.z); if (hh > bh) { bh = hh; bx = x; } }
     TVC_CAM.siteT.x = TVC_CAM.siteW.x = bx; }
+  // Every fixed camera stands on something: the pad cam poles (either side of the approach), the tele tripod, the site tower
+  outpost.addCamProps([[PAD_CAM.x, PAD_CAM.z, PAD_CAM.y, 'pole'], [PAD_CAM.x, -PAD_CAM.z, PAD_CAM.y, 'pole'], [TVC_CAM.tele.x, TVC_CAM.tele.z, TVC_CAM.tele.h, 'tripod'], [TVC_CAM.siteT.x, TVC_CAM.siteT.z, TVC_CAM.siteT.h, 'hut']]);
+  const planCams = { pad: [[PAD_CAM.x, PAD_CAM.z], [PAD_CAM.x, -PAD_CAM.z]], site: [TVC_CAM.siteT.x, TVC_CAM.siteT.z] }, planBad = checkPlan(outpost.objs, planCams);
+  planBad.forEach(([o, why]) => console.warn(`Base plan: ${o.name} ${why}`));
   const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3();
 
 
@@ -2620,11 +2605,17 @@ export async function initLanding(step) {
       else if (state === 'falling' || state === 'tipping') { const fp = fallPlume(); setPlume(fp.thr, simClock, 99, fp.n); }
       else { placeShip(); setPlume(state === 'flight' && flight.s.phase !== 'belly' ? flight.s.thr : 0, simClock, state === 'flight' ? flipT() : 99, state === 'flight' && flight.s.phase === 'tvc' ? flight.s.eng : 0); }
       if (!paused) effects(sdt);
+      outpost.update({ dt: sdt, t: simClock, state, phase: flight.s.phase, h: flight.s.h - groundUnder(), ship: state === 'flight' ? ship.position : null, landedAt: land?.t0 ?? null, ok: outcome?.ok && !!land });
       if (fadeOut > 0) { fadeOut = Math.max(0, fadeOut - dt); fadeAmt = fadeOut / 0.8; } else fadeAmt = 0;
-      padLights.forEach((m, i) => { m.visible = Math.floor(simClock * 2 + i / 3) % 2 === 0 || state === 'landed'; });
-      const lp = ship.position, throwD = Math.max(lp.y, 0) / SUN.y;
-      sun.target.position.copy(lp).addScaledVector(SUN, -throwD); sun.position.copy(sun.target.position).addScaledVector(SUN, throwD + 120);
-      if (Math.abs(sun.shadow.camera.far - (throwD + 300)) > 30) { sun.shadow.camera.far = throwD + 300; sun.shadow.camera.updateProjectionMatrix(); }
+      { const chase = state === 'flight' && flight.s.phase === 'tvc' && flight.s.h - groundUnder() < 1500, k = Math.floor(simClock * 10);   // in sequence while it comes down
+        padLights.forEach((m, i) => { m.visible = chase ? (k % 12 === i || (k + 6) % 12 === i) : Math.floor(simClock * 2 + i / 3) % 2 === 0 || state === 'landed'; }); }
+      const lp = ship.position, throwD = Math.max(lp.y, 0) / SUN.y, SC = sun.shadow.camera;
+      // Sun shadows: round the ship (±90 m) for the close cameras; over the whole outpost (±760 m) for the far ones, so the
+      // buildings throw their shadows across the terrain in the site shots (the cuts between them hide the switch)
+      const wideSh = camera.position.distanceTo(lp) > 600, half = wideSh ? 760 : 90, far = wideSh ? 3400 : throwD + 300;
+      if (wideSh) { sun.target.position.set(-60, 0, 100); sun.position.copy(sun.target.position).addScaledVector(SUN, 1600); }
+      else { sun.target.position.copy(lp).addScaledVector(SUN, -throwD); sun.position.copy(sun.target.position).addScaledVector(SUN, throwD + 120); }
+      if (SC.right !== half || Math.abs(SC.far - far) > 30) { SC.left = SC.bottom = -half; SC.right = SC.top = half; SC.far = far; SC.updateProjectionMatrix(); }
       cameraStep(dt);
       flare.lf.position.copy(camera.position).addScaledVector(SUN, 60000);
       applyLook(dt);
@@ -2647,6 +2638,12 @@ export async function initLanding(step) {
   const DEBUG = /[?&]debug/.test(location.search);
   if (DEBUG) {
     $('lndFps').hidden = false;
+    window.__base = outpost;   // tests: the outpost (rover, lights)
+    // M: the base plan from above (zones, roads, keep-outs, cameras; anything breaking a keep-out in red)
+    const mapC = document.createElement('canvas'); mapC.width = mapC.height = 640; drawPlanMap(mapC, outpost.objs, planCams, planBad);
+    const mapI = new Image(); mapI.src = mapC.toDataURL(); Object.assign(mapI.style, { position: 'absolute', right: '16px', top: '120px', width: '640px', zIndex: 50, display: 'none', borderRadius: '8px', pointerEvents: 'none' });
+    view.appendChild(mapI); const mapC2 = mapI;
+    window.addEventListener('keydown', e => { if (e.key === 'm' || e.key === 'M') mapC2.style.display = mapC2.style.display === 'none' ? 'block' : 'none'; });
     // Stills for comparing looks: __lnd.still('A') shows the ground scene from a low camera toward the horizon
     window.__lnd = {
       still(name, x = -160, y = 5, z = -170, tx = 1800, ty = 120, tz = 2300) {
