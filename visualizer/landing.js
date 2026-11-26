@@ -160,7 +160,11 @@ export async function initLanding(step) {
     dunes: { x: 300, z: -7600, r: 1500 }, yardangs: { x: -6500, z: 2500, r: 2500 },
     // [x, z, radius, height]: big mesas on the plateaus, then small buttes on the valley floor
     mesas: [[11500, 600, 2700, 420], [8600, -5200, 1300, 270], [14500, 5600, 1900, 360], [-9800, -8000, 2300, 300], [-13000, 6800, 1700, 280], [6200, 12500, 2400, 380]],
-    buttes: [[-900, 2600, 160, 60], [1100, -3400, 200, 75], [700, 5200, 140, 55], [-1100, -6000, 220, 80], [-600, 9000, 260, 90], [400, -11000, 300, 95]],
+    buttes: [[-900, 2600, 160, 60], [1100, -3400, 200, 75], [700, 5200, 140, 55], [-1100, -6000, 220, 80], [-600, 9000, 260, 90], [400, -11000, 300, 95],
+      [1450, -1150, 210, 135], [620, 1350, 160, 85], [-350, -1400, 130, 65], [1250, 2300, 380, 170], [-700, 1700, 120, 55]],   // in the site cameras' view, 1.5–3 km out
+    ridges: [[-1300, 180, 34], [1050, 220, 45]],
+    channels: [[-950, 0.18, 0.9], [650, -0.12, 0.7], [1850, 0.1, 1]],   // [z at the river, drift dz/dx, depth k]: dry washes from the east wall to the riverbed
+    peaks: [[13500, -2600, 3600, 820], [15200, 2900, 4300, 700], [11800, 6600, 3000, 640], [-14200, -3200, 3800, 760], [-12500, 4800, 3200, 600]],   // [x, z, radius, height]: ranges that break the skyline over the walls   // [x, wander, height]: low ridges along the valley floor
     baseR: 900,                     // gentle ground round the pad, kept for the base (section 14)
   };
   const GRADE = [];                 // flattened footprints ({ x, z, r }), filled by the base (section 14)
@@ -188,25 +192,39 @@ export async function initLanding(step) {
       craters.push([Math.cos(a) * d, Math.sin(a) * d, R, 0.8 + 0.2 * r01(), r01() * 6.28]);
     }
   }
-  // The valley walls: [height, talus 0..1]. Each edge wanders and is cut back by side canyons; loose buttes stand off it
-  const WALLS = [[-1, TERRAIN.west], [1, TERRAIN.east]].map(([s, W]) => {   // the parts that depend on z only, tabled every 8 m
-    const n = 30001, e = new Float32Array(n), H = new Float32Array(n);
-    for (let i = 0; i < n; i++) { const z = (i - 15000) * 8; e[i] = W.x + W.wan * fbm(z / 3800 + W.seed, W.seed) + 140 * fbm(z / 700 + W.seed * 2, 3.1); H[i] = W.h * (0.75 + 0.35 * fbm(z / 5000 + W.seed, 7)); }
-    return { s, W, e, H };
+  // The valley walls: [height, talus 0..1]. Each wall stands on a long scree apron (600–900 m deep, up to ~40% of its height,
+  // concave like real talus), rises in one sheer face or, along some stretches, two faces with a ledge between, and rounds
+  // over at the rim. Side canyons cut it back at irregular spacing: wide bays and narrow slots, shallow and deep. Loose
+  // buttes stand off the foot. The parts that depend on z only are tabled every 8 m.
+  const WALLS = [[-1, TERRAIN.west], [1, TERRAIN.east]].map(([s, W]) => {
+    const n = 30001, e = new Float32Array(n), H = new Float32Array(n), A = new Float32Array(n), B = new Float32Array(n), P = new Float32Array(n), D = new Float32Array(n), Ph = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const z = (i - 15000) * 8;
+      e[i] = W.x + W.wan * fbm(z / 3800 + W.seed, W.seed) + 140 * fbm(z / 700 + W.seed * 2, 3.1); H[i] = W.h * (0.75 + 0.35 * fbm(z / 5000 + W.seed, 7));
+      A[i] = 720 + 260 * fbm(z / 1500 + W.seed * 4, 1.3);                                   // apron depth
+      B[i] = sstep(0.05, 0.35, fbm(z / 2600 + W.seed * 6, 5.7));                             // ledge along this stretch
+      P[i] = lerp(5, 18, sstep(-0.5, 0.5, fbm(z / 1700 + W.seed * 3, 2.2)));                // canyon sharpness: bay … slot
+      D[i] = 850 * lerp(0.45, 1.3, sstep(-0.6, 0.6, fbm(z / 2100 + W.seed * 5, 9.4)));     // canyon depth
+      Ph[i] = z / W.canyon + 2.6 * fbm(z / 2600 + W.seed, W.seed * 2);                       // canyon spacing, irregular
+    }
+    return { s, W, e, H, A, B, P, D, Ph };
   });
   const wz = (A, z) => { const f = clamp(z / 8 + 15000, 0, 29999.999), i = f | 0, t = f - i; return A[i] + (A[i + 1] - A[i]) * t; };
   function wallAt(x, z) {
     let h = 0, tal = 0;
-    for (const { s, W, e: E, H: HH } of WALLS) {
-      const e = wz(E, z), sx = s * (x - e);   // > 0: plateau side
-      if (sx < -1200) continue;
-      const notch = sx < 1800 ? Math.pow(Math.max(0, 1 - Math.abs(Math.sin(z / W.canyon + 1.7 * fbm(x / 900, z / 900 + W.seed)))), 14) * sstep(1800, 300, sx) * 850 : 0;
-      const H = wz(HH, z);
-      const cliff = sstep(-120, 120, sx - notch);
-      const butte = sx > -900 && sx < -100 && cliff < 1 ? sstep(0.6, 0.7, fbm(x / 420 + W.seed, z / 420)) * sstep(-900, -200, sx) * (1 - cliff) : 0;
-      const t = sstep(-520, -60, sx) * (1 - cliff) * (1 - butte);
-      h += H * (cliff + 0.85 * butte) * (cliff + butte > 0.01 ? 1 + 0.05 * fbm(x / 600, z / 600) : 1) + H * 0.2 * Math.pow(t, 1.5);
-      tal = Math.max(tal, t);
+    for (const T of WALLS) {
+      const { s, W } = T, e = wz(T.e, z), sx = s * (x - e);   // > 0: plateau side
+      if (sx < -1400) continue;
+      const notch = sx < 1800 ? Math.pow(Math.max(0, 1 - Math.abs(Math.sin(wz(T.Ph, z) + 1.2 * fbm(x / 900, z / 900 + W.seed)))), wz(T.P, z)) * sstep(1800, 300, sx) * wz(T.D, z) : 0;
+      const H = wz(T.H, z), u = sx - notch, aw = wz(T.A, z), led = wz(T.B, z), lw = led > 0.01 && u > -200 && u < 700 ? 170 + 60 * fbm(x / 500, z / 500 + W.seed) : 170;
+      // Face(s): steep for most of the height, rounding over at the rim; with a ledge, a lower face to ~55% then the upper one
+      const face = v => 0.86 * sstep(-110, 50, v) + 0.14 * sstep(-30, 300, v);
+      const cliff = lerp(face(u), 0.55 * sstep(-110, 40, u) + 0.45 * face(u - lw), led);
+      const butte = sx > -1000 && sx < -100 && cliff < 1 ? sstep(0.6, 0.7, fbm(x / 420 + W.seed, z / 420)) * sstep(-1000, -250, sx) * (1 - cliff) : 0;
+      // Scree apron: concave, runs into the canyon mouths, partly buries the foot of the face
+      const ak = sstep(-aw, 40, u), apron = ak > 0 && cliff < 0.45 ? H * 0.4 * Math.pow(ak, 1.8) * (0.85 + 0.15 * fbm(x / 260, z / 260 + W.seed)) : 0;   // (behind the face it is buried anyway)
+      const wallH = H * (cliff + 0.85 * butte) * (cliff + butte > 0.01 ? 1 + 0.05 * fbm(x / 600, z / 600) : 1);
+      h += Math.max(wallH, apron);
+      tal = Math.max(tal, ak * (1 - cliff) * (1 - butte));
     }
     return [h, tal];
   }
@@ -223,10 +241,33 @@ export async function initLanding(step) {
     let h = 16 * fbm(x / 2600, z / 2600) + 26 * fbm(x / 1300 + 4, z / 1300)
       + (nearK ? 9 * Math.pow(ridged(x / 700, z / 1100), 3) + 1.6 * fbm(x / 420, z / 420) + (dist < 3000 ? 0.25 * fbm(x / 22, z / 22) : 0) : 0);   // rolling floor: rises, swales, low ridges
     let tone = 0, sand = 0, rimBright = 0, talus = 0;
+    // Valley floor relief (none on the base ground): rounded hillocks 15–45 m, and two low broken ridges running down the
+    // valley across the site cameras' line of sight, one between them and the pad, one in front of the east wall's apron
+    if (dist > 550 && dist < 9000) {
+      const fk = sstep(550, 1150, dist) * sstep(9000, 7000, dist);   // the base stands within ~450 m of the pad; past ~8 km the haze hides them
+      h += fk * (42 * Math.pow(sstep(0.05, 0.85, fbm(x / 560 + 2.3, z / 560 - 7.1)), 1.4) + (dist < 5000 ? 9 * fbm(x / 240 + 5, z / 240) : 0));
+      for (const [rx, ra, rh] of T.ridges) {
+        const dx = x - (rx + ra * Math.sin(z / 2300 + rx) + 140 * fbm(z / 1500, rx));
+        if (Math.abs(dx) < 700) { const brk = sstep(-0.35, 0.15, fbm(z / 700 + rx, 1.9));
+          h += fk * rh * brk * (0.6 + 0.4 * fbm(x / 300, z / 300)) * Math.exp(-((dx / (dx < 0 ? 260 : 150)) ** 2)); }   // gentle back slope, steeper front
+      }
+    }
     { const [wh, wt] = wallAt(x, z); h += wh; talus = wt; tone += 0.04 * wt; }
     // Dry riverbed winding down the valley east of the pad: a sandy bed between low banks
     { const R = T.river, dxr = x - (R[0] + R[1] * Math.sin(z / R[2]) + R[3] * Math.sin(z / R[4] + 1));
       if (Math.abs(dxr) < 300) { h += -9 * Math.exp(-((dxr / 45) ** 2)) + 1.8 * Math.exp(-((dxr / 110) ** 2)); sand = Math.max(sand, 0.85 * Math.exp(-((dxr / 60) ** 2))); } }
+    // Dry washes: from the east wall's apron west to the riverbed, winding, with a side branch each; sandy beds
+    if (x > 500 && x < 2300 && Math.abs(z) < 4000) for (const [cz, dr, dk] of T.channels) {
+      const R = T.river, rx = R[0] + R[1] * Math.sin(z / R[2]) + R[3] * Math.sin(z / R[4] + 1), along = x - rx;
+      if (along < -40 || along > 1500) continue;
+      const tap = sstep(-40, 60, along) * sstep(1500, 1050, along);
+      for (const [oz, k] of [[0, 1], [140 + 90 * dk, 0.6]]) {   // main wash, then a branch that joins it ~400 m up
+        const bz = cz + oz * sstep(250, 650, along) + dr * along + 70 * Math.sin(along / 260 + cz) + 40 * fbm(along / 300, cz);
+        const dzc = z - bz; if (Math.abs(dzc) > 120) continue;
+        const bed = Math.exp(-((dzc / (22 * k + 10)) ** 2)) * tap * (oz ? sstep(250, 450, along) : 1);
+        h -= 6 * dk * k * bed - 1.2 * Math.exp(-((dzc / 60) ** 2)) * tap; sand = Math.max(sand, 0.8 * bed);
+      }
+    }
     // Low rock outcrops on the floor (none near the pad)
     if (dist > 500 && dist < 12000) { const o = sstep(0.68, 0.8, fbm(x / 220 + 9, z / 220 - 4)) * sstep(500, 900, dist); h += 7 * o; tone -= 0.03 * o; }   // (sand/dust patches and streaks: in the ground shader)
     // Out to the horizon: ridged mountain ranges, a field of far mesas (benched), a canyon
@@ -238,6 +279,10 @@ export async function initLanding(step) {
       h += mtn + mesaF + canyon + 60 * fbm(x / 900, z / 900) * kf;
       tone += (mtn > 300 ? -0.06 : 0) + (mesaF > 260 ? 0.05 : 0) + (canyon < -200 ? -0.08 : 0);
     }
+    // Ranges 10–15 km out that rise over the valley walls' flat top line (ridged, uneven peaks)
+    for (const [px, pz, pr, ph] of T.peaks) { const dx = x - px, dz = z - pz; if (Math.abs(dx) > pr || Math.abs(dz) > pr) continue;
+      const q = 1 - Math.hypot(dx, dz) / pr - 0.18 * fbm(x / 1600 + px, z / 1600); if (q <= 0) continue;
+      h += ph * Math.pow(q, 1.5) * (0.6 + 0.55 * ridged(x / 2200 + px / 1e4, z / 2200)); tone -= 0.03 * q; }
     // Mesas and buttes: warped, embayed outlines, flat tops, cliffs benched in rock bands, rubble aprons; the big ones
     // break up at their edges into detached buttes and pillars
     for (const list of [TERRAIN.mesas, TERRAIN.buttes]) for (const [bx, bz, br, bh] of list) {
