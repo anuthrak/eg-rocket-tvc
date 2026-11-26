@@ -165,9 +165,12 @@ export async function initLanding(step) {
     ridges: [[-1300, 180, 34], [1050, 220, 45]],
     channels: [[-950, 0.18, 0.9], [650, -0.12, 0.7], [1850, 0.1, 1]],   // [z at the river, drift dz/dx, depth k]: dry washes from the east wall to the riverbed
     peaks: [[13500, -2600, 3600, 820], [15200, 2900, 4300, 700], [11800, 6600, 3000, 640], [-14200, -3200, 3800, 760], [-12500, 4800, 3200, 600]],   // [x, z, radius, height]: ranges that break the skyline over the walls   // [x, wander, height]: low ridges along the valley floor
-    baseR: 900,                     // gentle ground round the pad, kept for the base (section 14)
+    baseR: 300,                     // craters kept this far from the pad (the ground is rough right up to it)
   };
-  const GRADE = [];                 // flattened footprints ({ x, z, r }), filled by the base (section 14)
+  const GRADE = [];                 // levelled footprints ({ x, z, r, h }) for the base buildings, filled once terrain() exists
+  // The base round the pad (section 14): fixed spots, clear of the approach (it crosses along z over the pad) and of the
+  // pad cam's view up at the ship. Here so their footprints can be levelled into the terrain before the ground is built.
+  const BASE = { parked: [200, -270], masts: [[-175, 95, 120], [250, 180, 100]], tanks: [110, 250], habs: [-250, 280], dome: [-200, 330], solar: [-120, 380] };
   const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
   function vnoise(x, y) {
     const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
@@ -234,18 +237,24 @@ export async function initLanding(step) {
     for (let i = Math.max(0, Math.floor((c[0] - ext) / CB) + CG / 2); i <= Math.min(CG - 1, Math.floor((c[0] + ext) / CB) + CG / 2); i++)
       for (let j = Math.max(0, Math.floor((c[1] - ext) / CB) + CG / 2); j <= Math.min(CG - 1, Math.floor((c[1] + ext) / CB) + CG / 2); j++) cbin[j * CG + i].push(c); }
   const NOC = [];
+  // Rolling floor: rises, swales, low ridges (km scale) plus mounds 2–5 m and hummocks ~1 m, right up to the pad's edge
+  const floorBase = (x, z, nearK, dist) => 16 * fbm(x / 2600, z / 2600) + 26 * fbm(x / 1300 + 4, z / 1300)
+    + (nearK ? 9 * Math.pow(ridged(x / 700, z / 1100), 3) + 1.6 * fbm(x / 420, z / 420) + (dist < 3000 ? 0.25 * fbm(x / 22, z / 22) + sstep(3000, 2000, dist) * (5 * fbm(x / 90 + 1.7, z / 90 - 3.3) + 1.6 * fbm(x / 18 + 4, z / 18)) : 0) : 0);
+  const FLOOR0 = floorBase(0, 0, true, 0);
+  // Sight lines kept open to the pad (low cameras): terrain held a few metres under the line from the camera to the pad's
+  // edge, in a strip ~30 m each side; everything outside the strip stays rough. [x, z, camera y] (y set once terrain exists)
+  const SIGHT = [];
   // Returns [height, rim brightness, tone offset, dark sand 0..1, talus 0..1]
-  function terrain(x, z) {
+  function terrain(x, z, raw = false) {
     const dist = Math.hypot(x, z), T = TERRAIN;
     const nearK = dist < 20000;   // fine detail only where it can be seen
-    let h = 16 * fbm(x / 2600, z / 2600) + 26 * fbm(x / 1300 + 4, z / 1300)
-      + (nearK ? 9 * Math.pow(ridged(x / 700, z / 1100), 3) + 1.6 * fbm(x / 420, z / 420) + (dist < 3000 ? 0.25 * fbm(x / 22, z / 22) : 0) : 0);   // rolling floor: rises, swales, low ridges
+    let h = floorBase(x, z, nearK, dist) - FLOOR0 * sstep(1500, 0, dist);   // rolling floor, shifted to meet the pad at 0 (no pit, no pedestal)
     let tone = 0, sand = 0, rimBright = 0, talus = 0;
-    // Valley floor relief (none on the base ground): rounded hillocks 15–45 m, and two low broken ridges running down the
+    // Valley floor relief (none on the base ground): rolling hillocks 15–45 m (with hollows) and coarse 3–5 m ridging, and two low broken ridges running down the
     // valley across the site cameras' line of sight, one between them and the pad, one in front of the east wall's apron
-    if (dist > 550 && dist < 9000) {
-      const fk = sstep(550, 1150, dist) * sstep(9000, 7000, dist);   // the base stands within ~450 m of the pad; past ~8 km the haze hides them
-      h += fk * (42 * Math.pow(sstep(0.05, 0.85, fbm(x / 560 + 2.3, z / 560 - 7.1)), 1.4) + (dist < 5000 ? 9 * fbm(x / 240 + 5, z / 240) : 0));
+    if (dist > 45 && dist < 9000) {
+      const fk = sstep(45, 220, dist) * sstep(9000, 7000, dist);   // from just outside the pad; past ~8 km the haze hides them
+      h += fk * (44 * Math.pow(sstep(-0.75, 0.9, fbm(x / 560 + 2.3, z / 560 - 7.1)), 1.5) - 12) + (dist < 5000 ? sstep(40, 90, dist) * sstep(5000, 4000, dist) * (9 * fbm(x / 240 + 5, z / 240) + 6 * Math.pow(ridged(x / 75 + 3.1, z / 75 - 1.3), 2) - 2.5) : 0);   // rolling (no flat gaps), up and down about the pad's level; coarse ridged texture near
       for (const [rx, ra, rh] of T.ridges) {
         const dx = x - (rx + ra * Math.sin(z / 2300 + rx) + 140 * fbm(z / 1500, rx));
         if (Math.abs(dx) < 700) { const brk = sstep(-0.35, 0.15, fbm(z / 700 + rx, 1.9));
@@ -269,7 +278,7 @@ export async function initLanding(step) {
       }
     }
     // Low rock outcrops on the floor (none near the pad)
-    if (dist > 500 && dist < 12000) { const o = sstep(0.68, 0.8, fbm(x / 220 + 9, z / 220 - 4)) * sstep(500, 900, dist); h += 7 * o; tone -= 0.03 * o; }   // (sand/dust patches and streaks: in the ground shader)
+    if (dist > 90 && dist < 12000) { const o = sstep(0.68, 0.8, fbm(x / 220 + 9, z / 220 - 4)) * sstep(90, 250, dist); h += 7 * o; tone -= 0.03 * o; }   // (sand/dust patches and streaks: in the ground shader)
     // Out to the horizon: ridged mountain ranges, a field of far mesas (benched), a canyon
     if (dist > 4000) {
       const kf = sstep(5000, 22000, dist);
@@ -321,14 +330,28 @@ export async function initLanding(step) {
       if (big && cq > 1) { const tu = (dx * WX + dz * WZ) / R, tv = (dx * WZ - dz * WX) / R;
         if (tu > 0.8 && tu < 7) tone += 0.05 * Math.exp(-((tv / 0.8) ** 2)) * (1 - (tu - 0.8) / 6.2) * f; }
     }
-    // Ground kept gentle round the pad for the base, graded footprints, the flat landing zone
-    h *= lerp(0.4, 1, sstep(250, T.baseR, dist));
-    for (const g of GRADE) { const gd = Math.hypot(x - g.x, z - g.z); if (gd < g.r + 60) h = lerp(h, g.h ?? 0, sstep(g.r + 60, g.r, gd)); }
+    // Open sight lines to the pad, levelled footprints for the base, then only the pad itself is flat
+    if (!raw) for (const [cx, cz, cy] of SIGHT) {
+      const vx = -cx, vz = -cz, L2 = vx * vx + vz * vz, t = clamp(((x - cx) * vx + (z - cz) * vz) / L2, 0, 1);
+      const d = Math.hypot(x - cx - vx * t, z - cz - vz * t), w = sstep(55, 30, d) * sstep(0.02, 0.08, t);
+      if (w > 0) { const lim = lerp(cy, 0.5, t) - 2.5; if (h > lim) h -= (h - lim) * w; }
+    }
+    if (!raw) for (const g of GRADE) { const gd = Math.hypot(x - g.x, z - g.z); if (gd < g.r + 60) h = lerp(h, g.h, sstep(g.r + 60, g.r, gd)); }
     h -= dist * dist / (2 * 3389.5e3);   // the planet's curve
-    const flat = sstep(40, 110, dist);
+    const flat = sstep(32, 65, dist);   // the pad (25 m) and room for the legs
     return [h * flat, rimBright * flat, tone, sand * flat, talus];
   }
   const heightAt = (x, z) => terrain(x, z)[0];
+  {
+    // Sight lines: both pad cams (6 m up, on either side of the approach), the tele cam (2 m up) and the site cameras on the
+    // west rim (~25 m up). Must match PAD_CAM and TVC_CAM (section: camera).
+    const rimX = WALLS[0] ? wz(WALLS[0].e, 350) - 150 : -2000;
+    for (const [cx, cz, ch] of [[-82, 98, 6], [-82, -98, 6], [-330, 60, 2], [rimX, 350, 25]]) SIGHT.push([cx, cz, terrain(cx, cz, true)[0] + ch]);
+    // Footprints, each levelled at the ground's mean height there: parked ship, masts, tank farm, habs, dome, solar field
+    const B = BASE, fp = [[...B.parked, 22], ...B.masts.map(([x, z]) => [x, z, 8]), [B.tanks[0] + 12, B.tanks[1] + 6, 24], [B.habs[0] + 5, B.habs[1] + 22, 55], [...B.dome, 26], [B.solar[0] + 38, B.solar[1] + 21, 48]];
+    for (const [gx, gz, r] of fp) { let m = 0; for (let k = 0; k < 9; k++) { const a = k / 9 * 6.283, rr = k ? r * 0.7 : 0; m += terrain(gx + Math.cos(a) * rr, gz + Math.sin(a) * rr)[0]; }
+      GRADE.push({ x: gx, z: gz, r, h: m / 9 }); }
+  }
   const groundU = { uGShadow: { value: new THREE.Color() }, uGMid: { value: new THREE.Color() }, uGLit: { value: new THREE.Color() },
     uGHigh: { value: new THREE.Color() }, uGRock: { value: new THREE.Color() }, uSunDir: { value: SUN }, uTime: { value: 0 } };
   const buildGround = () => {
@@ -823,8 +846,7 @@ export async function initLanding(step) {
   // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
   // A parked cargo Starship (same hull, legs out), two lattice masts (120/100 m), a propellant tank farm, bermed habs, a
   // greenhouse dome and a solar field: light materials and lamps so they read from the site camera 2 km out.
-  // Fixed spots, clear of the approach (it crosses along z over the pad) and of the pad cam's view up at the ship.
-  const BASE = { parked: [200, -270], masts: [[-175, 95, 120], [250, 180, 100]], tanks: [110, 250], habs: [-250, 280], dome: [-200, 330], solar: [-120, 380] };
+  // Their spots and levelled footprints: BASE and GRADE, in the terrain section.
   {
     const put = (o, x, z, dy = 0) => { o.position.set(x, heightAt(x, z) + dy, z); o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); scene.add(o); return o; };
     const white = new THREE.MeshStandardMaterial({ color: 0xf2eee8, metalness: 0.15, roughness: 0.55 }), berm = new THREE.MeshStandardMaterial({ color: 0x8a4a2c, roughness: 1 });
@@ -2166,7 +2188,8 @@ export async function initLanding(step) {
       if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the RCS, as in the flip
       shotName = name; padCam = true;
     } else if (name === 'pad') {
-      const P = name === 'pad' ? _pc.set(PAD_CAM.x, PAD_CAM.y, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
+      const P = name === 'pad' ? _pc.set(PAD_CAM.x, 0, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
+      if (name === 'pad') P.y = heightAt(P.x, P.z) + PAD_CAM.y;   // 6 m above the ground there (the ground is rough now)
       if (name !== shotName) { camera.position.copy(P); lookOff.set(sp.x, Math.max(14, 0.92 * sp.y), sp.z); }
       camera.position.lerp(P, 1 - Math.exp(-dt * 2));
       _lo.set(sp.x * 0.8, Math.max(14, 0.92 * sp.y), sp.z * 0.8);   // tilts up to keep the whole ship in frame as it comes in
