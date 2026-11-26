@@ -45,13 +45,57 @@ export async function initLanding(step) {
   view.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const HAZE = new THREE.Color(0xd49a72);
-  scene.fog = new THREE.FogExp2(HAZE, 1.25e-5);        // dusty air: ~30% at 30 km, the horizon (110 km) mostly hazed out
+  scene.fog = new THREE.FogExp2(HAZE, 5.7e-5);         // dusty air: density = 1/L (see the haze chunk below); the look sets it
   const camera = new THREE.PerspectiveCamera(40, 1, 1, 200000);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.enabled = false; controls.maxPolarAngle = 88 * DEG;
 
   // Afternoon sun through dusty air: a low sun for long shadows; colour and strength come from the active look
-  const SUN = new THREE.Vector3(-0.6, 0.28, -0.71).normalize();    // ~17° up: long shadows
+  // Side light for the site cameras (on the west rim looking east, ~-10° azimuth): the sun ~90° to their left, so shadows
+  // run across the frame, the west-facing valley wall is raked (buttresses half lit, half shaded) and the ship has a lit
+  // and a shadow side. Behind the camera (the old -130°) it flattened everything.
+  const SUN_GROUND_AZ = -100, SUN_GROUND_EL = 17;
+  const SUN = new THREE.Vector3(Math.cos(SUN_GROUND_EL * DEG) * Math.cos(SUN_GROUND_AZ * DEG), Math.sin(SUN_GROUND_EL * DEG), Math.cos(SUN_GROUND_EL * DEG) * Math.sin(SUN_GROUND_AZ * DEG));   // ~17° up: long shadows
+  // Aerial perspective (all fogged materials): haze = 1 - exp(-(d/L)^0.85), L from the look (fog density = 1/L): ~7% at 1 km, ~22% at
+  // the valley wall 4 km out, ~53% at 15 km, ~83% at 40 km, so the scene reads in depth layers and the far ranges melt into the
+  // sky. Thinner with height (sight lines from altitude cross less dust), a little cooler in the mid distances, warmer toward the sun; the fog colour is
+  // the sky's horizon colour so the skyline has no seam. Computed from the camera-relative position, so sprites and points
+  // work too. A material can take less haze with defines.HAZE_K (the ship: still the clearest thing in the frame).
+  THREE.ShaderChunk.fog_pars_vertex = `#ifdef USE_FOG
+  varying float vFogDepth; varying vec3 vFogRel;
+#endif`;
+  THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
+  vFogDepth = - mvPosition.z; vFogRel = transpose(mat3(viewMatrix)) * mvPosition.xyz;
+#endif`;
+  THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+  uniform vec3 fogColor; varying float vFogDepth; varying vec3 vFogRel;
+  #ifdef FOG_EXP2
+    uniform float fogDensity;
+  #else
+    uniform float fogNear; uniform float fogFar;
+  #endif
+#endif`;
+  THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+  {
+    float hzD = length(vFogRel); vec3 hzW = cameraPosition + vFogRel, hzV = vFogRel / max(hzD, 1e-3);
+    #ifdef FOG_EXP2
+      // Dust thins with height (scale height 1 km): the mean density along the sight line from the camera to this point,
+      // so a view down from the flip altitude crosses far less haze than one along the valley floor
+      float hzYc = max(cameraPosition.y, 0.0), hzYp = max(hzW.y, 0.0), hzDy = hzYc - hzYp, hzE = exp(-hzYp / 1000.0);
+      float hzRho = abs(hzDy) < 1.0 ? hzE : 1000.0 * (hzE - exp(-hzYc / 1000.0)) / hzDy;
+      float fogFactor = 1.0 - exp(-pow(hzD * fogDensity * (0.06 + hzRho), 0.85));
+    #else
+      float fogFactor = smoothstep(fogNear, fogFar, hzD);
+    #endif
+    #ifdef HAZE_K
+      fogFactor *= HAZE_K;
+    #endif
+    float hzS = pow(max(dot(hzV, normalize(vec3(${SUN.x.toFixed(4)}, ${SUN.y.toFixed(4)}, ${SUN.z.toFixed(4)}))), 0.0), 3.0);
+    vec3 hzC = fogColor * mix(vec3(1.0), vec3(1.2, 1.08, 0.94), hzS * 0.7);
+    hzC *= mix(vec3(0.96, 0.97, 1.03), vec3(1.0), smoothstep(0.3, 0.85, fogFactor));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, hzC, fogFactor);
+  }
+#endif`;
   const sun = new THREE.DirectionalLight(0xffe4c2, 3.6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -311,8 +355,21 @@ export async function initLanding(step) {
           base = mix(base, uGLit, smoothstep(0.42, 0.82, t));
           base = mix(base, uGHigh, smoothstep(0.86, 1.0, t) * 0.55);
           float camD0 = distance(cameraPosition, vGW);
-          float band = (0.5 + 0.5 * sin(vGW.y / 9.0 + 2.0 * gf(w / 900.0))) * (1.0 - 0.25 * (1.0 - smoothstep(300.0, 1500.0, camD0)) * (0.5 - 0.5 * sin(vGW.y / 2.7 + 1.3)));   // rock strata, level across buttes (fine layers only up close)
-          vec3 rock = mix(mix(uGRock, uGMid, 0.55) * 1.3, mix(uGMid, uGHigh, 0.5) * 0.95, 0.3 + 0.35 * band);   // gentle strata, not stripes
+          float fp = length(fwidth(w));   // metres of ground per pixel: detail finer than this is faded to its mean (no moiré)
+          // Rock strata: layers ~14 m thick inside ~40 m formations, each its own shade (pale caprock, dark seams), warped and
+          // gently tilted so they wander across the cliffs; averaged out once a pixel spans a layer (no stripes far away)
+          float sy = vGW.y + 22.0 * gf(w / 700.0) + 0.004 * dot(w, vec2(0.7, 0.3)), fwY = fwidth(sy);
+          float li = floor(sy / 14.0), lf = fract(sy / 14.0), soft = 0.06 + fwY / 14.0;
+          float lay = mix(gh(vec2(li - 1.0, 3.7)), gh(vec2(li, 3.7)), smoothstep(0.0, soft, lf));
+          float fi = floor(sy / 41.0), form = mix(gh(vec2(fi - 1.0, 8.3)), gh(vec2(fi, 8.3)), smoothstep(0.0, 0.04 + fwY / 41.0, fract(sy / 41.0)));
+          float seam = step(0.72, gh(vec2(li, 9.1))) * (1.0 - smoothstep(0.0, 0.1 + soft, lf));   // thin dark seam at some layer bases
+          float band = 0.5 * form + 0.4 * lay + 0.1 * gf(w / 300.0) - 0.35 * seam;
+          band = mix(band, 0.5, smoothstep(0.35, 1.0, fwY / 14.0) * 0.6);
+          band = mix(band, 0.5, smoothstep(0.35, 1.0, fwY / 41.0));
+          float fine = 0.5 - 0.5 * sin(sy / 2.7 + 1.3);   // fine bedding, up close only
+          band *= 1.0 - 0.2 * fine * (1.0 - smoothstep(0.15, 0.6, fwidth(sy / 2.7)));
+          float hzBump = 1.0 - smoothstep(0.3, 1.2, fp);
+          vec3 rock = mix(mix(uGRock, uGMid, 0.55) * 1.3, mix(uGMid, uGHigh, 0.5) * 0.95, 0.2 + 0.55 * clamp(band, 0.0, 1.0));
           base = mix(base, rock, smoothstep(0.3, 0.75, sl) * 0.75);
           vec3 sandC = mix(uGRock, uGShadow, 0.4) * 1.35 * vec3(0.92, 0.95, 1.05);
           // Big patches that read from height: dark sand sheets, bright dust, wind streaks
@@ -323,24 +380,18 @@ export async function initLanding(step) {
           base = mix(base, sandC, clamp(sandP, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.7, sl)) * 0.85);
           base *= 0.86 + 0.28 * gf(w / 2500.0 + 7.0);                                           // broad tone variation
           // Near the camera: 2 m and 25 cm mottling, pebbles, sand ripples in the low sandy spots (fade with distance)
-          float nk = 1.0 - smoothstep(60.0, 1600.0, camD), fk = 1.0 - smoothstep(8.0, 160.0, camD);
+          float nk = (1.0 - smoothstep(60.0, 1600.0, camD)) * (1.0 - smoothstep(0.5, 2.0, fp)), fk = (1.0 - smoothstep(8.0, 160.0, camD)) * (1.0 - smoothstep(0.06, 0.25, fp));
           base *= mix(1.0, 0.84 + 0.32 * gf(w / 2.0), nk) * mix(1.0, 0.88 + 0.24 * gn(w / 0.25), fk);
           base *= mix(1.0, 0.62, smoothstep(0.83, 0.9, gn(w / 0.35 + 3.0)) * fk * (1.0 - vAG.x));      // pebbles
           float rip = sin(dot(w, vec2(0.8, -0.6)) / 0.55 + 3.0 * gn(w / 6.0));   // crests across the wind
-          base *= 1.0 + 0.07 * rip * fk * clamp(vAG.x * 1.6 - 0.1, 0.0, 1.0);   // only where there is loose sand
+          base *= 1.0 + 0.07 * rip * (1.0 - smoothstep(0.8, 2.5, fp)) * (1.0 - smoothstep(8.0, 160.0, camD)) * clamp(vAG.x * 1.6 - 0.1, 0.0, 1.0);   // only where there is loose sand
           // Boulder fields at the foot of the cliffs: dark speckle that reads from afar (real rocks up close)
-          base *= 1.0 - 0.38 * vAG.w * smoothstep(0.55, 0.75, gn(w / 7.0)) - 0.12 * vAG.w;
+          base *= 1.0 - 0.38 * vAG.w * mix(smoothstep(0.55, 0.75, gn(w / 7.0)), 0.3, smoothstep(2.0, 7.0, fp)) - 0.12 * vAG.w;
           // Baked light: terrain shadow on the sun term, hollows a little darker; drifting cloud shadows
           float sunL = mix(0.42, 1.0, vAG.y) * vAG.z;
           float cs = smoothstep(0.56, 0.78, gf((w + uTime * vec2(7.0, 5.0)) / 2800.0));
           diffuseColor.rgb *= base * sunL * (1.0 - 0.17 * cs);`)
-        .replace('#include <fog_fragment>', `#ifdef USE_FOG
-            vec3 vdir = normalize(vGW - cameraPosition);
-            float fd = fogDensity * (0.78 + 0.42 * exp(-max(vGW.y, 0.0) / 500.0));               // thicker in the low ground
-            float fogF = 1.0 - exp(-fd * fd * vFogDepth * vFogDepth);
-            float sunw = pow(max(dot(vdir, normalize(uSunDir)), 0.0), 3.0);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * mix(vec3(1.0), vec3(1.2, 1.08, 0.94), sunw * 0.7), fogF);
-          #endif`);
+        .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('dHdxy_fwd()', '(dHdxy_fwd() * hzBump)'));
     };
     const ground = new THREE.Mesh(geo, gMat);
     ground.receiveShadow = true;
@@ -722,6 +773,8 @@ export async function initLanding(step) {
     const b = t - LEGS.swing; return LEGS.open + dir * LEGS.over * Math.exp(-b / LEGS.bDecay) * Math.cos(2 * Math.PI * b / LEGS.bPer);
   }
 
+  // The ship takes half the haze: realistic air would wash it out on the long-lens site cameras, and it is the subject
+  ship.traverse(o => { if (o.material) [].concat(o.material).forEach(m => { m.defines = { ...(m.defines || {}), HAZE_K: '0.5' }; m.needsUpdate = true; }); });
   // ---------- Scale objects near the pad (after the towers in the Starship webcast shots: they show how big the ship is) ----------
   // A parked cargo Starship (same hull, legs out), two lattice masts (120/100 m), a propellant tank farm, bermed habs, a
   // greenhouse dome and a solar field: light materials and lamps so they read from the site camera 2 km out.
@@ -1057,7 +1110,7 @@ export async function initLanding(step) {
   // grazing angles (long crater shadows), the sun sits ~24° above the limb in forward shots with the arc brightest under
   // it, and the ship is mostly backlit. During the entry it eases to the ground scene's sun, so the cut matches.
   const sph = (az, el) => new THREE.Vector3(Math.cos(el * DEG) * Math.cos(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.sin(az * DEG));
-  const SUN_AZ = [-40, -130], SUN_EL = [5, 17];
+  const SUN_AZ = [-40, SUN_GROUND_AZ], SUN_EL = [5, SUN_GROUND_EL];
   const ORB_SUN = sph(SUN_AZ[0], SUN_EL[0]);
   let sunK = -1, envSunK = -1;
   const SUNRISE = /[?&]sunrise/.test(location.search), SUNRISE_DIR = sph(-40, -17.5);
@@ -1111,7 +1164,6 @@ export async function initLanding(step) {
     if (state === 'falling' || state === 'crashed' || endState === 'crashed') return PHASE_LOOKS.crashed();
     return PHASE_LOOKS.landed();
   }
-  const _fogCool = new THREE.Color(0.62, 0.55, 0.55);
   function applyLook(dt) {
     const [a, b, k] = lookFor();
     blendLooks(lookTarget, a, b ?? a, clamp(k ?? 0, 0, 1));
@@ -1120,7 +1172,7 @@ export async function initLanding(step) {
     skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust; skyU.uT.value = simClock; skyU.uAlt.value = camera.position.y; groundU.uTime.value = simClock;
     { const orb = inOrbit(); M.steel.roughness = orb ? 0.3 : 0.5; M.steel.metalness = orb ? 0.85 : 0.74; M.steel.envMapIntensity = orb ? 1.1 : 0.95; }   // ground scene: a broader, softer sun streak on the steel
     devils.forEach(m => m.material.uniforms.uC.value.copy(look.gHigh).lerp(look.hor, 0.5));
-    scene.fog.color.copy(look.hor).lerp(_fogCool, 0.25); scene.fog.density = look.fog * lerp(1, 0.4, sstep(300, 7000, camera.position.y));   // crisper from height
+    scene.fog.color.copy(look.hor);   // = the sky at the horizon: far ranges fade into it scene.fog.density = look.fog;   // 1/L at ground level (the haze chunk thins it with height along each sight line)
     sun.color.copy(look.sun); sun.intensity = look.sunI;
     hemi.color.copy(look.hemiSky); hemi.groundColor.copy(look.hemiGnd); hemi.intensity = look.hemiI;
     groundU.uGShadow.value.copy(look.gShadow); groundU.uGMid.value.copy(look.gMid); groundU.uGLit.value.copy(look.gLit);

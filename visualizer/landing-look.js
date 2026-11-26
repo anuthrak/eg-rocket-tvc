@@ -1,7 +1,7 @@
 // Landing tab: the look. Colour presets sampled from reference photos, the post-processing chain (bloom, tone mapping,
 // grade), a procedural lens flare, and the quality setting. Used by landing.js.
 //
-// Looks (sky, light, ground palette, grade, bloom), all colours as sRGB hex:
+// Looks (sky, light, ground palette, grade, bloom), all colours as sRGB hex; fog = 1 / haze distance scale L (m):
 //   A "clear afternoon"  blue zenith → peach horizon, rich orange ground (landing)
 //   B "golden dust"      warm hazy sky (belly flop, cloud deck)
 //   C "burnt sienna"     deep and dramatic (entry, crash)
@@ -18,21 +18,21 @@ const preset = o => o;
 export const LOOKS = {
   A: preset({
     zen: '#4a2a24', mid: '#a0603e', hor: '#d79a6a', dust: 0.2,
-    sun: '#fff0dc', sunI: 4.4, hemiSky: '#b08070', hemiGnd: '#5a2410', hemiI: 0.45, fog: 0.6e-5, exposure: 1.2, clouds: 0.12,
+    sun: '#fff0dc', sunI: 4.4, hemiSky: '#b08070', hemiGnd: '#5a2410', hemiI: 0.45, fog: 1 / 22000, exposure: 1.2, clouds: 0.12,
     gShadow: '#2a0f06', gMid: '#7a2e10', gLit: '#b8521e', gHigh: '#dca066', gRock: '#1e0d07',
-    contrast: 1.2, sat: 1.2, tintLo: [0.94, 0.96, 1.06], tintHi: [1.05, 1.0, 0.93], vig: 0.32, grain: 0.03,
+    contrast: 1.27, sat: 1.2, tintLo: [0.94, 0.96, 1.06], tintHi: [1.05, 1.0, 0.93], vig: 0.32, grain: 0.03,
     bloom: [0.55, 0.45, 1.25], flare: 0.6,
   }),
   B: preset({
     zen: '#5e2c16', mid: '#b0642c', hor: '#d28a50', dust: 0.4,
-    sun: '#ffdcaa', sunI: 3.8, hemiSky: '#c88050', hemiGnd: '#4a1806', hemiI: 0.55, fog: 1.0e-5, exposure: 1.15, clouds: 0.55,
+    sun: '#ffdcaa', sunI: 3.8, hemiSky: '#c88050', hemiGnd: '#4a1806', hemiI: 0.55, fog: 1 / 13000, exposure: 1.15, clouds: 0.55,
     gShadow: '#2e0f05', gMid: '#82300f', gLit: '#bc561e', gHigh: '#e0a058', gRock: '#200d06',
     contrast: 1.18, sat: 1.2, tintLo: [1.04, 0.95, 0.92], tintHi: [1.04, 1.0, 0.9], vig: 0.38, grain: 0.035,
     bloom: [0.65, 0.55, 1.2], flare: 0.45,
   }),
   C: preset({
     zen: '#3a1400', mid: '#6c2b01', hor: '#984806', dust: 0.45,
-    sun: '#ffc890', sunI: 3.4, hemiSky: '#a04a10', hemiGnd: '#2a0e02', hemiI: 0.55, fog: 1.8e-5, exposure: 1.3, clouds: 0.08,
+    sun: '#ffc890', sunI: 3.4, hemiSky: '#a04a10', hemiGnd: '#2a0e02', hemiI: 0.55, fog: 1 / 10500, exposure: 1.3, clouds: 0.08,
     gShadow: '#4f1f08', gMid: '#773816', gLit: '#a5541f', gHigh: '#c6733c', gRock: '#2e1204',
     contrast: 1.18, sat: 1.2, tintLo: [0.96, 0.9, 0.88], tintHi: [1.06, 0.98, 0.88], vig: 0.48, grain: 0.04,
     bloom: [0.8, 0.6, 1.15], flare: 0.7,
