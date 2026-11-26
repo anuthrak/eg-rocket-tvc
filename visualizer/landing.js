@@ -1214,6 +1214,7 @@ export async function initLanding(step) {
   function applyLook(dt) {
     const [a, b, k] = lookFor();
     blendLooks(lookTarget, a, b ?? a, clamp(k ?? 0, 0, 1));
+    if (state === 'entry') { const I = ent.I ?? 0; lookTarget.exposure *= 1 - 0.32 * I; lookTarget.bloom.x *= 1 - 0.3 * I; }   // the eye stops down at peak heating: the ship keeps its shape
     easeLook(look, lookTarget, 1 - Math.exp(-dt / 0.7));
     skyU.uZen.value.copy(look.zen); skyU.uMid.value.copy(look.mid); skyU.uHor.value.copy(look.hor);
     skyU.uSunCol.value.copy(look.sun); skyU.uDust.value = look.dust; skyU.uT.value = simClock; skyU.uAlt.value = camera.position.y; groundU.uTime.value = simClock;
@@ -1256,19 +1257,28 @@ export async function initLanding(step) {
     vec3 c = mix(vec3(0.75, 0.35, 1.0), vec3(1.0, 0.32, 0.55), smoothstep(0.0, 0.25, h));
     c = mix(c, vec3(1.0, 0.45, 0.12), smoothstep(0.2, 0.55, h));
     return mix(c, vec3(1.0, 0.86, 0.58), smoothstep(0.6, 0.95, h) * k); }`;
-  // Plasma: a glowing sheath over the heat shield and a wake trailing off the ship
+  // Shock layer (after the onboard entry footage): a thin glowing sheet standing a metre or two off the heat shield, brightest
+  // where the flow hits it head-on and where it is seen edge-on (optically thin gas: brightness ~ path length), open on the
+  // leeward side, and peeling off the shield edges into the wake. The leeward steel stays dark, lit by the glow.
+  const NOISE2 = `float pH(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float pN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(pH(i), pH(i + vec2(1, 0)), f.x), mix(pH(i + vec2(0, 1)), pH(i + vec2(1, 1)), f.x), f.y); }
+    float pF(vec2 p){ return 0.5 * pN(p) + 0.25 * pN(p * 2.1 + 3.1) + 0.125 * pN(p * 4.3 - 1.7) + 0.125 * pN(p * 8.7 + 5.3); }`;
   const plasmaMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 } },
-    vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
-      void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; varying vec3 vN; varying vec3 vV; varying vec3 vP; ${HEATC}
+    uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 }, uFlowL: { value: new THREE.Vector3(-1, 0, 0) } },
+    vertexShader: `uniform float uI, uT; uniform vec3 uFlowL; varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vEdge; varying vec3 vNL; varying float vD; varying float vE;
+      void main(){ float e = min(uv.x, 1.0 - uv.x); vEdge = 1.0 - smoothstep(0.0, 0.2, e); vNL = normal;
+        vec3 p = position + normal * (0.6 + 1.3 * uI + 1.2 * vEdge * uI) + normalize(uFlowL) * vEdge * vEdge * (1.5 + 4.5 * uI);   // stand-off; edges peel back
+        vP = p; vec4 mv = modelViewMatrix * vec4(p, 1.0); vD = -mv.z; vE = e; vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; uniform vec3 uFlowL; varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vEdge; varying vec3 vNL; varying float vD; varying float vE; ${HEATC} ${NOISE2}
       void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-        float n = 0.6 + 0.4 * sin(vP.y * 0.7 + uT * 25.0 + 2.5 * sin(vP.z * 1.7 - uT * 13.0)) * (0.7 + 0.3 * sin(vP.z * 0.9 + vP.y * 0.3 + uT * 7.0));
-        vec3 c = mix(heatCol(uH, 0.4 + 0.6 * smoothstep(28.0, 46.0, vP.y)), vec3(0.8, 0.4, 1.0), f * 0.5 * (1.0 - uH));
-        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * (0.35 + 1.6 * pow(f, 1.4)) * n * 2.5, 1.0); }`,
+        float wind = smoothstep(-0.15, 0.75, dot(normalize(vNL), -normalize(uFlowL)));            // facing the oncoming air
+        float turb = 0.55 + 0.9 * pF(vec2(vP.y * 0.35 - uT * 9.0, vP.z * 0.5 + vP.x * 0.3 + uT * 2.0));
+        float b = uI * (0.08 + 1.5 * pow(f, 2.2) + 1.0 * vEdge) * (0.25 + 0.75 * wind) * turb * smoothstep(0.0, 0.06, vE) * smoothstep(3.0, 14.0, vD);   // soft outer edge; fades right by the camera
+        vec3 c = mix(heatCol(uH, wind), vec3(0.62, 0.42, 1.0), (1.0 - uH) * 0.35 * (1.0 - wind));
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * b * 1.7, 1.0); }`,
   });
-  const plasma = new THREE.Mesh(shield.geometry, plasmaMat); plasma.scale.set(1.14, 1.01, 1.14); plasma.visible = false; airframe.add(plasma);
+  const plasma = new THREE.Mesh(shield.geometry, plasmaMat); plasma.visible = false; airframe.add(plasma);
   // Bow shock: a glowing envelope just off the belly and nose, drawn as a thin bright rim (fresnel), strongest on the
   // leading side, white-hot at the edge going pink then violet (after the reference renders)
   const shockMat = new THREE.ShaderMaterial({
@@ -1291,38 +1301,42 @@ export async function initLanding(step) {
   const wakeMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     uniforms: { uI: { value: 0 }, uT: { value: 0 }, uH: { value: 0 } },
-    vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
-      void main(){ vY = position.y; vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv; ${HEATC}
-      void main(){ float along = pow(1.0 - vY, 1.5); float edge = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 4.0);
-        float streak = (0.55 + 0.45 * sin(vUv.x * 120.0 + vY * 9.0 - uT * 6.0)) * (0.6 + 0.4 * sin(vUv.x * 19.0 + vY * 23.0 - uT * 4.0));
-        vec3 c = mix(heatCol(uH, 0.6), vec3(0.55, 0.4, 1.0), smoothstep(0.0, 0.7, vY));
-        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.06 + 1.8 * edge) * streak * 2.2, 1.0); }`,
+    vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv; varying float vD;
+      void main(){ vY = position.y; vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uI; uniform float uT; uniform float uH; varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv; varying float vD; ${HEATC} ${NOISE2}
+      void main(){ float along = pow(1.0 - vY, 1.3) * smoothstep(0.0, 0.03, vY); float edge = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.5);
+        // eddies: noise in (angle round the cone, distance along it) scrolling downstream, stretching as they go
+        float ed = pF(vec2(vUv.x * 14.0, vY * 7.0 - uT * 3.2)) * pF(vec2(vUv.x * 5.0 + 7.0, vY * 2.5 - uT * 1.4));
+        float tor = smoothstep(0.24, 0.62, ed) * (0.5 + 0.9 * smoothstep(0.35, 0.0, vY));   // filaments, not a sheet
+        vec3 c = heatCol(uH * (1.0 - vY), 1.0 - smoothstep(0.0, 0.25, vY));
+        c = mix(c, vec3(1.0, 0.35, 0.6), smoothstep(0.15, 0.5, vY)); c = mix(c, vec3(0.5, 0.38, 1.0), smoothstep(0.45, 0.95, vY));   // orange → pink → violet
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.1 + 1.6 * edge) * tor * 2.6 * smoothstep(5.0, 30.0, vD), 1.0); }`,
   });
   const wake = new THREE.Mesh(wakeGeo, wakeMat); wake.visible = false; shipScene.add(wake);
   // Plasma ribbons: ragged sheets peeling off the nose, belly edges and flap tips (ship-local anchors, belly = +x),
   // streaming back along the flow and cooling white-hot → orange → violet along their length. Camera-facing strips
   // bent by turbulence in the vertex shader; flicker, split (break-up noise) and length follow the heating.
   const RIB = [[0.5, 28.5, 0], [0.6, 21, R + 4.2], [0.6, 21, -R - 4.2], [0.6, -12, R + 6.2], [0.6, -12, -R - 6.2],
-    [1.2, 8, R * 0.95], [1.2, 8, -R * 0.95], [1.5, -2, R * 0.9], [1.5, -2, -R * 0.9], [1.0, 14, R * 0.97]];
+    [1.2, 8, R * 0.95], [1.2, 8, -R * 0.95], [1.5, -2, R * 0.9], [1.5, -2, -R * 0.9], [1.0, 14, R * 0.97],
+    [1.0, 14, -R * 0.97], [1.3, 2, R * 0.93], [1.3, 2, -R * 0.93], [0.9, 24, R * 0.8], [0.9, 24, -R * 0.8], [1.6, -8, R * 0.9]];
   const ribGeo = new THREE.PlaneGeometry(1, 1, 1, 40);
   const ribBase = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: `uniform vec3 uA, uFlow; uniform float uLen, uW, uT, uSeed; varying float vS; varying float vX;
+    vertexShader: `uniform vec3 uA, uFlow; uniform float uLen, uW, uT, uSeed; varying float vS; varying float vX; varying float vCD;
       void main(){ float s = position.y + 0.5; vS = s; vX = position.x * 2.0;
         vec3 f = normalize(uFlow), side = normalize(cross(f, vec3(0.0, 0.0, 1.0))), up = vec3(0.0, 0.0, 1.0);
         vec3 c = uA + f * s * uLen;
-        c += side * (sin(s * 7.0 - uT * 9.0 + uSeed) * 3.0 + sin(s * 17.0 - uT * 23.0 + uSeed * 2.0)) * s;
-        c += up * sin(s * 5.0 - uT * 7.0 + uSeed * 3.0) * 4.0 * s;
+        c += side * (sin(s * 7.0 - uT * 9.0 + uSeed) * 3.0 + sin(s * 17.0 - uT * 23.0 + uSeed * 2.0) + 2.0 * sin(s * 3.1 - uT * 4.0 + uSeed * 1.3)) * s * (0.6 + 1.4 * s);
+        c += up * (sin(s * 5.0 - uT * 7.0 + uSeed * 3.0) * 4.0 + 2.5 * sin(s * 11.0 - uT * 15.0 + uSeed)) * s * (0.6 + 1.4 * s);
         vec3 w = normalize(cross(f, cameraPosition - c));
         c += w * position.x * uW * (0.4 + 2.6 * s);
-        gl_Position = projectionMatrix * viewMatrix * vec4(c, 1.0); }`,
-    fragmentShader: `uniform float uI, uH, uT, uSeed; varying float vS; varying float vX; ${HEATC}
+        vCD = distance(cameraPosition, c); gl_Position = projectionMatrix * viewMatrix * vec4(c, 1.0); }`,
+    fragmentShader: `uniform float uI, uH, uT, uSeed; varying float vS; varying float vX; varying float vCD; ${HEATC} ${NOISE2}
       void main(){ float edge = pow(max(1.0 - abs(vX), 0.0), 1.5);
-        float brk = smoothstep(0.15, 0.6, 0.5 + 0.5 * sin(vS * 23.0 - uT * 31.0 + uSeed * 5.0) * sin(vS * 9.0 - uT * 13.0 + vX * 2.0 + uSeed));
+        float brk = smoothstep(0.25, 0.7, pF(vec2(vS * 9.0 - uT * 6.0 + uSeed, vX * 1.5 + uSeed * 3.0)));   // tears into blobs
         float fade = (1.0 - vS) * smoothstep(0.0, 0.04, vS);
         vec3 c = heatCol(uH * (1.0 - vS * 0.85), 1.0 - vS);
-        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * edge * mix(0.3, 1.0, brk) * fade * fade * 2.2, 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * edge * mix(0.3, 1.0, brk) * fade * fade * 2.2 * smoothstep(4.0, 18.0, vCD), 1.0); }`,
   });
   const ribbons = RIB.map((a, i) => {
     const m = new THREE.Mesh(ribGeo, ribBase.clone());
@@ -1331,9 +1345,9 @@ export async function initLanding(step) {
     m.frustumCulled = false; m.visible = false; shipScene.add(m);
     return { m, a: new THREE.Vector3(...a), k: 0.7 + 0.3 * ((i * 0.618) % 1) };
   });
-  const RIB_N = { high: 10, medium: 6, low: 3 };
+  const RIB_N = { high: 16, medium: 9, low: 4 };
   // The plasma lights the ship from below: steel sides and flaps catch its orange light at peak
-  const plasmaLight = new THREE.PointLight(0xff8040, 0, 0, 2); plasmaLight.position.set(R + 6, 4, 0); ship.add(plasmaLight);
+  const plasmaLight = new THREE.PointLight(0xff8040, 0, 0, 2);   // (intensity set per frame, kept moderate: the steel catches the glow, it doesn't wash out) plasmaLight.position.set(R + 6, 4, 0); ship.add(plasmaLight);
   let tileT = 0, entShot = -1;
   // Entry heating panel (re-uses the deorbit burn panel's slot)
   const burnEl = $('lndBurn'), burnHTML = burnEl.innerHTML;
@@ -1704,7 +1718,8 @@ export async function initLanding(step) {
 
   // ---------- Orbit timeline (screen time) ----------
   const qA = new THREE.Quaternion(), qB = new THREE.Quaternion(), _z = new THREE.Vector3(0, 0, 1);
-  const bellyQ = a => qA.setFromAxisAngle(_z, -a * DEG).clone();
+  const bellyQ = a => qA.setFromAxisAngle(_z, -a * DEG).clone(), _qi = new THREE.Quaternion();
+  const ENT_PACE = 0.66;   // entry profile speed on screen (×1 ≈ 20 s, 0.66 ≈ 30 s with the time-warp ramps)
   function orbitStep(dt) {
     const E = L.ENTRY;
     let pitch = 88, thr = 0, h = E.h0, v = E.v0;
@@ -1724,7 +1739,7 @@ export async function initLanding(step) {
       // down to ×10 into the cloud cut. Progress through the 20 s profile runs at warp/30; the badge counts live.
       ent.tr += dt;
       const wNow = 1 + (E.warp - 1) * sstep(1.5, 4.5, ent.tr) - (E.warp - 10) * sstep(0.88, 1, et / E.entry);
-      et += dt * wNow / E.warp;
+      et += dt * wNow / E.warp * ENT_PACE;   // ~30 s on screen
       $('lndWarp').textContent = '×' + Math.max(1, Math.round(wNow)) + ' time warp';
       if (window.__entU != null) et = window.__entU * E.entry;
       const u = clamp(et / E.entry, 0, 1);
@@ -1754,19 +1769,20 @@ export async function initLanding(step) {
     puffs.update(dt); haze.update(dt);
     // Plasma sheath, wake and streaks
     const I = state === 'entry' ? ent.I : 0;
-    plasma.visible = wake.visible = shock.visible = I > 0.01;
+    plasma.visible = wake.visible = I > 0.01; shock.visible = false;   // (the closed shell read as a bubble)
     const Hq = state === 'entry' ? ent.q ?? 0 : 0;
-    plasmaMat.uniforms.uI.value = I * 0.8 * (1 - 0.5 * Hq); plasmaMat.uniforms.uT.value = simClock; plasmaMat.uniforms.uH.value = Hq;
+    plasmaMat.uniforms.uI.value = I * 0.9; plasmaMat.uniforms.uT.value = simClock; plasmaMat.uniforms.uH.value = Hq;
     shockMat.uniforms.uI.value = I * 1.3 * (1 - 0.6 * Hq); shockMat.uniforms.uT.value = simClock; shockMat.uniforms.uH.value = Hq;
     shock.scale.set(8.2, 31, 8.6).multiplyScalar(1.12 - 0.12 * I);   // the shock hugs closer as the heating rises
     const tt = state === 'entry' ? tileT : 0;                         // tiles: dull red → orange → yellow, with lag
-    M.tiles.emissive.setRGB(1, 0.18 + 0.5 * tt, 0.06 + 0.2 * tt * tt); TILE_MATS.forEach(m => { m.emissiveIntensity = tt * 1.8; });
-    plasmaLight.intensity = I * 420; plasmaLight.color.setRGB(1, 0.4 + 0.35 * Hq, 0.2 + 0.2 * Hq);
+    M.tiles.emissive.setRGB(1, 0.12 + 0.4 * tt, 0.03 + 0.14 * tt * tt); TILE_MATS.forEach(m => { m.emissiveIntensity = tt * 0.95; });   // dull red → orange: glowing, not white
+    plasmaLight.intensity = I * 300; plasmaLight.color.setRGB(1, 0.4 + 0.35 * Hq, 0.2 + 0.2 * Hq);
     wakeMat.uniforms.uI.value = I * 0.6; wakeMat.uniforms.uT.value = simClock; wakeMat.uniforms.uH.value = Hq;
     const gam = (4 + 36 * ent.u) * DEG;                       // flight path angle below horizontal
     const flow = new THREE.Vector3(-Math.cos(gam), Math.sin(gam), 0);   // where the air goes, relative to the ship
     wake.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), flow);
-    wake.scale.set(8 + 3 * I, 260 + 260 * I, 8 + 3 * I); wake.position.copy(flow).multiplyScalar(-4);
+    plasmaMat.uniforms.uFlowL.value.copy(flow).applyQuaternion(_qi.copy(ship.quaternion).invert());
+    wake.scale.set(9 + 7 * I, 300 + 320 * I, 9 + 7 * I); wake.position.copy(flow).multiplyScalar(-6);
     const nR = RIB_N[qName] ?? 10;
     ribbons.forEach((r, i) => {
       const on = I > 0.03 && i < nR; r.m.visible = on; if (!on) return;
@@ -2004,8 +2020,10 @@ export async function initLanding(step) {
       const s = flight.s;
       if (s.phase === 'belly') {   // shaky close-up through the deck → long-lens tracking cam as it pierces the base
         if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; }
-        if (tBreak === null) return 'close';
-        return s.t < tBreak + 4.8 ? 'track' : s.t < tBreak + 7.2 ? 'flaps' : s.t < tBreak + 9.4 ? 'top' : 'side';
+        // Skirt cam first (after the Flight 15 onboard view): white inside the deck, the valley opening below as it breaks
+        // out, vapour tearing off the flap; then the long-lens tracking cam, the flaps, from above, the side profile
+        if (tBreak === null || s.t < tBreak + 3.4) return 'skirt';
+        return s.t < tBreak + 7.4 ? 'track' : s.t < tBreak + 9.8 ? 'flaps' : s.t < tBreak + 12 ? 'top' : 'side';
       }
       if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
       // TVC landing (side approach): wide at the handover, side profile across the divert, then the pad cam. All cuts.
@@ -2069,7 +2087,18 @@ export async function initLanding(step) {
   const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: wispTex, color: 0xffd8b0, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   glint.visible = false; scene.add(glint);
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
-  const ENT_CAM = [[V3(-50, -4, -62), null, V3(0, -8, 0)], [V3(128, -66, -58), V3(108, -58, -82), V3(2, -6, 0)], [V3(-4, 12, 74), V3(-24, 7, 62), V3(-16, 2, 0)]];
+  // Entry shots (u = progress through the entry profile; offsets in metres from the ship, which sits at the origin; the limb
+  // lies ~14° below the horizontal at 100 km, ~6° at 30 km, so the level-ish shots keep it in frame):
+  //   0 wide over the limb, the glow trailing like a meteor (eases in from the deorbit framing) · 1 hull cam: by the
+  //   forward flap, looking aft past the aft flaps, plasma streaming away over the planet (ship-local) · 2 peak: low beside the belly, the shield edge
+  //   on fire against the limb · 3 ahead, above: the trail streaming back over the surface · 4 long lens as the glow fades
+  const ENT_SHOTS = [
+    { u0: 0, u1: 0.2, p0: V3(-60, 30, -340), p1: V3(-20, 20, -300), t: V3(0, -42, 0), fov: 32 },
+    { u0: 0.2, u1: 0.4, onboard: true, p0: V3(-6, 19, 6), t: V3(0, -18, 7.5), fov: 62 },
+    { u0: 0.4, u1: 0.64, p0: V3(45, 2, -125), p1: V3(25, 0, -110), t: V3(0, -16, 0), fov: 36 },
+    { u0: 0.64, u1: 0.84, p0: V3(70, 80, 175), p1: V3(50, 70, 160), t: V3(-10, -6, 0), fov: 40 },
+    { u0: 0.84, u1: 1.01, p0: V3(-60, 70, -260), p1: V3(-40, 60, -220), t: V3(0, -55, 0), fov: 30 },
+  ];
   function cloudFx(dt) {   // vapour trail and torn streamers through the deck; belly-flop speed cues and chill-down
     const s = flight.s;
     if (s.phase === 'belly' && tBreak !== null && !paused) {
@@ -2091,6 +2120,10 @@ export async function initLanding(step) {
         dust.emit({ x: sp2.x - s.vx * dt * f, y: sp2.y - s.vh * dt * f + 6, z: sp2.z - s.vz * dt * f, vx: rnd(-1, 1), vy: rnd(-1, 1), vz: rnd(-1, 1),
           life: 9, s0: 9, s1: 60, a: 0.75, drag: 0.5, rgb: [0.97, 0.95, 0.93] }); }
     }
+    if (shotName === 'skirt' && state === 'flight' && !paused) {   // condensation tearing off the near flap's edge, streaming past the skirt cam
+      for (let i = 0; i < 4; i++) { const a = ship.localToWorld(_pv.copy(ribbons[3].a).add(_lo.set(rnd(-0.5, 0.5), rnd(-1.5, 1.5), rnd(-1, 0)))); const v = -s.vh;
+        dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-3, 3), vy: v * rnd(0.75, 0.95), vz: rnd(-2, 4), life: rnd(0.4, 0.9), s0: 1.2, s1: 9, a: 0.28, drag: 0.4, rgb: [0.97, 0.96, 0.95] }); }
+    }
     if (tBreak !== null && state === 'flight' && s.phase === 'belly' && s.t < tBreak + 2.5 && !paused) {   // torn streamers off the flaps
       if (s.h < DECK.base) once('base', 'CLOUD BASE · <b>6.6 KM</b>', 2000);
       for (const i of [1, 2, 3, 4]) { const a = ship.localToWorld(_pv.copy(ribbons[i].a));
@@ -2110,13 +2143,13 @@ export async function initLanding(step) {
       }
       if (state === 'orbit' || state === 'deorbit') off = _co.set(-80, 70, -110);
       else if (camMode === 'free') off = null;
-      else {   // entry: A pulls down under the belly as the glow starts · B (peak) low, long lens up at the belly · C the wake
-        const u = ent.u, sh = u < 0.3 ? 0 : u < 0.64 ? 1 : 2, S = ENT_CAM[sh];
-        const k = sh === 0 ? sstep(0, 1, u / 0.3) : sh === 1 ? (u - 0.3) / 0.34 : (u - 0.64) / 0.36;
-        if (sh === 0) { off = _co.copy(deoEndPos).lerp(S[0], k); _ct.copy(deoEndLook).lerp(S[2], k); }
-        else { off = _co.copy(S[0]).lerp(S[1], k); _ct.copy(S[2]); }
+      else {   // entry: five shots, each with the planet or the limb in frame (see ENT_SHOTS)
+        const u = ent.u, sh = Math.max(0, ENT_SHOTS.findIndex(S => u < S.u1)), S = ENT_SHOTS[sh], k = clamp((u - S.u0) / (S.u1 - S.u0), 0, 1);
+        if (S.onboard) { ship.updateMatrixWorld(); off = ship.localToWorld(_co.copy(S.p0)); ship.localToWorld(_ct.copy(S.t)); }
+        else { off = _co.copy(S.p0).lerp(S.p1, k); _ct.copy(S.t); if (sh === 0) { const e = sstep(0, 1, k * 2.2); off.lerpVectors(deoEndPos, off, e); _ct.lerpVectors(deoEndLook, S.t, e); } }
         if (sh !== entShot) { if (entShot >= 0) { camOff.copy(off); orbLook.copy(_ct); } entShot = sh; }
-        const fov = sh === 1 ? 30 : 40; if (camera.fov !== fov) { camera.fov = fov; resize(); }
+        if (S.onboard) { camOff.copy(off); orbLook.copy(_ct); }   // bolted to the flap: no lag
+        if (camera.fov !== S.fov) { camera.fov = S.fov; resize(); }
       }
       if (camMode === 'free') controls.update(); else {
         camOff.lerp(off, 1 - Math.exp(-dt * (state === 'entry' ? 4 : 1.5)));
@@ -2151,6 +2184,14 @@ export async function initLanding(step) {
       camera.rotateZ(0.6 * DEG * Math.sin(trk.t * 1.3));
       const fov = lerp(9, 6, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
+      shotName = name; padCam = true; return;
+    }
+    if (name === 'skirt') {   // onboard: bolted to the aft skirt beside the flap, wide lens looking down and aft past the belly
+      ship.updateMatrixWorld(); camera.position.copy(ship.localToWorld(_pv.set(1.6, -12, R + 1.5)));
+      camera.up.set(-0.55, 0, -1).applyQuaternion(ship.quaternion).normalize();   // frame "up" = toward the hull: hull and flap across the top
+      camera.lookAt(ship.localToWorld(_lo.set(11, -34, R + 4))); camera.up.set(0, 1, 0);
+      camera.rotateZ(0.012 * Math.sin(simClock * 13) + 0.006 * Math.sin(simClock * 31));   // vibration
+      if (Math.abs(camera.fov - 78) > 0.01) { camera.fov = 78; resize(); }
       shotName = name; padCam = true; return;
     }
     if (name === 'siteT' || name === 'siteW' || name === 'tele') {   // fixed cameras (SpaceX webcast style): only the aim pans, eased

@@ -112,13 +112,13 @@ const PLANET_FS = /* glsl */`
   }`;
 
 const ATMO_FS = /* glsl */`
-  uniform vec3 uSun, uC; uniform float uR, uH, uInside; varying vec3 vW;
+  uniform vec3 uSun, uC; uniform float uR, uH, uInside, uAlt; varying vec3 vW;
   void main(){
     if ((uInside > 0.5) == gl_FrontFacing) discard;          // outside the shell: front faces; inside: back faces
     vec3 o = cameraPosition, d = normalize(vW - o), oc = o - uC;
     float t = -dot(oc, d); vec3 P = oc + d * t; float b = length(P);
     float od, alt; vec3 nrm;
-    if (b > uR) { alt = b - uR; nrm = normalize(P); od = exp(-alt / uH); }                  // grazing: through the shell
+    if (b > uR) { alt = (uInside > 0.5 && t < 0.0) ? uAlt : b - uR; nrm = normalize(P); od = exp(-alt / uH); }   // grazing: through the shell (inside, looking up: from here)
     else {                                                                                   // over the disc: to the surface
       float th = sqrt(uR * uR - b * b); vec3 hit = oc + d * (t - th); nrm = normalize(hit);
       alt = 0.0; od = 0.18 / max(-dot(d, nrm), 0.05) * 0.12; }
@@ -128,6 +128,17 @@ const ATMO_FS = /* glsl */`
     float fwd2 = pow(max(dot(d, uSun), 0.0), 40.0);
     float rim = exp(-alt / (uH * 0.18)) * step(uR, b);                                      // the thin bright line
     glow += vec3(1.0, 0.9, 0.82) * rim * (lit * 0.8 + fwd2 * 2.5) + vec3(0.45, 0.6, 1.0) * rim * lit * 0.2;   // white-hot line, hottest under the sun
+    // Inside the atmosphere (the entry): the sky fills in as the air thickens (11 km scale height). Black with stars above
+    // ~100 km, deep violet round 60 km, dusky orange round 30 km, butterscotch by 12 km; denser toward the horizon, a bluish
+    // aureole round the sun; looking down, the same haze over the ground (aerial perspective)
+    if (uInside > 0.5) { vec3 up = normalize(oc); float mu = dot(d, up), dens = exp(-uAlt / 11.0), sunUp = smoothstep(-0.15, 0.4, dot(up, uSun));
+      float S;
+      if (b < uR && t > 0.0) S = 1.0 - exp(-(1.0 - dens) * 0.35 / max(-mu, 0.07));                                     // down to the ground: haze over it
+      else { float dm = exp(-(t > 0.0 ? b - uR : uAlt) / 11.0); S = 1.0 - exp(-dm * 6.0 / (t > 0.0 ? 0.05 : max(mu, 0.05))); }   // sky: thickest where the ray skims lowest
+      vec3 sky = mix(vec3(0.24, 0.2, 0.5), vec3(0.8, 0.45, 0.27), smoothstep(0.04, 0.45, S));
+      sky = mix(sky, vec3(0.88, 0.66, 0.46), smoothstep(0.45, 0.95, S));
+      sky += vec3(0.45, 0.6, 0.95) * pow(max(dot(d, uSun), 0.0), 12.0) * 0.5 * S;
+      glow = glow * (1.0 - 0.6 * S) + sky * S * (0.25 + 0.75 * sunUp) * (mu < 0.0 ? 0.75 : 0.95); }
     gl_FragColor = vec4(pow(glow, vec3(2.2)) * 1.7, 1.0);
   }`;
 
@@ -228,7 +239,7 @@ export function createOrbitScene(sunDir) {
   scene.add(cloud);
 
   // Atmosphere: analytic limb glow on a shell 150 km up
-  const atmoU = { uSun: { value: sun }, uC: { value: C }, uR: { value: R_MARS }, uH: { value: 22 }, uInside: { value: 0 } };
+  const atmoU = { uSun: { value: sun }, uC: { value: C }, uR: { value: R_MARS }, uH: { value: 22 }, uInside: { value: 0 }, uAlt: { value: 200 } };
   const atmo = new THREE.Mesh(new THREE.SphereGeometry(R_MARS + 150, 192, 128), new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: atmoU,
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
@@ -264,7 +275,7 @@ export function createOrbitScene(sunDir) {
       C.set(0, -(R_MARS + h), 0);
       for (const m of group) { m.position.copy(C); m.rotation.set(POLE_TILT, 0, phi * SPIN); }
       cloud.material.uniforms.uT.value = t;
-      atmoU.uInside.value = h < 150 ? 1 : 0;
+      atmoU.uInside.value = h < 150 ? 1 : 0; atmoU.uAlt.value = h;
       camera.position.copy(camOffM).multiplyScalar(0.001);
       camera.quaternion.copy(quat);
       const near = Math.max(0.05, h * 0.25);
