@@ -109,8 +109,9 @@ export async function initLanding(step) {
   // round a small Mars sun, thin high water-ice clouds drifting, dust layers on the horizon (thicker toward the sun), Phobos
   const skyU = { uSun: { value: SUN }, uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uHor: { value: new THREE.Color() },
     uSunCol: { value: new THREE.Color() }, uDust: { value: 0.3 }, uT: { value: 0 }, uAlt: { value: 0 }, uCirrus: { value: 1 } };
+  let groundSky; const vCam = new THREE.PerspectiveCamera(34, 1, 30, 260000);
   {
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(150000, 64, 32), new THREE.ShaderMaterial({
+    const sky = groundSky = new THREE.Mesh(new THREE.SphereGeometry(150000, 64, 32), new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyU,
       vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); vec4 p = projectionMatrix*modelViewMatrix*vec4(position,1.0); gl_Position = p.xyww; }`,
       fragmentShader: `uniform vec3 uSun, uZen, uMid, uHor, uSunCol; uniform float uDust, uT, uAlt, uCirrus; varying vec3 vD;
@@ -1366,6 +1367,9 @@ export async function initLanding(step) {
   let state = 'orbit', paused = false;
   let outcome = null, legK = 0, legT = 0, legEv = 0, land = null, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
   let calls = {};                    // callouts already shown this run
+  // Hero ending (finish): drone orbit after the landing (or round the wreck), the end card over it
+  const HERO = { dur: 11, durWreck: 8, r: [200, 160], h: [34, 52], spd: 6, rW: 90, hW: 20, spdW: 3.5, fov: 38 };
+  const hero = { on: false, card: true, at: 1e9, cardAt: 1e9, how: '', a0: 0, t0: 0, c: new THREE.Vector3() };
   const START = L.flightStart();
   let apSide = 1;   // which side of the pad the ship comes in from (+1/-1, random each run)
   function newFlight() { apSide = Math.random() < 0.5 ? -1 : 1; return L.createFlight(START.x0, apSide * L.DIVERT); }
@@ -1467,13 +1471,13 @@ export async function initLanding(step) {
   function flashScreen(strength = 1) { flashAmt = Math.max(flashAmt, 0.85 * strength); }
   function doGust() {
     if (state !== 'flight' || flight.s.phase !== 'tvc' || paused) return;
-    if (source === 'sim') { att.gust(rnd(0, 360), GUST_SCALE); setStrip('<b>Gust</b>', 1500, 'now'); }
+    if (source === 'sim') { att.gust(rnd(0, 360), GUST_SCALE); setStrip('<b>Gust</b>', 1500, 'now'); calls.gustAt = simClock; }
     else setStrip('<b>Push the rocket</b> · now', 2500, 'now');
   }
 
   let loopTimer = 0;
   function reset() {
-    state = 'orbit'; paused = false; $('landing').classList.remove('paused');
+    state = 'orbit'; paused = false; $('landing').classList.remove('paused'); hero.on = false; hero.card = true; hero.at = hero.cardAt = 1e9;
     cue = null; stripMsg = null; pushOn = false; tagEl.classList.remove('on'); insLast = insSeen = -1e9; outcome = null; legK = 0; legT = 0; legEv = 0; land = null; td = null; lost = false; calls = {}; endState = null; stormT = 0; fadeOut = 0;
     flight = newFlight(); att.reset(); tracker.reset();
     trim = { x: 0, y: 0 }; trimN = 0; maxTilt = 0; maxGimbal = 0; trail.length = 0; simClock = 0;
@@ -1482,7 +1486,7 @@ export async function initLanding(step) {
     fall.ang = fall.rate = 0;
     ship.visible = true; debris.forEach(d => { d.m.visible = false; }); fire.clear(); dust.clear(); glow.clear(); puffs.clear(); haze.clear();
     orbitSun(0); setVac([0, 0, 0], [], 0); rvacMat.emissiveIntensity = 0; heatPanel(false); $('lndBurn').hidden = true; deoShot = '';
-    ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; entShot = -1; if (camera.fov !== 40) { camera.fov = 40; resize(); }
+    ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; entShot = -1; if (camera.fov !== 40) { setFov(40); }
     // Fly again starts exactly like the first run: same planet turn, idle shot, look, no leftover cloud deck or tracking cam
     phi = 0; idleI = 0; idleT = 0; tBreak = null; trk = null; glint.visible = false; Object.assign(bGust, { k: 0, d: 1, next: 2 });
     wisps.forEach(w => scene.remove(w)); wisps.length = 0; Object.assign(look, blendLooks({}, 'space', 'space', 0));
@@ -1533,7 +1537,7 @@ export async function initLanding(step) {
       if (source === 'rig' && !rigLive()) { lost = true; return; }   // pause until the rig link is back
       lost = false;
       const t = s.t - s.tPh;
-      for (const g of gustPlan) { if (!g.cued && t >= g.t - 3) { g.cued = true; cue = { at: g.t, kind: 'gust' }; } if (!g.done && t >= g.t) { g.done = true; att.gust(g.dir, GUST_SCALE); } }
+      for (const g of gustPlan) { if (!g.cued && t >= g.t - 3) { g.cued = true; cue = { at: g.t, kind: 'gust' }; } if (!g.done && t >= g.t) { g.done = true; att.gust(g.dir, GUST_SCALE); calls.gustAt = simClock; } }
       for (const p of promptPlan) { if (!p.cued && t >= p.t - 3) { p.cued = true; cue = { at: p.t, kind: 'push' }; } }
       if (source === 'sim') att.step(1 + 1.5 * sstep(80, 0, s.h));      // dust blown back up near the ground
       d = readDev(); dev = d;
@@ -1575,6 +1579,7 @@ export async function initLanding(step) {
         : tilt > L.LAND_OK_DEG ? `It stayed up, landing at ${tilt.toFixed(1)}°` : `It stayed up, touching down at ${vs.toFixed(1)} m/s (over ${TDN.hardVs} m/s)` };
     dustStorm(s.x, s.h, s.z);
     stormT = 2.5;
+    lower(outcome.title === 'TOUCHDOWN' ? 'TOUCHDOWN · LZ-1' : outcome.title, `${miss.toFixed(1)} m from centre · ${vs.toFixed(1)} m/s · ${tilt.toFixed(1)}° tilt`, 5000);
     finish('landed');
   }
   function dustStorm(x, y, z) {
@@ -1670,8 +1675,21 @@ export async function initLanding(step) {
   function finish(how) {
     state = how; endState = how;
     refresh();
-    setTimeout(() => { if (state === how) endCard(); }, how === 'landed' ? 1500 : 2500);
+    // Hero ending: ~2 s on the pad cam as the dust settles, then a slow drone orbit (the wreck: slower, lower, closer), the
+    // end card fading in over it. Any key or click brings the card in at once.
+    hero.on = false; hero.card = false; hero.how = how; hero.at = simClock + (how === 'landed' ? 2 : 2.5); hero.cardAt = hero.at + (how === 'landed' ? HERO.dur : HERO.durWreck);
   }
+  function heroStep() {
+    if (hero.card || (state !== 'landed' && state !== 'crashed')) return;
+    if (!hero.on && simClock >= hero.at) {
+      hero.on = true; hero.t0 = simClock;
+      hero.c.copy(state === 'crashed' && !td ? crashAt : ship.position); hero.c.y = heightAt(hero.c.x, hero.c.z);
+      const hub = Math.atan2(150 - hero.c.z, 440 - hero.c.x); hero.a0 = hub + Math.PI - 0.5;   // start west of the ship: the habitat district behind it
+    }
+    if (simClock >= hero.cardAt) { hero.card = true; endCard(); }
+  }
+  addEventListener('keydown', () => { if (hero.on && !hero.card) { hero.card = true; endCard(); } });
+  $('landing').addEventListener('pointerdown', () => { if (hero.on && !hero.card) { hero.card = true; endCard(); } });
   function endCard() {
     showResult();
     refresh();
@@ -2031,6 +2049,7 @@ export async function initLanding(step) {
       if (hg < TVC_CAM.padH) return 'pad';
       return hg > TVC_CAM.wideH ? 'siteT' : hg > TVC_CAM.teleH ? 'siteW' : 'tele';
     }
+    if (hero.on) return 'hero';
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
     return 'chase';
   }
@@ -2096,8 +2115,8 @@ export async function initLanding(step) {
     { u0: 0, u1: 0.2, p0: V3(-60, 30, -340), p1: V3(-20, 20, -300), t: V3(0, -42, 0), fov: 32 },
     { u0: 0.2, u1: 0.4, onboard: true, p0: V3(-6, 19, 6), t: V3(0, -18, 7.5), fov: 62 },
     { u0: 0.4, u1: 0.64, p0: V3(45, 2, -125), p1: V3(25, 0, -110), t: V3(0, -16, 0), fov: 36 },
-    { u0: 0.64, u1: 0.84, p0: V3(70, 80, 175), p1: V3(50, 70, 160), t: V3(-10, -6, 0), fov: 40 },
-    { u0: 0.84, u1: 1.01, p0: V3(-60, 70, -260), p1: V3(-40, 60, -220), t: V3(0, -55, 0), fov: 30 },
+    { u0: 0.64, u1: 0.8, p0: V3(70, 80, 175), p1: V3(50, 70, 160), t: V3(-10, -6, 0), fov: 40 },
+    { u0: 0.8, u1: 1.01, valley: true, p0: V3(-200, 175, -70), p1: V3(-165, 140, -50), t: V3(0, -25, 0), fov: 36 },   // high behind the ship, down the approach onto the real valley (below ~33 km)
   ];
   function cloudFx(dt) {   // vapour trail and torn streamers through the deck; belly-flop speed cues and chill-down
     const s = flight.s;
@@ -2130,7 +2149,7 @@ export async function initLanding(step) {
         dust.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-4, 4), vy: -s.vh * 0.85 + rnd(-10, 10), vz: rnd(-4, 4), life: rnd(0.6, 1.4), s0: 6, s1: 30, a: 0.35, drag: 0.6, rgb: [0.95, 0.9, 0.86] }); }
     }
   }
-  function cameraStep(dt) {
+  function cameraShot(dt, use) {
     orbitA += dt * (state === 'orbit' ? 0.12 : 0.04);
     if (inOrbit()) {   // orbit pass: the camera moves round the ship at the origin
       let off;
@@ -2144,12 +2163,12 @@ export async function initLanding(step) {
       if (state === 'orbit' || state === 'deorbit') off = _co.set(-80, 70, -110);
       else if (camMode === 'free') off = null;
       else {   // entry: five shots, each with the planet or the limb in frame (see ENT_SHOTS)
-        const u = ent.u, sh = Math.max(0, ENT_SHOTS.findIndex(S => u < S.u1)), S = ENT_SHOTS[sh], k = clamp((u - S.u0) / (S.u1 - S.u0), 0, 1);
+        const u = ent.u, sh = use[0] === 'e' ? +use.slice(1) : entShotIdx(), S = ENT_SHOTS[sh], k = clamp((u - S.u0) / (S.u1 - S.u0), 0, 1);
         if (S.onboard) { ship.updateMatrixWorld(); off = ship.localToWorld(_co.copy(S.p0)); ship.localToWorld(_ct.copy(S.t)); }
         else { off = _co.copy(S.p0).lerp(S.p1, k); _ct.copy(S.t); if (sh === 0) { const e = sstep(0, 1, k * 2.2); off.lerpVectors(deoEndPos, off, e); _ct.lerpVectors(deoEndLook, S.t, e); } }
         if (sh !== entShot) { if (entShot >= 0) { camOff.copy(off); orbLook.copy(_ct); } entShot = sh; }
         if (S.onboard) { camOff.copy(off); orbLook.copy(_ct); }   // bolted to the flap: no lag
-        if (camera.fov !== S.fov) { camera.fov = S.fov; resize(); }
+        if (camera.fov !== S.fov) { setFov(S.fov); }
       }
       if (camMode === 'free') controls.update(); else {
         camOff.lerp(off, 1 - Math.exp(-dt * (state === 'entry' ? 4 : 1.5)));
@@ -2164,7 +2183,7 @@ export async function initLanding(step) {
     if (camMode === 'still') return;
     if (state === 'flight') cloudFx(dt);
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
-    const name = shot(), sp = ship.position;
+    const name = use, sp = ship.position;
     glint.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
       if (shotName !== 'track') {
@@ -2183,7 +2202,7 @@ export async function initLanding(step) {
       glint.visible = true; glint.position.copy(sp); glint.scale.setScalar(0.07 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2));
       camera.rotateZ(0.6 * DEG * Math.sin(trk.t * 1.3));
       const fov = lerp(9, 6, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
-      if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; resize(); }
+      if (Math.abs(camera.fov - fov) > 0.01) { setFov(fov); }
       shotName = name; padCam = true; return;
     }
     if (name === 'skirt') {   // onboard: bolted to the aft skirt beside the flap, wide lens looking down and aft past the belly
@@ -2191,7 +2210,7 @@ export async function initLanding(step) {
       camera.up.set(-0.55, 0, -1).applyQuaternion(ship.quaternion).normalize();   // frame "up" = toward the hull: hull and flap across the top
       camera.lookAt(ship.localToWorld(_lo.set(11, -34, R + 4))); camera.up.set(0, 1, 0);
       camera.rotateZ(0.012 * Math.sin(simClock * 13) + 0.006 * Math.sin(simClock * 31));   // vibration
-      if (Math.abs(camera.fov - 78) > 0.01) { camera.fov = 78; resize(); }
+      if (Math.abs(camera.fov - 78) > 0.01) { setFov(78); }
       shotName = name; padCam = true; return;
     }
     if (name === 'siteT' || name === 'siteW' || name === 'tele') {   // fixed cameras (SpaceX webcast style): only the aim pans, eased
@@ -2205,9 +2224,24 @@ export async function initLanding(step) {
         const e = Math.max(eP, eS - half * C.top);
         _lo.set(0, camera.position.y + hd * Math.tan(e * DEG), 0);
       }
-      if (name !== shotName) siteAim.copy(_lo); else siteAim.lerp(_lo, 1 - Math.exp(-dt * C.aim));
+      // The operator: on the cut the lens is wide and a little off, zooms in onto the ship (overshoots, settles), then
+      // pushes in slowly; the aim holds while the ship stays in a dead zone, re-centres on a spring when it leaves
+      if (name !== shotName) { siteGoal.copy(_lo); siteAim.copy(_lo).add(_pv.set(rnd(-1, 1), rnd(-0.4, 0.6), rnd(-1, 1)).multiplyScalar(0.1 * frameH)); siteVel.set(0, 0, 0); opT0 = simClock; reC = false; }
+      else if (!paused) {
+        const dz = 0.07 * frameH, d = siteGoal.distanceTo(_lo); if (d > dz) reC = true; if (reC) { siteGoal.lerp(_lo, 1 - Math.exp(-dt * 5)); if (d < 0.15 * dz) reC = false; }
+        const w = C.aim * 1.7, z = 0.6, n = Math.ceil(dt / 0.01), h = dt / n;
+        for (let i = 0; i < n; i++) { siteVel.addScaledVector(_pv.copy(siteGoal).sub(siteAim), w * w * h).multiplyScalar(1 - 2 * z * w * h); siteAim.addScaledVector(siteVel, h); }
+      }
       camera.lookAt(siteAim);
       if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the RCS, as in the flip
+      shotName = name; padCam = true;
+    } else if (name === 'hero') {   // drone orbit, slow float; letterboxed
+      const wreck = hero.how === 'crashed', t = simClock - hero.t0, k = sstep(0, HERO.dur, t);
+      const a = hero.a0 + (wreck ? HERO.spdW : HERO.spd) * DEG * t, r = wreck ? HERO.rW : lerp(HERO.r[0], HERO.r[1], k), hh = wreck ? HERO.hW : lerp(HERO.h[0], HERO.h[1], k);
+      const x = hero.c.x + Math.cos(a) * r, z = hero.c.z + Math.sin(a) * r;
+      camera.position.set(x + 0.6 * Math.sin(simClock * 0.43), Math.max(hero.c.y + hh, heightAt(x, z) + 8) + 0.5 * Math.sin(simClock * 0.31 + 1), z + 0.6 * Math.cos(simClock * 0.37));
+      camera.lookAt(_lo.copy(hero.c).add(_pv.set(0, wreck ? 4 : 22, 0)));
+      if (Math.abs(camera.fov - HERO.fov) > 0.01) { setFov(HERO.fov); }
       shotName = name; padCam = true;
     } else if (name === 'pad') {
       const P = name === 'pad' ? _pc.set(PAD_CAM.x, 0, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
@@ -2237,7 +2271,8 @@ export async function initLanding(step) {
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) shake *= Math.exp(-dt * 2.5);
     const fov = name === 'pad' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name in TVC_CAM && TVC_CAM[name].fov ? TVC_CAM[name].fov : 40;
-    if (camera.fov !== fov) { camera.fov = fov; resize(); }
+    const fz = name === 'siteT' || name === 'siteW' || name === 'tele' ? fov * opZoom() : fov;
+    if (Math.abs(camera.fov - fz) > 1e-3) setFov(fz);
   }
   // TVC landing shots after the Starship Flight 15 webcast: a far site camera (~250 m up, ~3 km out, off to the side of
   // the divert) on a long lens, then the same spot wide with the pad and the base in the lower third, then a low ground
@@ -2256,7 +2291,8 @@ export async function initLanding(step) {
   outpost.addCamProps([[PAD_CAM.x, PAD_CAM.z, PAD_CAM.y, 'pole'], [PAD_CAM.x, -PAD_CAM.z, PAD_CAM.y, 'pole'], [TVC_CAM.tele.x, TVC_CAM.tele.z, TVC_CAM.tele.h, 'tripod'], [TVC_CAM.siteT.x, TVC_CAM.siteT.z, TVC_CAM.siteT.h, 'hut']]);
   const planCams = { pad: [[PAD_CAM.x, PAD_CAM.z], [PAD_CAM.x, -PAD_CAM.z]], site: [TVC_CAM.siteT.x, TVC_CAM.siteT.z] }, planBad = checkPlan(outpost.objs, planCams);
   planBad.forEach(([o, why]) => console.warn(`Base plan: ${o.name} ${why}`));
-  const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3();
+  const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3(), siteGoal = new THREE.Vector3(), siteVel = new THREE.Vector3(); let opT0 = 0, reC = false;
+  const opZoom = () => { const t = simClock - opT0; return (1 + 0.6 * Math.exp(-t * 2.6) * Math.cos(t * 3.2)) * (1 - 0.08 * sstep(0, 12, t)); };   // finding the ship, then the slow push-in
 
 
   // Heat shimmer behind the nozzles: project the exhaust axis to the screen for the grade pass (High/Medium only)
@@ -2285,6 +2321,35 @@ export async function initLanding(step) {
   const stripEl = $('lndPrompt');
   let stripMsg = null, cue = null, stripDig = null, stripPrev = '';   // cue: { at (s into the TVC phase), kind: 'push' | 'gust' }
   function setStrip(html, ms, cls = '') { stripMsg = { html, until: performance.now() + ms, cls }; }
+  // ---------- Broadcast presentation: letterbox bars, lower-third captions, clean feed (H) ----------
+  // Outside the HUD, so they stay in the clean feed. Bars (2.39:1) for the orbit idle, the deorbit burn and the hero ending.
+  const barsEl = document.createElement('div'); barsEl.className = 'lnd-bars'; barsEl.innerHTML = '<i></i><i></i>'; $('landing').appendChild(barsEl);
+  const lowerEl = document.createElement('div'); lowerEl.className = 'lnd-lower'; lowerEl.innerHTML = '<div class="t"></div><div class="s"></div>'; $('landing').appendChild(lowerEl);
+  const hintEl = document.createElement('div'); hintEl.className = 'lnd-cleanhint'; hintEl.textContent = 'Clean feed · H shows the controls'; $('landing').appendChild(hintEl);
+  let lowerT = 0;
+  function lower(title, sub, ms = 4200) {
+    lowerEl.querySelector('.t').textContent = title; lowerEl.querySelector('.s').textContent = sub || ''; lowerEl.querySelector('.s').hidden = !sub;
+    lowerEl.classList.remove('show'); void lowerEl.offsetWidth; lowerEl.classList.add('show');
+    clearTimeout(lowerT); lowerT = setTimeout(() => lowerEl.classList.remove('show'), ms);
+  }
+  function captions() {   // once per run each, from the run's own numbers
+    const C = calls;
+    if (state === 'entry') {
+      if (!C.capEI && ent.h) { C.capEI = 1; lower('ENTRY INTERFACE', `${Math.round(ent.h / 1000)} km · ${Math.round(ent.v * 3.6).toLocaleString('en-US')} km/h`); }
+      if (!C.capPk && ent.u > 0.57) { C.capPk = 1; lower('PEAK HEATING', `${$('lndQ').textContent} MW/m² · tiles ${$('lndTile').textContent} °C`); }
+    }
+    if (state === 'flight') { const s = flight.s;
+      if (s.phase === 'belly' && !C.capBF && tBreak !== null) { C.capBF = 1; lower('BELLY FLOP', `${(s.h / 1000).toFixed(1)} km · ${Math.round(Math.hypot(s.vh, s.vx ?? 0) * 3.6).toLocaleString('en-US')} km/h · flaps steering`); }
+      if (s.phase === 'flip' && !C.capFl) { C.capFl = 1; lower('FLIP · LANDING BURN', 'three centre engines · belly-first to upright'); }
+      if (s.phase === 'tvc' && !C.capTv) { C.capTv = 1; lower('TVC IN CONTROL', source === 'rig' ? 'flown by the real rocket on the desk rig' : 'simulated Nano controller · MPU6050 + two servos'); }
+      if (C.gustAt != null && simClock > C.gustAt + 1.6) { const p = $('lndPush').textContent.trim(); C.gustAt = null; lower('GUST RESPONSE', p ? p.replace(/\s+/g, ' ') : 'the controller pushes back'); }
+    }
+  }
+  const letterbox = on => barsEl.classList.toggle('on', on);
+  addEventListener('keydown', e => {
+    if (document.body.dataset.tab !== 'landing' || e.target.closest?.('input, select, textarea')) return;
+    if (e.key === 'h' || e.key === 'H') { const on = document.body.classList.toggle('clean-feed'); hintEl.classList.toggle('show', on); if (on) setTimeout(() => hintEl.classList.remove('show'), 2200); dispatchEvent(new Event('resize')); }
+  });
   function stripStep() {
     const s = flight.s, t = s.phase === 'tvc' ? s.t - s.tPh : 0;
     let html = '', cls = '';
@@ -2617,6 +2682,63 @@ export async function initLanding(step) {
     const sc = h * renderer.getPixelRatio() / (2 * Math.tan(camera.fov * DEG / 2));
     dust.setScale(sc); fire.setScale(sc); glow.setScale(sc); puffs.setScale(sc); haze.setScale(sc);
   }
+  // ---------- Director: picks the shot, whip-pans between some, then the operator's feel for the camera type ----------
+  // Whip-pan: the old shot swings away (accelerating, smeared), the new one swings in (decelerating) — 0.32 s, cut at the middle.
+  // Feel: tripods (site, tele, pad) near-still with wind sway, and the shake of an event arrives late, at the speed of sound on
+  // Mars (~240 m/s); onboard (hull cam, skirt cam, aft flap ride-along) high-frequency vibration with the air and the engines;
+  // drones and chase cameras a slow float. Depth of field on the close shots and the hero orbit (Medium/High); plasma streaks.
+  const WHIP_DUR = 0.32, WHIPS = new Set(['e0>e1', 'e1>e2', 'e2>e3', 'e3>e4', 'skirt>track', 'track>flaps', 'flaps>top', 'top>side', 'side>flip']);
+  const FEEL_TRIPOD = new Set(['siteT', 'siteW', 'tele', 'pad']), FEEL_ONBOARD = new Set(['skirt', 'close', 'e1']);
+  const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6 };   // blur (px at 1080p) at twice the focus distance
+  let whip = null, camName = '';
+  const shHist = new Float32Array(512), shT = new Float32Array(512).fill(-1e9); let shI = 0;
+  const shakeAt = t => { let v = 0, best = -1e9; for (let i = 0; i < 512; i++) if (shT[i] <= t && shT[i] > best) { best = shT[i]; v = shHist[i]; } return v; };
+  const _dA = new THREE.Vector3(), _dB = new THREE.Vector3(), _dV = new THREE.Vector3();
+  const entShotIdx = () => Math.max(0, ENT_SHOTS.findIndex(S => ent.u < S.u1));
+  function feel(dt, name) {
+    shHist[shI] = shake; shT[shI] = simClock; shI = (shI + 1) % 512;
+    if (paused) return;
+    const t = simClock;
+    if (FEEL_TRIPOD.has(name)) {
+      camera.rotateX(DEG * (0.012 * Math.sin(t * 0.71) + 0.006 * Math.sin(t * 2.3 + 1)));
+      camera.rotateY(DEG * (0.01 * Math.sin(t * 0.53 + 2) + 0.005 * Math.sin(t * 1.9)));
+      const sD = shakeAt(t - camera.position.distanceTo(ship.position) / 240);   // the sound of it arrives late
+      if (sD > 0.002) { camera.rotateX(rnd(-1, 1) * sD * 0.35 * DEG); camera.rotateY(rnd(-1, 1) * sD * 0.35 * DEG); }
+    } else if (FEEL_ONBOARD.has(name)) {
+      const q = state === 'entry' ? ent.I : clamp(Math.abs(flight.s.vh) / 320, 0, 1) * 0.6, a = DEG * (0.04 + 0.22 * q + 0.35 * curThr());
+      camera.rotateX(a * (0.6 * Math.sin(t * 83) + 0.4 * Math.sin(t * 131 + 1) + rnd(-0.3, 0.3)));
+      camera.rotateY(a * (0.6 * Math.sin(t * 97 + 2) + 0.4 * Math.sin(t * 157) + rnd(-0.3, 0.3)));
+    } else if (name !== 'track' && name !== 'orbit' && name !== 'deorbit') {   // drone / chase: slow float
+      const m = name[0] === 'e' ? 3 : name === 'hero' ? 0.8 : 1.2;
+      camera.position.add(_dV.set(Math.sin(t * 0.37), 0.6 * Math.sin(t * 0.29 + 1), Math.cos(t * 0.43)).multiplyScalar(m));
+      camera.rotateZ(DEG * 0.25 * Math.sin(t * 0.41));
+    }
+  }
+  function cameraStep(dt) {
+    const want = inOrbit() ? (state === 'entry' && camMode !== 'free' ? 'e' + entShotIdx() : state) : camMode === 'still' || camMode === 'free' ? camMode : shot();
+    if (!whip && want !== camName) { if (camName && !paused && WHIPS.has(camName + '>' + want)) whip = { t: 0, from: camName, to: want, dir: Math.random() < 0.5 ? -1 : 1 }; else camName = want; }
+    let use = camName;
+    if (whip) { whip.t += paused ? 0 : dt; if (whip.t >= WHIP_DUR / 2) camName = whip.to; use = whip.t < WHIP_DUR / 2 ? whip.from : whip.to; }
+    cameraShot(dt, use);
+    const g = post.grade.uniforms;
+    if (camMode === 'free' || camMode === 'still') { post.dof.enabled = false; g.uMBk.value = g.uStrK.value = 0; return; }
+    feel(dt, use);
+    if (whip) { const k = clamp(whip.t / WHIP_DUR, 0, 1), a = k < 0.5 ? (2 * k) ** 2 : -((2 * (1 - k)) ** 2);
+      camera.rotateY(-whip.dir * 0.42 * a); g.uMBk.value = Math.sin(Math.PI * k); g.uMB.value.set(whip.dir * 0.1, 0); if (whip.t >= WHIP_DUR) whip = null; }
+    else g.uMBk.value = 0;
+    if (state === 'entry' && ent.I > 0.02 && QUALITY[qName].bloom) {   // plasma: the bright parts smear downstream on screen
+      _dV.set(0, 1, 0).applyQuaternion(wake.quaternion); _dA.copy(ship.position).project(camera); _dB.copy(ship.position).addScaledVector(_dV, 60).project(camera);
+      g.uStr.value.set((_dB.x - _dA.x) * 0.5, (_dB.y - _dA.y) * 0.5); const L = g.uStr.value.length(); if (L > 0.06) g.uStr.value.multiplyScalar(0.06 / L);
+      g.uStrK.value = ent.I * 0.9;
+    } else g.uStrK.value = 0;
+    const ap = DOF_AP[use]; post.dof.enabled = !!(ap && QUALITY[qName].dof && !inOrbit());
+    if (post.dof.enabled) { const u = post.dof.mat.uniforms; u.uFocus.value = camera.position.distanceTo(use === 'hero' ? _dA.copy(hero.c).add(_dV.set(0, hero.how === 'crashed' ? 4 : 22, 0)) : ship.position);
+      u.uAp.value = ap * renderer.domElement.height / 1080; u.uMax.value = 10 * renderer.domElement.height / 1080; }
+  }
+  function setFov(f) {   // zoom only (no buffer resize): projection, the orbit pass, particle sizes
+    camera.fov = f; camera.updateProjectionMatrix(); orbit.resize(camera.aspect, f);
+    const sc = renderer.domElement.height / (2 * Math.tan(f * DEG / 2)); dust.setScale(sc); fire.setScale(sc); glow.setScale(sc); puffs.setScale(sc); haze.setScale(sc);
+  }
   new ResizeObserver(resize).observe(view);
 
   let last = performance.now(), acc = 0, lastHud = 0, warmed = false;
@@ -2626,6 +2748,7 @@ export async function initLanding(step) {
     if (document.body.dataset.tab !== 'landing') return;      // paused while another tab shows
     const sdt = paused ? 0 : dt;
     simClock += sdt;
+    captions(); heroStep(); letterbox(state === 'orbit' || state === 'deorbit' || hero.on);
     if (inOrbit()) {
       if (!paused) orbitStep(dt); else orbitStep(0);
       cameraStep(dt);
@@ -2635,8 +2758,18 @@ export async function initLanding(step) {
       const cheat = SUNRISE && state === 'orbit' && idleI !== 1 && idleI !== 2;
       orbit.setBurstDir(cheat ? SUNRISE_DIR : null);
       orbitFlare.lf.position.copy(cheat ? SUNRISE_DIR : ORB_SUN).multiplyScalar(6e5);
+      // Below ~33 km, the last entry shot looks down past the ship onto the real terrain (the ground scene, seen from the
+      // ship's place on a compressed approach that ends where the belly flop starts), not the orbit planet's huge craters;
+      // the orbit pass still draws the sky and anything beyond the terrain's edge. Not on Low.
+      const valley = state === 'entry' && camMode !== 'free' && ENT_SHOTS[+camName.slice(1)]?.valley && camName[0] === 'e' && qName !== 'low';
+      if (valley) {
+        vCam.position.set(START.x0 - (ent.h - L.H_START) * 1.7, ent.h, flight.s.z ?? 0).add(camera.position); vCam.quaternion.copy(camera.quaternion);
+        if (vCam.fov !== camera.fov || vCam.aspect !== camera.aspect) { vCam.fov = camera.fov; vCam.aspect = camera.aspect; vCam.updateProjectionMatrix(); }
+        skyU.uAlt.value = ent.h;
+      }
+      groundSky.visible = !valley; cloudMeshes.forEach(([m]) => { m.visible = !valley; });   // the tiled cloud layers read as a pattern from above
       applyLook(dt);
-      post.setMode(true);
+      post.setMode(true, valley ? vCam : null);
       if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
     } else {
       acc += sdt;
@@ -2662,7 +2795,7 @@ export async function initLanding(step) {
       applyLook(dt);
       shimmer();
       const insOn = rigLinkStep(paused ? 0 : dt);
-      post.setMode(false);
+      groundSky.visible = true; if (!cloudMeshes[0][0].visible) cloudMeshes.forEach(([m]) => { m.visible = true; }); post.setMode(false);
       if (!(warmed && window.tvcCovered?.())) { post.render(dt); if (insOn) renderInset(); warmed = true; }
     }
     if (now - lastHud > 60) { lastHud = now; hud(); }

@@ -12,6 +12,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
 const preset = o => o;
@@ -85,11 +86,12 @@ const GradeShader = {
     uChroma: { value: 0 }, uFade: { value: 0 }, uFadeCol: { value: new THREE.Color(1, 0.95, 0.9) }, uFlash: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
     uShA: { value: new THREE.Vector2() }, uShB: { value: new THREE.Vector2() }, uShW: { value: 0 }, uShK: { value: 0 },
+    uMB: { value: new THREE.Vector2() }, uMBk: { value: 0 }, uStr: { value: new THREE.Vector2() }, uStrK: { value: 0 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: `uniform sampler2D tDiffuse; uniform float uContrast, uSat, uVig, uGrain, uTime, uChroma, uFade, uFlash;
     uniform vec3 uTintLo, uTintHi, uFadeCol; uniform vec2 uRes; varying vec2 vUv;
-    uniform vec2 uShA, uShB; uniform float uShW, uShK;
+    uniform vec2 uShA, uShB; uniform float uShW, uShK; uniform vec2 uMB, uStr; uniform float uMBk, uStrK;
     float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main(){
       vec3 c; vec2 uv = vUv;
@@ -104,6 +106,10 @@ const GradeShader = {
       if (uChroma > 0.0) { vec2 d = (uv - 0.5) * uChroma * length(uv - 0.5);
         c = vec3(texture2D(tDiffuse, uv + d).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - d).b); }
       else c = texture2D(tDiffuse, uv).rgb;
+      // Whip-pan blur: the frame smeared along the pan (uMB: the smear across the screen, uv units)
+      if (uMBk > 0.001) { vec3 a = c; for (int i = 0; i < 10; i++) a += texture2D(tDiffuse, uv + uMB * uMBk * (float(i) / 9.0 - 0.5)).rgb; c = a / 11.0; }
+      // Plasma streaks: only what's bright smears, back along the flow on screen
+      if (uStrK > 0.001) { vec3 a = vec3(0.0); for (int i = 1; i <= 10; i++) { float f = float(i) / 10.0; a += max(texture2D(tDiffuse, uv - uStr * f).rgb - 0.5, 0.0) * (1.0 - f); } c += a * uStrK * 0.45; }
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSat);
       c = (c - 0.5) * uContrast + 0.5;
@@ -117,11 +123,42 @@ const GradeShader = {
     }`,
 };
 
+// Depth of field: one gather pass reading the scene's own depth (no second render), 24 taps on a golden-angle disc; the
+// blur radius (px) grows with distance from the focus plane. Background samples only count if they're blurred too, so a sharp
+// subject doesn't bleed into its blurred surroundings. Off (zero cost) unless a shot asks for it, and never on Low.
+class DofPass extends Pass {
+  constructor(camera) {
+    super(); this.camera = camera;
+    this.mat = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, tDepth: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 1 }, uFar: { value: 1000 }, uFocus: { value: 100 }, uAp: { value: 0 }, uMax: { value: 9 } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `#include <packing>
+        uniform sampler2D tDiffuse, tDepth; uniform vec2 uRes; uniform float uNear, uFar, uFocus, uAp, uMax; varying vec2 vUv;
+        float lin(vec2 p){ return -perspectiveDepthToViewZ(texture2D(tDepth, p).x, uNear, uFar); }
+        float coc(float z){ return clamp(uAp * abs(z - uFocus) / max(z, 0.1), 0.0, uMax); }
+        void main(){ vec4 base = texture2D(tDiffuse, vUv); float z = lin(vUv), c = coc(z);
+          if (c < 0.6) { gl_FragColor = base; return; }
+          vec3 a = base.rgb; float ws = 1.0;
+          for (int i = 0; i < 24; i++) { float fi = float(i), r = sqrt((fi + 0.5) / 24.0) * c, an = fi * 2.39996;
+            vec2 q = vUv + vec2(cos(an), sin(an)) * r / uRes; float zq = lin(q), cq = coc(zq);
+            float w = zq < z - 0.5 ? smoothstep(r - 1.0, r + 1.0, cq) : 1.0;
+            a += texture2D(tDiffuse, q).rgb * w; ws += w; }
+          gl_FragColor = vec4(a / ws, base.a); }`,
+    });
+    this.quad = new FullScreenQuad(this.mat); this.enabled = false;
+  }
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.mat.uniforms; u.tDiffuse.value = readBuffer.texture; u.tDepth.value = readBuffer.depthTexture;
+    u.uNear.value = this.camera.near; u.uFar.value = this.camera.far; u.uRes.value.set(readBuffer.width, readBuffer.height);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer); this.quad.render(renderer);
+  }
+}
+
 // Quality levels
 export const QUALITY = {
-  high:   { label: 'High',   bloom: true,  grain: true,  shadow: 2048, rocks: 1.0,  pr: 2,   shimmer: true },
-  medium: { label: 'Medium', bloom: true,  grain: false, shadow: 1024, rocks: 0.55, pr: 1.5, shimmer: true },
-  low:    { label: 'Low',    bloom: false, grain: false, shadow: 1024, rocks: 0.25, pr: 1,   shimmer: false },
+  high:   { label: 'High',   bloom: true,  grain: true,  shadow: 2048, rocks: 1.0,  pr: 2,   shimmer: true, dof: true },
+  medium: { label: 'Medium', bloom: true,  grain: false, shadow: 1024, rocks: 0.55, pr: 1.5, shimmer: true, dof: true },
+  low:    { label: 'Low',    bloom: false, grain: false, shadow: 1024, rocks: 0.25, pr: 1,   shimmer: false, dof: false },
 };
 export const Q_ORDER = ['high', 'medium', 'low'];
 
@@ -134,16 +171,22 @@ export function createPost(renderer, ground, orbitScene, orbitCam, shipScene, ca
   const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 1.2);
   const output = new OutputPass();
   const grade = new ShaderPass(GradeShader);
-  [rpGround, rpOrbit, rpShip, bloom, output, grade].forEach(p => composer.addPass(p));
+  const dof = new DofPass(camera);
+  for (const rt of [composer.renderTarget1, composer.renderTarget2]) rt.depthTexture = new THREE.DepthTexture(rt.width, rt.height);   // the scene's depth, for the depth of field
+  [rpOrbit, rpGround, rpShip, dof, bloom, output, grade].forEach(p => composer.addPass(p));
   return {
-    composer, bloom, grade,
-    setMode(orbit) { rpGround.enabled = !orbit; rpOrbit.enabled = rpShip.enabled = orbit; },
+    composer, bloom, grade, dof,
+    setMode(orbit, valleyCam = null) {   // valley: the ground drawn over the orbit sky (its own sky hidden), the ship on top
+      rpOrbit.enabled = rpShip.enabled = orbit; rpGround.enabled = !orbit || !!valleyCam;
+      rpGround.camera = valleyCam || camera; rpGround.clear = !valleyCam; rpGround.clearDepth = !!valleyCam;
+    },
     apply(look, quality, t) {
       bloom.enabled = quality.bloom;
       bloom.strength = look.bloom.x; bloom.radius = look.bloom.y; bloom.threshold = look.bloom.z;
       const u = grade.uniforms;
       u.uContrast.value = look.contrast; u.uSat.value = look.sat; u.uTintLo.value.copy(look.tintLo); u.uTintHi.value.copy(look.tintHi);
       u.uVig.value = look.vig; u.uGrain.value = quality.grain ? look.grain : 0; u.uTime.value = t;
+      if (!quality.dof) dof.enabled = false;
       renderer.toneMappingExposure = look.exposure;
     },
     setSize(w, h, pr) { composer.setPixelRatio(pr); composer.setSize(w, h); grade.uniforms.uRes.value.set(w * pr, h * pr); },

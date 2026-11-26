@@ -402,8 +402,8 @@ export function buildBase(ctx) {
   const parkRover = (r, x, z, a) => { r.position.set(x, gy(x, z), z); r.rotation.set(0, -a, 0); };
   const rover2 = makeRover(); { const G0 = PLAN.garage; parkRover(rover2, G0.x - 18, G0.z + 12, -0.25 + 0.4); scene.add(rover2); }
   const rover = makeRover(); scene.add(rover);
-  const roverPath = densify([[PLAN.garage.x - 14, PLAN.garage.z - 3], [300, 95], [150, 55], [62, 24]], 4);   // garage → LZ-1's berm gap
-  const RV = { t: -1, speed: 8, len: (roverPath.length - 1) * 4 };
+  const roverPath = densify([[205, 70], [150, 55], [62, 24]], 4);   // from a pull-off on the road (it waits there for the landing) to LZ-1's berm gap
+  const RV = { t: -1, speed: 9, len: (roverPath.length - 1) * 4 };
   const placeRover = s => {   // s: metres along the path
     const f = clamp(s / 4, 0, roverPath.length - 1.001), i = f | 0, t = f - i, [x0, z0] = roverPath[i], [x1, z1] = roverPath[i + 1];
     const x = lerp(x0, x1, t), z = lerp(z0, z1, t), a = Math.atan2(z1 - z0, x1 - x0), ca = Math.cos(a), sa = Math.sin(a);
@@ -472,7 +472,7 @@ export function buildBase(ctx) {
       ctx.dust.emit({ x, y, z, vx: ctx.wind[0] * 2 + (Math.random() - 0.5) * 1.5, vy: 2.5 + Math.random() * 3, vz: ctx.wind[1] * 2 + (Math.random() - 0.5) * 1.5, life: 4 + Math.random() * 3, s0: 1.5, s1: 12, a: 0.32, drag: 0.25, rgb: [0.97, 0.95, 0.93] }); } }
     // The rover drives out to the pad a few seconds after a good landing, kicking up dust
     if (landed && info.landedAt != null && info.ok) {
-      const s = clamp((t - info.landedAt - 4) * RV.speed, 0, RV.len);
+      const s = clamp((t - info.landedAt - 2) * RV.speed, 0, RV.len);
       const [x, z, a] = placeRover(s), moving = s > 0 && s < RV.len;
       rover.userData.wheels.forEach(w => { w.rotation.z = -s / 0.75; });
       rover.userData.beacon.visible = (t * 1.5) % 1 < 0.3;

@@ -795,3 +795,21 @@ body[data-tab="landing"] .bench-only { visibility: hidden; }
 /* Legs: lights when all four are locked */
 .lnd-legs { margin-left: 5px; font: 600 9px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.35); vertical-align: middle; transition: color .2s; }
 .lnd-legs.on { color: #fff; }
+
+/* Landing: broadcast presentation (outside the HUD, so they stay in the clean feed) */
+.lnd-bars { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.lnd-bars i { position: absolute; left: 0; right: 0; height: max(0px, calc((100% - 41.84vw) / 2)); background: #000; transition: transform 1.4s cubic-bezier(.6, 0, .2, 1); }
+.lnd-bars i:first-child { top: 0; transform: translateY(-101%); }
+.lnd-bars i:last-child { bottom: 0; transform: translateY(101%); }
+.lnd-bars.on i { transform: none; }
+.lnd-lower { position: absolute; left: clamp(16px, 3vw, 48px); bottom: clamp(180px, 26vh, 240px); z-index: 3; pointer-events: none; opacity: 0; transform: translateX(-28px);
+  transition: opacity .5s, transform .7s cubic-bezier(.2, .8, .2, 1); }
+.lnd-lower.show { opacity: 1; transform: none; }
+.lnd-lower .t { font: 600 clamp(16px, 1.6vw, 24px)/1.15 var(--cond); letter-spacing: .2em; padding: 7px 16px 6px 13px; background: rgba(12, 7, 4, .66); border-left: 3px solid #f5a623; width: max-content; }
+.lnd-lower .s { font-size: clamp(11px, .9vw, 13px); letter-spacing: .06em; color: rgba(255, 255, 255, .85); padding: 4px 14px 5px 16px; background: rgba(12, 7, 4, .45); width: max-content; margin-top: 2px; }
+.lnd-cleanhint { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 4; pointer-events: none; font-size: 12px; letter-spacing: .08em; padding: 6px 12px;
+  background: rgba(0, 0, 0, .55); border-radius: 6px; opacity: 0; transition: opacity .4s; }
+.lnd-cleanhint.show { opacity: 1; }
+body.clean-feed > header, body.clean-feed > footer, body.clean-feed #landing .lnd-ui, body.clean-feed #lndFps { display: none !important; }
+body.clean-feed #landing { grid-row: 1 / -1; }
+body.clean-feed .lnd-lower { bottom: 9vh; }
