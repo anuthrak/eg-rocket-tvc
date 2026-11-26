@@ -24,91 +24,125 @@ const NOISE = /* glsl */`
                mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }
 `;
 
-const PLANET_FS = /* glsl */`
-  uniform vec3 uSun, uCanyonC, uCanyonA; uniform float uOct, uExag, uR;
-  varying vec3 vP; varying vec3 vN; varying vec3 vW;
+// The surface, shared by the bake and the live pass. Mars from orbit is mostly broad colour: bright dusty highlands, dark
+// basaltic plains, wind streaks trailing behind craters, a layered canyon. Craters are shallow detail, not the pattern.
+// Heights are on the unit sphere (×R for km); crater gradients are analytic, so the shading never comes from pixel blocks.
+const SURF = /* glsl */`
+  uniform vec3 uCanyonC, uCanyonA;
   ${NOISE}
-  // fbm whose finest octaves fade out once they get smaller than a few pixels
-  float fbmf(vec3 p, float foot){ float s = 0.0, a = 0.5, f = 1.0;
-    for (int i = 0; i < 9; i++) { if (float(i) >= uOct) break;
-      float k = smoothstep(foot * 3.0, foot * 10.0, 1.0 / f); s += a * n3(p * f) * k + a * 0.5 * (1.0 - k); f *= 2.03; a *= 0.5; }
-    return s; }
-  // One crater scale: height (in cell units) and a 'fresh ejecta' brightness
-  vec2 craters(vec3 p, float scale, float density){
-    vec3 q = p * scale, i = floor(q), f = fract(q); float h = 0.0, ej = 0.0;
+  float fbmN(vec3 p, int oct){ float s = 0.0, a = 0.5, f = 1.0; for (int i = 0; i < 9; i++) { if (i >= oct) break; s += a * n3(p * f); f *= 2.03; a *= 0.5; } return s; }
+  const vec3 WIND = vec3(0.36, 0.48, 0.8);
+  // One crater scale. Returns height (x, unit sphere), fresh-ejecta brightness (y), wind streak (z); adds the height's
+  // gradient (unit sphere) to g
+  vec3 craters(vec3 p, float scale, float density, float depth, inout vec3 g){
+    vec3 q = p * scale, i = floor(q), f = fract(q); float h = 0.0, ej = 0.0, st = 0.0;
+    vec3 Wt = normalize(WIND - p * dot(WIND, p));
     for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
       vec3 n = vec3(x, y, z), c = i + n;
       if (h3(c + 7.7) > density) continue;
-      vec3 o = h33(c) * 0.7 + 0.15;
-      float r = mix(0.14, 0.46, pow(h3(c + 3.3), 1.6));
-      float d = length(n + o - f) / r;
-      if (d > 2.2) continue;
-      float bowl = -(1.0 - d * d) * step(d, 1.0);
-      float rim = exp(-pow((d - 1.0) / 0.2, 2.0)) * 0.42;
-      float age = h3(c + 1.1);                                    // old craters are softened
-      h += r * (bowl * mix(0.9, 0.45, age) + rim * mix(1.0, 0.4, age));
-      ej += exp(-pow((d - 1.25) / 0.35, 2.0)) * (1.0 - age) * step(1.0, d);
+      vec3 v = n + h33(c) * 0.7 + 0.15 - f;                       // to the crater's centre (cell units)
+      float r = mix(0.1, 0.4, pow(h3(c + 3.3), 2.2)), d = length(v) / r, age = h3(c + 1.1);
+      float al = dot(-v, Wt) / r, ac = length(-v - Wt * dot(-v, Wt)) / r;   // downwind of the crater: a pale streak
+      st += exp(-ac * ac / 0.35) * smoothstep(0.8, 1.3, al) * exp(-max(al - 1.0, 0.0) / 1.6) * (0.4 + 0.6 * age);
+      if (d > 2.0) continue;
+      float a = mix(0.8, 0.35, age), b = mix(0.9, 0.3, age);
+      float bowl = -(1.0 - d * d) * step(d, 1.0), rim = exp(-pow((d - 1.0) / 0.22, 2.0)) * 0.4;
+      float dh = a * 2.0 * d * step(d, 1.0) + b * rim * (-2.0 * (d - 1.0) / 0.0484);   // d(height)/dd
+      h += r * (bowl * a + rim * b);
+      g += dh * (-v) / (r * max(d, 1e-3) * r) * r * depth;          // d/dq of r·shape(|v|/r), then ×depth/scale·scale
+      ej += exp(-pow((d - 1.2) / 0.3, 2.0)) * (1.0 - age) * step(1.0, d);
     }
-    return vec2(h, ej);
+    return vec3(h * depth / scale, ej, st);
   }
-  void main(){
-    vec3 p = normalize(vP);
-    float foot = length(fwidth(p)) + 1e-6;                         // unit-sphere size of one pixel
-    // Continents and plains
-    float big = fbmf(p * 2.2 + 4.0, foot), dark = smoothstep(0.5, 0.62, fbmf(p * 3.4 + 9.0, foot) + 0.18 * big - 0.05);
-    float grit = fbmf(p * 90.0, foot);
-    // Crater fields, more in the highlands (sizes ~150, 45, 14, 4 km)
-    float H = 0.0, ej = 0.0;
-    float sc[4] = float[4](10.0, 34.0, 110.0, 380.0);
-    float den[4] = float[4](0.35, 0.5, 0.55, 0.6);
-    for (int k = 0; k < 4; k++) {
-      float vis = smoothstep(foot * 2.0, foot * 8.0, 1.0 / sc[k]);
-      if (vis < 0.01) continue;
-      vec2 c = craters(p, sc[k], den[k] * (0.55 + 0.6 * (1.0 - dark)));
-      H += c.x / sc[k] * 0.22 * vis; ej += c.y * vis * 0.5;
-    }
-    // Canyon system: a long trough with terraced walls
+  // The canyon: a long trough with terraced, layered walls
+  float canyon(vec3 p, out float band){
     vec3 nc = normalize(cross(uCanyonC, uCanyonA));
     float across = dot(p, nc) + 0.012 * (n3(p * 40.0) - 0.5), along = dot(p, uCanyonA);
-    float cmask = smoothstep(0.26, 0.14, abs(along)) * step(0.0, dot(p, uCanyonC));
-    float cw = 0.011 * (0.7 + 0.6 * n3(p * 9.0));
-    float cd = exp(-pow(across / cw, 2.0)); cd = floor(cd * 5.0 + n3(p * 120.0)) / 5.0;   // terraces
-    H -= 0.0022 * cd * cmask;
-    H += 0.0009 * (fbmf(p * 14.0, foot) - 0.5) + 0.00015 * (grit - 0.5);
-    // Relief: perturb the normal by the screen-space gradient of the height (in km), exaggerated
-    float Hkm = H * uR * uExag;
-    vec3 N = normalize(vN), dpx = dFdx(vW), dpy = dFdy(vW);
-    vec3 r1 = cross(dpy, N), r2 = cross(N, dpx); float det = dot(dpx, r1);
-    vec3 grad = sign(det) * (dFdx(Hkm) * r1 + dFdy(Hkm) * r2);
-    vec3 n = normalize(abs(det) * N - grad);
-    // Albedo (display colours)
-    vec3 shadowC = vec3(0.30, 0.11, 0.05), rust = vec3(0.62, 0.22, 0.08), ochre = vec3(0.86, 0.38, 0.13), dust = vec3(0.97, 0.62, 0.34);
-    vec3 c = mix(ochre, rust, smoothstep(0.35, 0.72, big));
-    c = mix(c, dust, smoothstep(0.58, 0.8, fbmf(p * 6.0 + 2.0, foot)) * 0.45);
-    c = mix(c, shadowC * 1.3, dark * 0.7);
-    c = mix(c, dust, clamp(ej, 0.0, 1.0) * 0.35);
-    c *= 0.82 + 0.36 * grit;
-    c = mix(c, shadowC, cd * cmask * 0.5);
-    // Polar caps for late southern spring (Ls ~245, sun ~18 deg south; local +z = north pole). South: the seasonal frost
-    // has retreated to ~80S, patchy, round the bright residual cap (~86S). North: polar night above ~72N; a thin,
-    // dusty seasonal frost from ~62N, mostly in the dark, under a faint polar hood (the haze is added after lighting)
-    float lat = p.z, frostN = fbmf(p * 22.0 + 7.0, foot);
-    float sCap = smoothstep(0.975, 0.99, -lat + 0.012 * (frostN - 0.5)) * smoothstep(0.3, 0.55, frostN + smoothstep(0.995, 0.998, -lat));
-    sCap = max(sCap, smoothstep(0.996, 0.9985, -lat + 0.002 * grit));
-    c = mix(c, vec3(0.95, 0.93, 0.9), sCap);
-    float nCap = smoothstep(0.87, 0.92, lat + 0.03 * (frostN - 0.5)) * smoothstep(0.25, 0.6, frostN + smoothstep(0.92, 0.97, lat));
-    c = mix(c, vec3(0.78, 0.76, 0.74), nCap * 0.7);
-    // Light: a narrow red terminator band, a near-black night side with a faint cool ambient
-    float mu = dot(N, uSun), d = max(dot(n, uSun), 0.0);
+    float m = smoothstep(0.26, 0.14, abs(along)) * step(0.0, dot(p, uCanyonC)), w = 0.011 * (0.7 + 0.6 * n3(p * 9.0));
+    float cd = exp(-pow(across / w, 2.0));
+    band = smoothstep(0.08, 0.35, cd) * smoothstep(0.95, 0.6, cd) * m;   // the walls
+    return (cd + 0.06 * sin(cd * 9.42)) * m;   // a smooth trough with a gentle bench on each wall
+  }
+`;
+
+// Bake (once, at load): colour, and the height's gradient, into two mipmapped cube maps. uMode 0: albedo; 1: gradient.
+const BAKE_FS = /* glsl */`
+  uniform float uMode, uTexel, uGS; varying vec3 vP;
+  ${SURF}
+  float height(vec3 p, out vec3 g, out vec3 cr2){
+    g = vec3(0.0); float band, dark = smoothstep(0.5, 0.62, fbmN(p * 3.4 + 9.0, 7) + 0.18 * fbmN(p * 2.2 + 4.0, 5) - 0.05);
+    vec3 c0 = craters(p, 10.0, 0.25, 0.12, g), c1 = craters(p, 34.0, 0.35 * (0.6 + 0.6 * (1.0 - dark)), 0.14, g), c2 = craters(p, 110.0, 0.4 * (0.5 + 0.7 * (1.0 - dark)), 0.15, g);
+    cr2 = vec3(c0.y + c1.y + c2.y, c0.z + c1.z + c2.z, dark);
+    return c0.x + c1.x + c2.x - 0.0022 * canyon(p, band) + 0.0008 * (fbmN(p * 14.0, 8) - 0.5);
+  }
+  void main(){
+    vec3 p = normalize(vP), g, cr;
+    if (uMode < 0.5) {
+      float H = height(p, g, cr), band, cn = canyon(p, band), dark = cr.z;
+      float big = fbmN(p * 2.2 + 4.0, 8), grit = fbmN(p * 90.0, 8), dusty = smoothstep(0.55, 0.78, fbmN(p * 6.0 + 2.0, 8));
+      vec3 basalt = vec3(0.36, 0.17, 0.09), rust = vec3(0.66, 0.29, 0.12), ochre = vec3(0.84, 0.45, 0.2), dust = vec3(0.93, 0.64, 0.4);
+      vec3 c = mix(ochre, rust, smoothstep(0.35, 0.72, big));
+      c = mix(c, dust, dusty * 0.5);
+      c = mix(c, basalt, dark * 0.75);
+      c = mix(c, basalt * 1.15, smoothstep(0.52, 0.7, fbmN(p * 18.0 + 5.0, 7)) * 0.5);      // dark sand sheets, a few hundred km
+      c = mix(c, dust, smoothstep(0.56, 0.74, fbmN(p * 45.0 + 1.0, 6)) * 0.35);           // bright dust patches
+      c = mix(c, dust, clamp(cr.y, 0.0, 1.0) * 0.25 + clamp(cr.x, 0.0, 1.0) * 0.18);   // pale streaks, a little ejecta
+      c *= 0.88 + 0.24 * grit;
+      c = mix(c, basalt * 1.2, smoothstep(0.6, 1.0, cn) * 0.6);   // dark sand on the floor
+      c = mix(c, dust * 0.95, band * 0.35);                        // pale layered walls
+      float lat = p.z, fr = fbmN(p * 22.0 + 7.0, 6);
+      float sCap = smoothstep(0.975, 0.99, -lat + 0.012 * (fr - 0.5)) * smoothstep(0.3, 0.55, fr + smoothstep(0.995, 0.998, -lat));
+      sCap = max(sCap, smoothstep(0.996, 0.9985, -lat));
+      c = mix(c, vec3(0.95, 0.93, 0.9), sCap);
+      float nCap = smoothstep(0.87, 0.92, lat + 0.03 * (fr - 0.5)) * smoothstep(0.25, 0.6, fr + smoothstep(0.92, 0.97, lat));
+      c = mix(c, vec3(0.78, 0.76, 0.74), nCap * 0.7);
+      gl_FragColor = vec4(c, 1.0);
+    } else {
+      // gradient: analytic for the craters; the canyon and the broad relief by finite differences one texel apart
+      vec3 t1 = normalize(cross(abs(p.z) < 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0), p)), t2 = cross(p, t1), cr, gx, gy;
+      float H0 = height(p, g, cr), e = uTexel, b;
+      vec3 pa = normalize(p + t1 * e), pb = normalize(p + t2 * e);
+      float s0 = -0.0022 * canyon(p, b) + 0.0008 * (fbmN(p * 14.0, 8) - 0.5);
+      float sa = -0.0022 * canyon(pa, b) + 0.0008 * (fbmN(pa * 14.0, 8) - 0.5), sb = -0.0022 * canyon(pb, b) + 0.0008 * (fbmN(pb * 14.0, 8) - 0.5);
+      g += (t1 * (sa - s0) + t2 * (sb - s0)) / e;
+      g -= p * dot(g, p);
+      gl_FragColor = vec4(clamp(g * uGS + 0.5, 0.0, 1.0), 1.0);
+    }
+  }`;
+
+const PLANET_FS = /* glsl */`
+  uniform vec3 uSun; uniform float uOct, uExag, uR, uGS, uAlt; uniform samplerCube uAlb, uGrad; uniform mat3 uRot;
+  varying vec3 vP; varying vec3 vN; varying vec3 vW;
+  ${SURF}
+  float fbmf(vec3 p, float foot){ float s = 0.0, a = 0.5, f = 1.0;
+    for (int i = 0; i < 6; i++) { if (float(i) >= uOct) break;
+      float k = smoothstep(foot * 3.0, foot * 10.0, 1.0 / f); s += a * n3(p * f) * k + a * 0.5 * (1.0 - k); f *= 2.03; a *= 0.5; }
+    return s; }
+  void main(){
+    vec3 p = normalize(vP);
+    // the larger of the two pixel footprints: detail fades before it can break into dashes at grazing angles
+    float foot = max(length(dFdx(p)), length(dFdy(p))) + 1e-7;
+    vec3 c = textureCube(uAlb, p).rgb, g = (textureCube(uGrad, p).rgb - 0.5) / uGS;
+    // Live: the small craters (2-7 km) and fine grit, only where they're bigger than a few pixels
+    float vis = smoothstep(foot * 4.0, foot * 14.0, 0.3 / 380.0);
+    if (vis > 0.01) { vec3 gl = vec3(0.0); vec3 k = craters(p, 380.0, 0.45, 0.16, gl); g += gl * vis; c = mix(c, c * 1.12, clamp(k.y, 0.0, 1.0) * 0.3 * vis); }
+    c *= 0.9 + 0.2 * fbmf(p * 1500.0, foot * 1500.0);
+    // Light: lit ground, a soft red terminator, a near-black night side with a faint cool ambient
+    vec3 N = normalize(vN), gw = uRot * g; gw -= N * dot(gw, N);
+    vec3 n = normalize(N - uExag * gw);
+    float mu = dot(N, uSun), d = max(dot(n, uSun), 0.0) * 0.85 + max(mu, 0.0) * 0.15;
     float day = smoothstep(-0.04, 0.12, mu);
-    vec3 term = mix(vec3(1.0, 0.42, 0.22), vec3(1.0), smoothstep(0.0, 0.25, mu));
-    vec3 col = c * (d * 1.3 * term * day + 0.035 * vec3(0.55, 0.62, 0.8));
-    col += vec3(0.55, 0.6, 0.68) * smoothstep(0.8, 0.95, lat) * (0.06 * day + 0.006);   // north polar hood
-    // Aerial perspective toward the limb
+    vec3 term = mix(vec3(1.0, 0.45, 0.25), vec3(1.0), smoothstep(0.0, 0.22, mu));
+    vec3 col = pow(c, vec3(2.2)) * (d * 1.25 * term * day + 0.004 * vec3(0.55, 0.62, 0.8) + 0.05 * day * vec3(1.0, 0.7, 0.5));   // light in linear (+ skylight)
+    col += vec3(0.27, 0.32, 0.4) * smoothstep(0.8, 0.95, p.z) * (0.01 * day + 0.0005);   // north polar hood
+    // Aerial perspective: toward the limb, and over everything as the air thickens below ~60 km
     vec3 V = normalize(cameraPosition - vW);
     float limb = pow(1.0 - max(dot(N, V), 0.0), 4.0);
-    col = mix(col, vec3(1.0, 0.56, 0.28) * smoothstep(-0.15, 0.3, mu) * 0.9, limb * 0.6);
-    gl_FragColor = vec4(pow(col, vec3(2.2)) * 1.7, 1.0);
+    col = mix(col, vec3(1.0, 0.28, 0.06) * smoothstep(-0.15, 0.3, mu) * 0.8, limb * 0.6);
+    float dist = distance(cameraPosition, vW), thick = smoothstep(90.0, 15.0, uAlt);
+    float hz = (1.0 - exp(-dist * (0.0006 + 0.0022 * thick))) * (0.2 + 0.55 * thick);
+    col = mix(col, vec3(0.72, 0.27, 0.09) * (0.25 + 0.75 * day), hz * 0.7);
+    gl_FragColor = vec4(col * 1.7, 1.0);
   }`;
 
 const ATMO_FS = /* glsl */`
@@ -214,7 +248,8 @@ export function createOrbitScene(sunDir) {
 
   // Planet
   const planetU = { uSun: { value: sun }, uCanyonC: { value: new THREE.Vector3(1, 0, 0) }, uCanyonA: { value: new THREE.Vector3(0, 0, 1) },
-    uOct: { value: 8 }, uExag: { value: 5 }, uR: { value: R_MARS } };
+    uOct: { value: 6 }, uExag: { value: 2.2 }, uR: { value: R_MARS }, uGS: { value: 0.4 }, uAlt: { value: 200 },
+    uAlb: { value: null }, uGrad: { value: null }, uRot: { value: new THREE.Matrix3() } };
   const planet = new THREE.Mesh(new THREE.SphereGeometry(R_MARS, 384, 256), new THREE.ShaderMaterial({
     uniforms: planetU,
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vW;
@@ -268,12 +303,29 @@ export function createOrbitScene(sunDir) {
     get sunVisible() { return sunVis; },
     // Cinematic cheat (?sunrise): draw the sun disc and glare here instead of at the real sun (null = real)
     setBurstDir(v) { burstDir = v; },
+    // Bake the surface into two cube maps (colour; the height's gradient), mipmapped and anisotropically filtered
+    bake(renderer, size = 2048) {
+      const bs = new THREE.Scene(), u = { uMode: { value: 0 }, uTexel: { value: Math.PI / 2 / size }, uGS: planetU.uGS, uCanyonC: planetU.uCanyonC, uCanyonA: planetU.uCanyonA };
+      const mat = new THREE.ShaderMaterial({ side: THREE.BackSide, depthTest: false, depthWrite: false, uniforms: u,
+        vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }', fragmentShader: BAKE_FS });
+      bs.add(new THREE.Mesh(new THREE.SphereGeometry(10, 64, 32), mat));
+      const aniso = renderer.capabilities.getMaxAnisotropy(), tm = renderer.toneMapping; renderer.toneMapping = THREE.NoToneMapping;
+      for (const [mode, key] of [[0, 'uAlb'], [1, 'uGrad']]) {
+        planetU[key].value?.dispose?.();
+        const rt = new THREE.WebGLCubeRenderTarget(size, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+        rt.texture.anisotropy = aniso; u.uMode.value = mode;
+        new THREE.CubeCamera(1, 100, rt).update(renderer, bs);
+        planetU[key].value = rt.texture;
+      }
+      renderer.toneMapping = tm; mat.dispose();
+    },
     setQuality(oct, pr) { planetU.uOct.value = oct; scene.userData.starMat.uniforms.uPR.value = pr; },
     // h: ship altitude (km); phi: how far the planet has turned under the ship (rad); camOffM / quat: the ship camera's
     // offset from the ship (metres) and orientation, so both passes line up
     set(h, phi, camOffM, quat, t) {
       C.set(0, -(R_MARS + h), 0);
       for (const m of group) { m.position.copy(C); m.rotation.set(POLE_TILT, 0, phi * SPIN); }
+      planet.updateMatrixWorld(); planetU.uRot.value.setFromMatrix4(planet.matrixWorld); planetU.uAlt.value = h;
       cloud.material.uniforms.uT.value = t;
       atmoU.uInside.value = h < 150 ? 1 : 0; atmoU.uAlt.value = h;
       camera.position.copy(camOffM).multiplyScalar(0.001);

@@ -109,7 +109,8 @@ const GradeShader = {
       // Whip-pan blur: the frame smeared along the pan (uMB: the smear across the screen, uv units)
       if (uMBk > 0.001) { vec3 a = c; for (int i = 0; i < 10; i++) a += texture2D(tDiffuse, uv + uMB * uMBk * (float(i) / 9.0 - 0.5)).rgb; c = a / 11.0; }
       // Plasma streaks: only what's bright smears, back along the flow on screen
-      if (uStrK > 0.001) { vec3 a = vec3(0.0); for (int i = 1; i <= 10; i++) { float f = float(i) / 10.0; a += max(texture2D(tDiffuse, uv - uStr * f).rgb - 0.5, 0.0) * (1.0 - f); } c += a * uStrK * 0.45; }
+      if (uStrK > 0.001) { vec3 a = vec3(0.0); float j = h(uv * uRes + uTime);   // jittered taps: a smooth smear, not copies
+        for (int i = 0; i < 10; i++) { float f = (float(i) + j) / 10.0; a += max(texture2D(tDiffuse, uv - uStr * f).rgb - 0.6, 0.0) * (1.0 - f); } c += a * uStrK * 0.4; }
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSat);
       c = (c - 0.5) * uContrast + 0.5;

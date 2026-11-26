@@ -1203,6 +1203,7 @@ export async function initLanding(step) {
   const look = newLook('space'), lookTarget = newLook('space');
   let qName = 'high';
   try { const q = localStorage.getItem('tvc-landing-quality'); if (QUALITY[q]) qName = q; } catch {}
+  { const bq = +(location.search.match(/[?&]bake=(\d+)/)?.[1] ?? 0); orbit.bake(renderer, bq || (qName === 'low' ? 1024 : 2048)); }   // the planet's surface, baked once
   let envTimer = 0, lookOverride = null;
   function lookFor() {
     if (lookOverride) return [lookOverride];
@@ -1311,7 +1312,7 @@ export async function initLanding(step) {
         float tor = smoothstep(0.24, 0.62, ed) * (0.5 + 0.9 * smoothstep(0.35, 0.0, vY));   // filaments, not a sheet
         vec3 c = heatCol(uH * (1.0 - vY), 1.0 - smoothstep(0.0, 0.25, vY));
         c = mix(c, vec3(1.0, 0.35, 0.6), smoothstep(0.15, 0.5, vY)); c = mix(c, vec3(0.5, 0.38, 1.0), smoothstep(0.45, 0.95, vY));   // orange → pink → violet
-        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.1 + 1.6 * edge) * tor * 2.6 * smoothstep(5.0, 30.0, vD), 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * along * (0.1 + 1.6 * edge) * tor * 2.6 * smoothstep(12.0, 60.0, vD), 1.0); }`,
   });
   const wake = new THREE.Mesh(wakeGeo, wakeMat); wake.visible = false; shipScene.add(wake);
   // Plasma ribbons: ragged sheets peeling off the nose, belly edges and flap tips (ship-local anchors, belly = +x),
@@ -1323,7 +1324,7 @@ export async function initLanding(step) {
   const ribGeo = new THREE.PlaneGeometry(1, 1, 1, 40);
   const ribBase = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: `uniform vec3 uA, uFlow; uniform float uLen, uW, uT, uSeed; varying float vS; varying float vX; varying float vCD;
+    vertexShader: `uniform vec3 uA, uFlow; uniform float uLen, uW, uT, uSeed; varying float vS; varying float vX; varying float vCD; varying float vEO;
       void main(){ float s = position.y + 0.5; vS = s; vX = position.x * 2.0;
         vec3 f = normalize(uFlow), side = normalize(cross(f, vec3(0.0, 0.0, 1.0))), up = vec3(0.0, 0.0, 1.0);
         vec3 c = uA + f * s * uLen;
@@ -1331,13 +1332,14 @@ export async function initLanding(step) {
         c += up * (sin(s * 5.0 - uT * 7.0 + uSeed * 3.0) * 4.0 + 2.5 * sin(s * 11.0 - uT * 15.0 + uSeed)) * s * (0.6 + 1.4 * s);
         vec3 w = normalize(cross(f, cameraPosition - c));
         c += w * position.x * uW * (0.4 + 2.6 * s);
+        vEO = smoothstep(0.18, 0.55, length(cross(f, normalize(cameraPosition - c))));   // edge-on strips read as slabs: fade them
         vCD = distance(cameraPosition, c); gl_Position = projectionMatrix * viewMatrix * vec4(c, 1.0); }`,
-    fragmentShader: `uniform float uI, uH, uT, uSeed; varying float vS; varying float vX; varying float vCD; ${HEATC} ${NOISE2}
-      void main(){ float edge = pow(max(1.0 - abs(vX), 0.0), 1.5);
+    fragmentShader: `uniform float uI, uH, uT, uSeed; varying float vS; varying float vX; varying float vCD; varying float vEO; ${HEATC} ${NOISE2}
+      void main(){ float edge = pow(max(1.0 - abs(vX), 0.0), 2.2) * vEO;
         float brk = smoothstep(0.25, 0.7, pF(vec2(vS * 9.0 - uT * 6.0 + uSeed, vX * 1.5 + uSeed * 3.0)));   // tears into blobs
         float fade = (1.0 - vS) * smoothstep(0.0, 0.04, vS);
         vec3 c = heatCol(uH * (1.0 - vS * 0.85), 1.0 - vS);
-        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * edge * mix(0.3, 1.0, brk) * fade * fade * 2.2 * smoothstep(4.0, 18.0, vCD), 1.0); }`,
+        gl_FragColor = vec4(pow(c, vec3(2.2)) * uI * edge * mix(0.3, 1.0, brk) * fade * fade * 2.2 * smoothstep(10.0, 45.0, vCD), 1.0); }`,
   });
   const ribbons = RIB.map((a, i) => {
     const m = new THREE.Mesh(ribGeo, ribBase.clone());
@@ -1772,7 +1774,7 @@ export async function initLanding(step) {
       if (h < 80e3) once('lossSig', 'SIGNAL · <b>PLASMA BLACKOUT</b>', 2400);
       if (h < 40e3) once('aos', 'SIGNAL <b>ACQUIRED</b>', 2000);
       ent.fade = sstep(0.86, 1, u); ent.u = u;
-      orbitSun(sstep(0.12, 1, u));
+      orbitSun(sstep(0.0, 0.2, u));   // the deorbit keeps its sunrise; through the entry the sun climbs to the afternoon's
       rvacMat.emissiveIntensity *= Math.exp(-dt * 0.8);
       if (u > 0.59) once('peak', 'PEAK HEATING · <b>1,600 °C</b> ON THE TILES', 2400);
       if (u >= 1) { ent.h = h; ent.v = v; cutToGround(); return; }
@@ -1801,6 +1803,8 @@ export async function initLanding(step) {
     wake.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), flow);
     plasmaMat.uniforms.uFlowL.value.copy(flow).applyQuaternion(_qi.copy(ship.quaternion).invert());
     wake.scale.set(9 + 7 * I, 300 + 320 * I, 9 + 7 * I); wake.position.copy(flow).multiplyScalar(-6);
+    { const L = _pv.copy(camera.position).sub(wake.position), al = L.dot(flow), rad = L.addScaledVector(flow, -al).length(), rr = wake.scale.x * clamp(1 - al / wake.scale.y, 0, 1);
+      wakeMat.uniforms.uI.value *= 0.12 + 0.88 * sstep(-3, 8, al < 0 ? 99 : rad - rr); }   // seen from inside, its faces stand edge-on as slabs
     const nR = RIB_N[qName] ?? 10;
     ribbons.forEach((r, i) => {
       const on = I > 0.03 && i < nR; r.m.visible = on; if (!on) return;
@@ -1814,12 +1818,12 @@ export async function initLanding(step) {
       glow.emit({ x: a.x, y: a.y, z: a.z, vx: flow.x * rnd(150, 320) + rnd(-20, 20), vy: flow.y * rnd(150, 320) + rnd(-20, 20), vz: rnd(-30, 30),
         life: rnd(0.15, 0.45), s0: 0.7, s1: 0.25, a: 1, drag: 0, rgb: [1, 0.85, 0.55] });
     }
-    if (I > 0.05) {
-      const n = Math.round(14 * I);
+    if (I > 0.15) {
+      const n = Math.round(10 * I);
       for (let i = 0; i < n; i++) {
         const along = rnd(-22, 28), side = Math.random() < 0.5 ? -1 : 1;
         const p = new THREE.Vector3(Math.cos(-pitch * DEG) * along, Math.sin(-pitch * DEG) * along - 4, side * rnd(3, 7));
-        glow.emit({ x: p.x, y: p.y, z: p.z, vx: flow.x * 420, vy: flow.y * 420, vz: side * rnd(10, 40), life: rnd(0.12, 0.3), s0: 2.5, s1: 7, a: 0.7 * I, drag: 0, rgb: [1, lerp(0.42, 0.7, Hq) + rnd(-0.05, 0.05), lerp(0.85, 0.35, Hq)] });
+        glow.emit({ x: p.x, y: p.y, z: p.z, vx: flow.x * rnd(80, 160), vy: flow.y * rnd(80, 160), vz: side * rnd(5, 15), life: rnd(0.1, 0.22), s0: 2.2, s1: 4, a: 0.5 * I, drag: 0, rgb: [1, lerp(0.42, 0.7, Hq) + rnd(-0.05, 0.05), lerp(0.85, 0.35, Hq)] });
       }
     }
     glow.update(dt);
@@ -2687,7 +2691,7 @@ export async function initLanding(step) {
   // Feel: tripods (site, tele, pad) near-still with wind sway, and the shake of an event arrives late, at the speed of sound on
   // Mars (~240 m/s); onboard (hull cam, skirt cam, aft flap ride-along) high-frequency vibration with the air and the engines;
   // drones and chase cameras a slow float. Depth of field on the close shots and the hero orbit (Medium/High); plasma streaks.
-  const WHIP_DUR = 0.32, WHIPS = new Set(['e0>e1', 'e1>e2', 'e2>e3', 'e3>e4', 'skirt>track', 'track>flaps', 'flaps>top', 'top>side', 'side>flip']);
+  const WHIP_DUR = 0.32, WHIPS = new Set();   // whip-pans: off (plain cuts read better here); add 'from>to' pairs to bring one back
   const FEEL_TRIPOD = new Set(['siteT', 'siteW', 'tele', 'pad']), FEEL_ONBOARD = new Set(['skirt', 'close', 'e1']);
   const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6 };   // blur (px at 1080p) at twice the focus distance
   let whip = null, camName = '';
@@ -2729,7 +2733,7 @@ export async function initLanding(step) {
     if (state === 'entry' && ent.I > 0.02 && QUALITY[qName].bloom) {   // plasma: the bright parts smear downstream on screen
       _dV.set(0, 1, 0).applyQuaternion(wake.quaternion); _dA.copy(ship.position).project(camera); _dB.copy(ship.position).addScaledVector(_dV, 60).project(camera);
       g.uStr.value.set((_dB.x - _dA.x) * 0.5, (_dB.y - _dA.y) * 0.5); const L = g.uStr.value.length(); if (L > 0.06) g.uStr.value.multiplyScalar(0.06 / L);
-      g.uStrK.value = ent.I * 0.9;
+      g.uStrK.value = FEEL_ONBOARD.has(use) ? 0 : ent.I * 0.5;
     } else g.uStrK.value = 0;
     const ap = DOF_AP[use]; post.dof.enabled = !!(ap && QUALITY[qName].dof && !inOrbit());
     if (post.dof.enabled) { const u = post.dof.mat.uniforms; u.uFocus.value = camera.position.distanceTo(use === 'hero' ? _dA.copy(hero.c).add(_dV.set(0, hero.how === 'crashed' ? 4 : 22, 0)) : ship.position);
