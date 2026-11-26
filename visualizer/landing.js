@@ -494,6 +494,9 @@ export async function initLanding(step) {
     return t;
   }
   const cloudMeshes = [];
+  // The hole the ship punches in the overcast (its breakout point; radius): cleared, its edge a little brighter
+  const holeU = { value: new THREE.Vector3(0, 0, 0) };
+  const deckHole = (x, z) => holeU.value.set(x, z, 900);
   // The cloud deck the ship falls through (6.6–8.1 km): soft sprite wisps round its path, bright lit tops, grey-orange
   // ragged base. The flat layer at 6.55 km is the overcast ceiling seen from below after the breakout.
   const DECK = { base: 6600, top: 8100 };
@@ -529,6 +532,20 @@ export async function initLanding(step) {
     }
   }
   const clouds = [cloudLayer(6550, 90000, 0.0, 1, 7), cloudLayer(3200, 70000, 0.32, 2, 9)];
+  cloudMeshes[0][0].material.onBeforeCompile = sh => {
+    sh.uniforms.uHole = holeU;
+    sh.vertexShader = 'varying vec3 vHW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vHW = (modelMatrix * vec4(position, 1.0)).xyz;');
+    sh.fragmentShader = 'uniform vec3 uHole; varying vec3 vHW;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      if (uHole.z > 0.0) { float hd = distance(vHW.xz, uHole.xy) / uHole.z; diffuseColor.a *= smoothstep(0.55, 1.15, hd); diffuseColor.rgb *= 1.0 + 0.5 * exp(-pow((hd - 1.05) / 0.25, 2.0)); }`);
+  };
+  // The tracking camera's neighbour: a thin instrument mast, near and out of focus at the start of the belly-flop hunt
+  const trkMast = (() => { const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.8, metalness: 0.4 });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, 26, 8), m); pole.position.y = 13; g.add(pole);
+    for (const [y, w] of [[18, 3.2], [24, 2.2]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 0.12), m); b.position.y = y; g.add(b); }
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.5), m); box.position.set(0.4, 21, 0); g.add(box);
+    const ws = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.6, 10, 1, true), new THREE.MeshStandardMaterial({ color: 0xc8642a, roughness: 0.9, side: THREE.DoubleSide }));
+    ws.rotation.z = Math.PI / 2; ws.position.set(1.2, 25.4, 0); g.add(ws);
+    g.visible = false; scene.add(g); if (/[?&]debug/.test(location.search)) window.__mast = g; return g; })();
   // Sun lens flare (landing-look.js), parked far along the sun direction each frame
   const flare = createFlare(); scene.add(flare.lf);
 
@@ -1227,7 +1244,9 @@ export async function initLanding(step) {
     hemi.color.copy(look.hemiSky); hemi.groundColor.copy(look.hemiGnd); hemi.intensity = look.hemiI;
     groundU.uGShadow.value.copy(look.gShadow); groundU.uGMid.value.copy(look.gMid); groundU.uGLit.value.copy(look.gLit);
     groundU.uGHigh.value.copy(look.gHigh); groundU.uGRock.value.copy(look.gRock);
-    cloudMeshes.forEach(([m, o], i) => { m.material.opacity = o * (i === 0 ? look.clouds : look.clouds * 1.6); });
+    const tvcQ = state === 'flight' && flight.s.phase === 'tvc' ? 0.45 : 1;   // the low streaks crowd the landing shots: thinner then
+    skyU.uCirrus.value = (qName === 'low' ? 0.5 : 1) * (tvcQ < 1 ? 0.35 : 1);   // and the cirrus behind the long lenses looking up
+    cloudMeshes.forEach(([m, o], i) => { m.material.opacity = i === 0 && shotName === 'track' ? 0.7 : o * (i === 0 ? look.clouds : look.clouds * 1.6 * tvcQ); });   // the overcast shows (with its hole) behind the tracking shot
     const q = QUALITY[qName];
     post.apply(look, q, simClock);
     post.grade.uniforms.uFade.value = fadeAmt; post.grade.uniforms.uFlash.value = flashAmt;
@@ -1490,7 +1509,7 @@ export async function initLanding(step) {
     orbitSun(0); setVac([0, 0, 0], [], 0); rvacMat.emissiveIntensity = 0; heatPanel(false); $('lndBurn').hidden = true; deoShot = '';
     ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; entShot = -1; if (camera.fov !== 40) { setFov(40); }
     // Fly again starts exactly like the first run: same planet turn, idle shot, look, no leftover cloud deck or tracking cam
-    phi = 0; idleI = 0; idleT = 0; tBreak = null; trk = null; glint.visible = false; Object.assign(bGust, { k: 0, d: 1, next: 2 });
+    phi = 0; idleI = 0; idleT = 0; tBreak = null; trk = null; glint.visible = false; holeU.value.z = 0; trkMast.visible = false; Object.assign(bGust, { k: 0, d: 1, next: 2 });
     wisps.forEach(w => scene.remove(w)); wisps.length = 0; Object.assign(look, blendLooks({}, 'space', 'space', 0));
     shipScene.add(ship); ship.position.set(0, 0, 0);
     $('lndResult').hidden = true; $('lndFeed').textContent = ''; fadeAmt = 0;
@@ -1511,7 +1530,7 @@ export async function initLanding(step) {
     scene.add(ship);
     plasma.visible = false; wake.visible = false; shock.visible = false; TILE_MATS.forEach(m => { m.emissiveIntensity = 0; }); glow.clear();
     ribbons.forEach(r => { r.m.visible = false; }); plasmaLight.intensity = 0; tileT = 0; burnEl.hidden = true; heatPanel(false);
-    fadeOut = 0.8; tBreak = null; trk = null;
+    fadeOut = 0.8; tBreak = null; trk = null; holeU.value.z = 0;
     buildWisps({ high: 1, medium: 0.6, low: 0.3 }[qName] ?? 1, flight.s.x ?? 0, flight.s.z ?? 0);
     once('belly', 'BELLY FLOP · <b>INSIDE THE CLOUD DECK</b>', 2200);
     refresh();
@@ -1598,7 +1617,7 @@ export async function initLanding(step) {
     fall.axis.set(ax.z, 0, -ax.x).normalize();
     if (!isFinite(fall.axis.x)) fall.axis.set(1, 0, 0);
     fall.rate = 0.6; fall.v.set(s.vx, s.vh, s.vz); fall.h = Math.max(0, s.h - groundUnder());
-    // The autopilot fights it: full throttle, nozzles hard over, nose RCS, for ~1 s; then the engines stutter out
+    // The autopilot fights it: full throttle, nozzles hard over (gimbal only), for ~1 s; then the engines stutter out
     fall.t = 0; fall.thr = 1; fall.n = Math.max(1, s.eng || 3); fall.collapse = false;
     fall.gx = Math.sign(tvc.rotation.x || 1) * 15 * DEG; fall.gz = Math.sign(tvc.rotation.z || -1) * 15 * DEG;
     setStrip(`<b>Loss of control</b> · past ${L.ABORT_DEG}°`, 4500, 'bad');
@@ -2041,17 +2060,20 @@ export async function initLanding(step) {
     if (state === 'flight') {
       const s = flight.s;
       if (s.phase === 'belly') {   // shaky close-up through the deck → long-lens tracking cam as it pierces the base
-        if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; }
+        if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; deckHole(ship.position.x, ship.position.z); }
         // Skirt cam first (after the Flight 15 onboard view): white inside the deck, the valley opening below as it breaks
         // out, vapour tearing off the flap; then the long-lens tracking cam, the flaps, from above, the side profile
         if (tBreak === null || s.t < tBreak + 3.4) return 'skirt';
-        return s.t < tBreak + 7.4 ? 'track' : s.t < tBreak + 9.8 ? 'flaps' : s.t < tBreak + 12 ? 'top' : 'side';
+        return s.t < tBreak + 6.6 ? 'track' : s.t < tBreak + 9.8 ? 'flaps' : s.t < tBreak + 12 ? 'top' : 'side';
       }
       if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
-      // TVC landing (side approach): wide at the handover, side profile across the divert, then the pad cam. All cuts.
-      const hg = s.h - groundUnder();
+      // TVC landing: the engine bay at the handover, the rim long lens, the ground long lens, overhead, the pad cam; on a
+      // gust, a close chase on the gimbal working for ~2.5 s. All cuts.
+      const hg = s.h - groundUnder(), tv = s.t - s.tPh, sinceGust = simClock - (calls.gustAt ?? -99);
       if (hg < TVC_CAM.padH) return 'pad';
-      return hg > TVC_CAM.wideH ? 'siteT' : hg > TVC_CAM.teleH ? 'siteW' : 'tele';
+      if (sinceGust > 0.15 && sinceGust < 2.45 && hg > 140 && (camName === 'gimbal' || simClock - camSince > 1.0)) return 'gimbal';   // (never right after a cut)
+      if (tv < 1.8 && hg > 1100) return 'bay';
+      return hg > TVC_CAM.rimH ? 'siteT' : hg > TVC_CAM.teleH ? 'tele' : 'over';
     }
     if (hero.on) return 'hero';
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
@@ -2140,7 +2162,8 @@ export async function initLanding(step) {
     if (state === 'flight' && s.phase === 'belly' && (tBreak === null || s.t < tBreak + 6) && !paused) {   // vapour trail
       const sp2 = ship.position;
       const n = Math.min(40, Math.ceil(dt * 300)); for (let i = 0; i < n; i++) { const f = i / n;
-        dust.emit({ x: sp2.x - s.vx * dt * f, y: sp2.y - s.vh * dt * f + 6, z: sp2.z - s.vz * dt * f, vx: rnd(-1, 1), vy: rnd(-1, 1), vz: rnd(-1, 1),
+        const yy = sp2.y - s.vh * dt * f + 6;   // the trail bends with the wind shear (it differs by height), so it curls rather than ruling a line
+        dust.emit({ x: sp2.x - s.vx * dt * f, y: yy, z: sp2.z - s.vz * dt * f, vx: 9 * Math.sin(yy / 520) + rnd(-1, 1), vy: rnd(-1, 1), vz: 8 * Math.cos(yy / 700 + 1) + rnd(-1, 1),
           life: 9, s0: 9, s1: 60, a: 0.75, drag: 0.5, rgb: [0.97, 0.95, 0.93] }); }
     }
     if (shotName === 'skirt' && state === 'flight' && !paused) {   // condensation tearing off the near flap's edge, streaming past the skirt cam
@@ -2188,11 +2211,14 @@ export async function initLanding(step) {
     if (state === 'flight') cloudFx(dt);
     if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
     const name = use, sp = ship.position;
-    glint.visible = false;
+    glint.visible = false; if (name !== 'track') trkMast.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
-      if (shotName !== 'track') {
-        trk = { p: sp.clone().add(_co.set(-5200, -4600, -3400)), a: sp.clone().add(_lo.set(60, -260, 30)), v: new THREE.Vector3(), t: 0 };
-        if (camera.position.y < 0) camera.position.y = 0;
+      if (shotName !== 'track') {   // a tracking camera on the ground ~3 km out, looking up at the ship under the cloud deck
+        const px = sp.x - 700, pz = sp.z + (sp.z > 0 ? -1 : 1) * 2900, p = new THREE.Vector3(px, heightAt(px, pz) + 3, pz);
+        trk = { p, a: sp.clone().add(_lo.set(-300, -420, 120)), v: new THREE.Vector3(), t: 0, focus: 220 };
+        const f = _pv.set(sp.x - px, 0, sp.z - pz).normalize(), side = _lo.set(f.z, 0, -f.x);   // the mast: near, left, out of focus
+        const mx = px + f.x * 12 - side.x * 2.6, mz = pz + f.z * 12 - side.z * 2.6; trkMast.position.set(mx, heightAt(mx, mz), mz);
+        trkMast.rotation.y = Math.atan2(f.x, f.z); trkMast.visible = true;
       }
       trk.t += dt;
       if (!paused) {
@@ -2202,11 +2228,15 @@ export async function initLanding(step) {
         trk.a.add(_lo.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(1.6));       // hand jitter
         if (Math.random() < 0.02) trk.v.add(_lo.set(rnd(-1, 1), rnd(-1, 1), 0).multiplyScalar(25));   // a bump
       }
-      camera.position.copy(trk.p); camera.lookAt(_pv.copy(trk.a).add(_lo.set(70, -45, 0)));   // ship off-centre, the cloud in the corner
-      glint.visible = true; glint.position.copy(sp); glint.scale.setScalar(0.07 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2));
-      camera.rotateZ(0.6 * DEG * Math.sin(trk.t * 1.3));
-      const fov = lerp(9, 6, sstep(0.6, 2.4, trk.t));                               // zooms in as it locks on
+      camera.position.copy(trk.p); camera.lookAt(trk.a);
+      glint.visible = true; glint.position.copy(sp); glint.scale.setScalar(0.035 * camera.position.distanceTo(sp) * Math.tan(camera.fov * DEG / 2));
+      camera.rotateZ(0.4 * DEG * Math.sin(trk.t * 1.3));
+      // The hunt: wide and soft with the ship off to one side; the aim catches it, the focus snaps, the lens zooms in
+      const D = camera.position.distanceTo(sp);
+      trk.focus = lerp(220, D, sstep(0.75, 1.05, trk.t));
+      const z = sstep(0.9, 1.9, trk.t), fov = lerp(26, 3.6, z) * (1 + 0.06 * Math.sin(z * Math.PI) * (z > 0.8 ? 1 : 0));
       if (Math.abs(camera.fov - fov) > 0.01) { setFov(fov); }
+      if (trk.t > 1.6) trkMast.visible = false;
       shotName = name; padCam = true; return;
     }
     if (name === 'skirt') {   // onboard: bolted to the aft skirt beside the flap, wide lens looking down and aft past the belly
@@ -2239,7 +2269,27 @@ export async function initLanding(step) {
       camera.lookAt(siteAim);
       if (!paused) camera.rotateZ(-TFX.camLean * DEG * clamp(rcsK, -1, 1));   // the operator leans with the RCS, as in the flip
       shotName = name; padCam = true;
-    } else if (name === 'hero') {   // drone orbit, slow float; letterboxed
+    } else if (name === 'bay') {   // onboard, on the skirt by the engines: the bells gimbal, the plume pours away below
+      ship.updateMatrixWorld(); camera.position.copy(ship.localToWorld(_pv.set(R + 2.4, -TAIL - 1.2, 2.6)));
+      camera.up.copy(_up.set(0, 1, 0).applyQuaternion(ship.quaternion));
+      camera.lookAt(ship.localToWorld(_lo.set(0, -TAIL - 5.5, 0))); camera.up.set(0, 1, 0);
+      if (Math.abs(camera.fov - 64) > 0.01) setFov(64);
+      shotName = name; padCam = true; return;
+    } else if (name === 'gimbal') {   // a chase drone off the side, close enough to see the nozzles swing and the ship right itself
+      const dirC = _pv.set(sp.x - TVC_CAM.siteT.x, 0, sp.z - TVC_CAM.siteT.z).normalize();   // from the side the rim camera sees
+      _co.set(-dirC.z, 0, dirC.x).multiplyScalar(-82).addScaledVector(dirC, -40); _co.y = -14;
+      if (name !== shotName) camOff.copy(_co); camOff.lerp(_co, 1 - Math.exp(-dt * 1.5));
+      camera.position.copy(sp).add(camOff);
+      camera.lookAt(_lo.copy(sp).add(_pv.set(0, -10, 0)));
+      if (Math.abs(camera.fov - 42) > 0.01) setFov(42);
+      shotName = name; padCam = true; return;
+    } else if (name === 'over') {   // a drone high over the pad, looking down at the plume hitting it and the dust ring
+      if (name !== shotName) { overP.set(150 * -apSide * 0.3 + 120, heightAt(0, 0) + 330, -apSide * 210); }
+      camera.position.copy(overP).add(_pv.set(Math.sin(simClock * 0.4) * 1.5, Math.sin(simClock * 0.3) * 1, Math.cos(simClock * 0.5) * 1.5));
+      camera.lookAt(_lo.set(sp.x * 0.5, lerp(heightAt(0, 0) + 4, sp.y - 8, 0.45), sp.z * 0.5));
+      if (Math.abs(camera.fov - 40) > 0.01) setFov(40);
+      shotName = name; padCam = true; return;
+    } else if (name === 'hero') {   // drone orbit, slow float
       const wreck = hero.how === 'crashed', t = simClock - hero.t0, k = sstep(0, HERO.dur, t);
       const a = hero.a0 + (wreck ? HERO.spdW : HERO.spd) * DEG * t, r = wreck ? HERO.rW : lerp(HERO.r[0], HERO.r[1], k), hh = wreck ? HERO.hW : lerp(HERO.h[0], HERO.h[1], k);
       const x = hero.c.x + Math.cos(a) * r, z = hero.c.z + Math.sin(a) * r;
@@ -2283,10 +2333,10 @@ export async function initLanding(step) {
   // telephoto looking up past the comms mast, then the pad cam. x/z/h: spot (h above the ground), drop: aim below the ship
   // (× frame height, keeps it above the HUD), pad/padY: how much the aim holds the pad area (wide), aim: pan easing rate
   const TVC_CAM = {
-    wideH: 1000, teleH: 250, padH: 40,
-    siteT: { x: -2900, z: 350, h: 25, fov: 12, drop: 0.1, aim: 4 },   // on the west rim of the valley
+    wideH: 1000, rimH: 800, teleH: 250, padH: 40,
+    siteT: { x: -2900, z: 350, h: 25, fov: 34, drop: 0, padK: -0.36, top: 0.7, aim: 3 },   // the ship in the upper third, the valley floor and the pad below it   // on the west rim of the valley
     siteW: { x: -2900, z: 350, h: 25, fov: 30, drop: 0, padK: 0, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
-    tele: { x: -330, z: 60, h: 2, fov: 25, drop: 0.14, aim: 4 },
+    tele: { x: 1050, z: 300, h: 3, fov: 30, drop: 0.3, aim: 4 },   // on the valley floor past the hub: its buildings and the light tower in the foreground
   };
   { const e = wz(WALLS[0].e, TVC_CAM.siteT.z); let bx = e - 70, bh = -1e9;   // stand just back from the west rim's edge, on its highest point
     for (let x = e - 260; x <= e - 40; x += 10) { const hh = heightAt(x, TVC_CAM.siteT.z); if (hh > bh) { bh = hh; bx = x; } }
@@ -2295,7 +2345,7 @@ export async function initLanding(step) {
   outpost.addCamProps([[PAD_CAM.x, PAD_CAM.z, PAD_CAM.y, 'pole'], [PAD_CAM.x, -PAD_CAM.z, PAD_CAM.y, 'pole'], [TVC_CAM.tele.x, TVC_CAM.tele.z, TVC_CAM.tele.h, 'tripod'], [TVC_CAM.siteT.x, TVC_CAM.siteT.z, TVC_CAM.siteT.h, 'hut']]);
   const planCams = { pad: [[PAD_CAM.x, PAD_CAM.z], [PAD_CAM.x, -PAD_CAM.z]], site: [TVC_CAM.siteT.x, TVC_CAM.siteT.z] }, planBad = checkPlan(outpost.objs, planCams);
   planBad.forEach(([o, why]) => console.warn(`Base plan: ${o.name} ${why}`));
-  const _pc = new THREE.Vector3(), siteAim = new THREE.Vector3(), siteGoal = new THREE.Vector3(), siteVel = new THREE.Vector3(); let opT0 = 0, reC = false;
+  const overP = new THREE.Vector3(), _pc = new THREE.Vector3(), siteAim = new THREE.Vector3(), siteGoal = new THREE.Vector3(), siteVel = new THREE.Vector3(); let opT0 = 0, reC = false;
   const opZoom = () => { const t = simClock - opT0; return (1 + 0.6 * Math.exp(-t * 2.6) * Math.cos(t * 3.2)) * (1 - 0.08 * sstep(0, 12, t)); };   // finding the ship, then the slow push-in
 
 
@@ -2568,7 +2618,7 @@ export async function initLanding(step) {
   function effects(dt) {
     const sp = ship.position;
     // TVC landing: the cloud deck (6.6–8.1 km) is far above; seen from the low cameras its sprites read as cartoon puffs, so fade it out
-    if (state === 'flight' && wisps.length) { const k = flight.s.phase === 'tvc' ? 1 - sstep(0, 1.2, flight.s.t - flight.s.tPh) : 1;
+    if (state === 'flight' && wisps.length) { const k = flight.s.phase === 'tvc' ? 1 - sstep(0, 1.2, flight.s.t - flight.s.tPh) : shotName === 'track' ? 0 : 1;
       if (k !== wispK) { wispK = k; wisps.forEach(w => { w.material.opacity = w.userData.op * k; w.visible = k > 0.01; }); } }
     _up.set(0, 1, 0).applyQuaternion(ship.quaternion);
     if (state === 'flight' && flight.s.phase === 'belly') {   // dust in the air rushing past
@@ -2587,26 +2637,12 @@ export async function initLanding(step) {
       for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y, z: nose.z + rnd(-3, 3), vx: -_up.y * v * side * rnd(0.6, 1) + s.vx, vy: _up.x * v * side * rnd(0.6, 1) + s.vh, vz: rnd(-6, 6),
         life: rnd(0.4, burst ? 1.2 : 0.8), s0: 2, s1: burst ? 14 : 9, a: 0.85, drag: 2.5, rgb: [1, 1, 1] });
     } else if (state === 'flight' && flight.s.phase === 'tvc' && !paused) {
-      // TVC: the nose RCS helps the gimbal: it fires while the nose swings faster than TFX.rcsOn, gas out the side it swings toward
-      const s = flight.s, nose = _pv.copy(sp).addScaledVector(_up, NOSE * 0.8);
+      // TVC landing: purely the gimbal (no nose jets). When the nose swings fast, the camera operators lean with it
       _rv.copy(_up).sub(lastUp).divideScalar(Math.max(dt, 1e-3)); _rv.y = 0; lastUp.copy(_up);
       const w = _rv.length() / DEG, on = w > TFX.rcsOn;
       rcsK += ((on ? Math.sign(_rv.x - _rv.z || 1) : 0) - rcsK) * (1 - Math.exp(-dt * 6));
-      if (on) {
-        const burst = !rcsOn; rcsOn = true;
-        if (burst) shake = Math.max(shake, TFX.rcsKick);
-        _rv.normalize();
-        const n = burst ? 14 : Math.random() < 0.8 ? Math.round(2 + 3 * clamp((w - TFX.rcsOn) / 6, 0, 1)) : 0, v = burst ? 70 : 50;
-        nose.addScaledVector(_rv, R);   // side vents on the hull
-        for (let i = 0; i < n; i++) dust.emit({ x: nose.x, y: nose.y + rnd(-1, 1), z: nose.z, vx: _rv.x * v * rnd(0.6, 1) + s.vx, vy: rnd(-4, 4) + s.vh, vz: _rv.z * v * rnd(0.6, 1) + s.vz,
-          life: rnd(0.25, burst ? 0.7 : 0.45), s0: 0.8, s1: burst ? TFX.rcsSize : TFX.rcsSize * 0.6, a: 0.55, drag: 3, rgb: [1, 1, 1] });   // small, quick jets (not puffy clouds)
-      } else rcsOn = false;
-      rcsSide = 0;
+      rcsOn = on; rcsSide = 0;
     } else { rcsSide = 0; rcsOn = false; rcsK = 0; lastUp.copy(_up); }
-    // Lost in the air: the nose RCS fires one side then the other, uselessly
-    if (state === 'falling' && fall.t < 1.6 && !paused && Math.random() < 0.6) { const nose = _pv.copy(sp).addScaledVector(_up, NOSE * 0.8), a = rnd(0, Math.PI * 2);
-      for (let i = 0; i < 6; i++) dust.emit({ x: nose.x, y: nose.y, z: nose.z, vx: Math.cos(a) * rnd(35, 60) + fall.v.x, vy: rnd(-5, 5) + fall.v.y, vz: Math.sin(a) * rnd(35, 60) + fall.v.z,
-        life: rnd(0.25, 0.6), s0: 0.8, s1: TFX.rcsSize, a: 0.55, drag: 3, rgb: [1, 1, 1] }); }
     // Crash: the second blast, then the wreck keeps burning (flames, a smoke column leaning downwind, a flickering light)
     while (blasts.length && simClock >= blasts[0].t) { const b = blasts.shift(); fireball(b.at, CRASH.fireball * 0.7, 0.8); flash.position.set(b.at.x, b.at.y + 12, b.at.z); flash.intensity = 1.5e5; shake = Math.max(shake, 1.2); }
     if (crashT > 0 && !paused) { crashT -= dt; const k = Math.min(1, crashT / 10);
@@ -2692,9 +2728,9 @@ export async function initLanding(step) {
   // Mars (~240 m/s); onboard (hull cam, skirt cam, aft flap ride-along) high-frequency vibration with the air and the engines;
   // drones and chase cameras a slow float. Depth of field on the close shots and the hero orbit (Medium/High); plasma streaks.
   const WHIP_DUR = 0.32, WHIPS = new Set();   // whip-pans: off (plain cuts read better here); add 'from>to' pairs to bring one back
-  const FEEL_TRIPOD = new Set(['siteT', 'siteW', 'tele', 'pad']), FEEL_ONBOARD = new Set(['skirt', 'close', 'e1']);
-  const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6 };   // blur (px at 1080p) at twice the focus distance
-  let whip = null, camName = '';
+  const FEEL_TRIPOD = new Set(['siteT', 'siteW', 'tele', 'pad']), FEEL_ONBOARD = new Set(['skirt', 'close', 'e1', 'bay']);
+  const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6, gimbal: 5, track: 8 };   // blur (px at 1080p) at twice the focus distance
+  let whip = null, camName = '', camSince = 0;
   const shHist = new Float32Array(512), shT = new Float32Array(512).fill(-1e9); let shI = 0;
   const shakeAt = t => { let v = 0, best = -1e9; for (let i = 0; i < 512; i++) if (shT[i] <= t && shT[i] > best) { best = shT[i]; v = shHist[i]; } return v; };
   const _dA = new THREE.Vector3(), _dB = new THREE.Vector3(), _dV = new THREE.Vector3();
@@ -2720,7 +2756,7 @@ export async function initLanding(step) {
   }
   function cameraStep(dt) {
     const want = inOrbit() ? (state === 'entry' && camMode !== 'free' ? 'e' + entShotIdx() : state) : camMode === 'still' || camMode === 'free' ? camMode : shot();
-    if (!whip && want !== camName) { if (camName && !paused && WHIPS.has(camName + '>' + want)) whip = { t: 0, from: camName, to: want, dir: Math.random() < 0.5 ? -1 : 1 }; else camName = want; }
+    if (!whip && want !== camName) { camSince = simClock; if (camName && !paused && WHIPS.has(camName + '>' + want)) whip = { t: 0, from: camName, to: want, dir: Math.random() < 0.5 ? -1 : 1 }; else camName = want; }
     let use = camName;
     if (whip) { whip.t += paused ? 0 : dt; if (whip.t >= WHIP_DUR / 2) camName = whip.to; use = whip.t < WHIP_DUR / 2 ? whip.from : whip.to; }
     cameraShot(dt, use);
@@ -2736,7 +2772,7 @@ export async function initLanding(step) {
       g.uStrK.value = FEEL_ONBOARD.has(use) ? 0 : ent.I * 0.5;
     } else g.uStrK.value = 0;
     const ap = DOF_AP[use]; post.dof.enabled = !!(ap && QUALITY[qName].dof && !inOrbit());
-    if (post.dof.enabled) { const u = post.dof.mat.uniforms; u.uFocus.value = camera.position.distanceTo(use === 'hero' ? _dA.copy(hero.c).add(_dV.set(0, hero.how === 'crashed' ? 4 : 22, 0)) : ship.position);
+    if (post.dof.enabled) { const u = post.dof.mat.uniforms; u.uFocus.value = use === 'track' && trk ? trk.focus : camera.position.distanceTo(use === 'hero' ? _dA.copy(hero.c).add(_dV.set(0, hero.how === 'crashed' ? 4 : 22, 0)) : ship.position);
       u.uAp.value = ap * renderer.domElement.height / 1080; u.uMax.value = 10 * renderer.domElement.height / 1080; }
   }
   function setFov(f) {   // zoom only (no buffer resize): projection, the orbit pass, particle sizes
@@ -2752,7 +2788,7 @@ export async function initLanding(step) {
     if (document.body.dataset.tab !== 'landing') return;      // paused while another tab shows
     const sdt = paused ? 0 : dt;
     simClock += sdt;
-    captions(); heroStep(); letterbox(state === 'orbit' || state === 'deorbit' || hero.on);
+    captions(); heroStep(); letterbox(false);
     if (inOrbit()) {
       if (!paused) orbitStep(dt); else orbitStep(0);
       cameraStep(dt);
