@@ -2062,18 +2062,16 @@ export async function initLanding(step) {
       if (s.phase === 'belly') {   // shaky close-up through the deck → long-lens tracking cam as it pierces the base
         if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; deckHole(ship.position.x, ship.position.z); }
         // Skirt cam first (after the Flight 15 onboard view): white inside the deck, the valley opening below as it breaks
-        // out, vapour tearing off the flap; then the long-lens tracking cam, the flaps, from above, the side profile
-        if (tBreak === null || s.t < tBreak + 3.4) return 'skirt';
-        return s.t < tBreak + 6.6 ? 'track' : s.t < tBreak + 9.8 ? 'flaps' : s.t < tBreak + 12 ? 'top' : 'side';
+        // out, vapour tearing off the flap; then the ground tracking camera finds it and holds it to the flip
+        return tBreak === null || s.t < tBreak + 3.4 ? 'skirt' : 'track';
       }
-      if (s.phase === 'flip') return s.cmd.y > 45 ? 'flip' : 'flipLow';   // side profile, then low aft once past 45°
-      // TVC landing: the engine bay at the handover, the rim long lens, the ground long lens, overhead, the pad cam; on a
-      // gust, a close chase on the gimbal working for ~2.5 s. All cuts.
-      const hg = s.h - groundUnder(), tv = s.t - s.tPh, sinceGust = simClock - (calls.gustAt ?? -99);
+      if (s.phase === 'flip') return 'flip';   // one side profile through the whole flip
+      // TVC landing, four held shots: the engine bay at the handover, the ground long lens from the sun side (the gusts play
+      // out in it, no cuts), overhead from the sun side, the pad cam
+      const hg = s.h - groundUnder(), tv = s.t - s.tPh;
       if (hg < TVC_CAM.padH) return 'pad';
-      if (sinceGust > 0.15 && sinceGust < 2.45 && hg > 140 && (camName === 'gimbal' || simClock - camSince > 1.0)) return 'gimbal';   // (never right after a cut)
-      if (tv < 1.8 && hg > 1100) return 'bay';
-      return hg > TVC_CAM.rimH ? 'siteT' : hg > TVC_CAM.teleH ? 'tele' : 'over';
+      if (tv < 3 && hg > 1100) return 'bay';
+      return hg > TVC_CAM.teleH ? 'tele' : 'over';
     }
     if (hero.on) return 'hero';
     if (state === 'landed' || state === 'tipping' || (state === 'crashed' && td)) return 'pad';
@@ -2083,8 +2081,6 @@ export async function initLanding(step) {
     const h = flight.s.h;
     switch (name) {
       case 'wide': _co.set(-105 + 20 * Math.sin(orbitA), 42, -118); _lo.set(0, -8, 0); break;
-      case 'top': _co.set(-34, 150, -22); _lo.set(0, -260, 0); break;              // above, looking down past it: the ground rushing up
-      case 'side': _co.set(-40, 2, -250); _lo.set(0, -12, 0); break;               // level, long lens, against the horizon
       case 'close': _co.set(-19, 3.5, -15); _lo.set(3, -2, 0); break;            // riding along by the aft flap
       case 'flaps': _co.set(-34, 12, -30); _lo.set(-12, -2, 0); break;                 // close on the aft flaps working
       case 'high': _co.set(-70, 120, -160); _lo.set(0, -40, 0); break;                 // pull back: the ground coming up
@@ -2275,19 +2271,11 @@ export async function initLanding(step) {
       camera.lookAt(ship.localToWorld(_lo.set(0, -TAIL - 5.5, 0))); camera.up.set(0, 1, 0);
       if (Math.abs(camera.fov - 64) > 0.01) setFov(64);
       shotName = name; padCam = true; return;
-    } else if (name === 'gimbal') {   // a chase drone off the side, close enough to see the nozzles swing and the ship right itself
-      const dirC = _pv.set(sp.x - TVC_CAM.siteT.x, 0, sp.z - TVC_CAM.siteT.z).normalize();   // from the side the rim camera sees
-      _co.set(-dirC.z, 0, dirC.x).multiplyScalar(-82).addScaledVector(dirC, -40); _co.y = -14;
-      if (name !== shotName) camOff.copy(_co); camOff.lerp(_co, 1 - Math.exp(-dt * 1.5));
-      camera.position.copy(sp).add(camOff);
-      camera.lookAt(_lo.copy(sp).add(_pv.set(0, -10, 0)));
-      if (Math.abs(camera.fov - 42) > 0.01) setFov(42);
-      shotName = name; padCam = true; return;
     } else if (name === 'over') {   // a drone high over the pad, looking down at the plume hitting it and the dust ring
-      if (name !== shotName) { overP.set(150 * -apSide * 0.3 + 120, heightAt(0, 0) + 330, -apSide * 210); }
+      if (name !== shotName) { overP.set(-50, heightAt(0, 0) + 420, -250); }   // sun side: the lit steel, its shadow across the pad markings
       camera.position.copy(overP).add(_pv.set(Math.sin(simClock * 0.4) * 1.5, Math.sin(simClock * 0.3) * 1, Math.cos(simClock * 0.5) * 1.5));
-      camera.lookAt(_lo.set(sp.x * 0.5, lerp(heightAt(0, 0) + 4, sp.y - 8, 0.45), sp.z * 0.5));
-      if (Math.abs(camera.fov - 40) > 0.01) setFov(40);
+      camera.lookAt(_lo.set(sp.x * 0.6, lerp(heightAt(0, 0) + 4, sp.y - 8, 0.5), sp.z * 0.6));
+      if (Math.abs(camera.fov - 46) > 0.01) setFov(46);
       shotName = name; padCam = true; return;
     } else if (name === 'hero') {   // drone orbit, slow float
       const wreck = hero.how === 'crashed', t = simClock - hero.t0, k = sstep(0, HERO.dur, t);
@@ -2336,7 +2324,7 @@ export async function initLanding(step) {
     wideH: 1000, rimH: 800, teleH: 250, padH: 40,
     siteT: { x: -2900, z: 350, h: 25, fov: 34, drop: 0, padK: -0.36, top: 0.7, aim: 3 },   // the ship in the upper third, the valley floor and the pad below it   // on the west rim of the valley
     siteW: { x: -2900, z: 350, h: 25, fov: 30, drop: 0, padK: 0, top: 0.85, aim: 2 },   // padK: pad this far below centre (× fov); top: ship kept below this (× half fov)
-    tele: { x: 1050, z: 300, h: 3, fov: 30, drop: 0.3, aim: 4 },   // on the valley floor past the hub: its buildings and the light tower in the foreground
+    tele: { x: -70, z: -660, h: 3, fov: 27, drop: 0.25, aim: 4 },   // on the valley floor, sun side (the sun behind it, the ship's lit face); the plant and LZ-2 in the foreground
   };
   { const e = wz(WALLS[0].e, TVC_CAM.siteT.z); let bx = e - 70, bh = -1e9;   // stand just back from the west rim's edge, on its highest point
     for (let x = e - 260; x <= e - 40; x += 10) { const hh = heightAt(x, TVC_CAM.siteT.z); if (hh > bh) { bh = hh; bx = x; } }
@@ -2729,7 +2717,7 @@ export async function initLanding(step) {
   // drones and chase cameras a slow float. Depth of field on the close shots and the hero orbit (Medium/High); plasma streaks.
   const WHIP_DUR = 0.32, WHIPS = new Set();   // whip-pans: off (plain cuts read better here); add 'from>to' pairs to bring one back
   const FEEL_TRIPOD = new Set(['siteT', 'siteW', 'tele', 'pad']), FEEL_ONBOARD = new Set(['skirt', 'close', 'e1', 'bay']);
-  const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6, gimbal: 5, track: 8 };   // blur (px at 1080p) at twice the focus distance
+  const DOF_AP = { close: 7, flaps: 7, flip: 5, flipLow: 5, hero: 6, track: 8 };   // blur (px at 1080p) at twice the focus distance
   let whip = null, camName = '', camSince = 0;
   const shHist = new Float32Array(512), shT = new Float32Array(512).fill(-1e9); let shI = 0;
   const shakeAt = t => { let v = 0, best = -1e9; for (let i = 0; i < 512; i++) if (shT[i] <= t && shT[i] > best) { best = shT[i]; v = shHist[i]; } return v; };
