@@ -1390,8 +1390,9 @@ export async function initLanding(step) {
   let outcome = null, legK = 0, legT = 0, legEv = 0, land = null, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
   let calls = {};                    // callouts already shown this run
   // Hero ending (finish): drone orbit after the landing (or round the wreck), the end card over it
-  const HERO = { dur: 14, durWreck: 9, r: [200, 175], h: [34, 46], spd: 2.4, rW: 90, hW: 20, spdW: 1.6, fov: 38 };   // slow drone orbit: ~34° over the landed hold
-  const hero = { on: false, card: true, at: 1e9, cardAt: 1e9, how: '', a0: 0, t0: 0, c: new THREE.Vector3() };
+  // The ending: from the pad cam (or wherever the camera is) it pulls back over HERO.blend s into a slow drone orbit
+  const HERO = { dur: 20, durWreck: 12, blend: 7, r: [230, 250], h: [40, 55], spd: 1.3, rW: 95, hW: 22, spdW: 1, fov: 38 };
+  const hero = { on: false, card: true, at: 1e9, cardAt: 1e9, how: '', a0: 0, t0: 0, c: new THREE.Vector3(), ang: 0, r0: 0, h0: 0, f0: 40, l0: new THREE.Vector3() };
   const START = L.flightStart();
   let apSide = 1;   // which side of the pad the ship comes in from (+1/-1, random each run)
   function newFlight() { apSide = Math.random() < 0.5 ? -1 : 1; return L.createFlight(START.x0, apSide * L.DIVERT); }
@@ -1721,7 +1722,10 @@ export async function initLanding(step) {
     if (!hero.on && simClock >= hero.at) {
       hero.on = true; hero.t0 = simClock;
       hero.c.copy(state === 'crashed' && !td ? crashAt : ship.position); hero.c.y = heightAt(hero.c.x, hero.c.z);
-      const hub = Math.atan2(150 - hero.c.z, 440 - hero.c.x); hero.a0 = hub + Math.PI - 0.5;   // start west of the ship: the habitat district behind it
+      // Start from the camera as it is: its bearing, distance, height, lens and aim, so the pull-back has no cut
+      const cp = camera.position, dx = cp.x - hero.c.x, dz = cp.z - hero.c.z;
+      hero.a0 = hero.ang = Math.atan2(dz, dx); hero.r0 = Math.hypot(dx, dz); hero.h0 = cp.y - hero.c.y; hero.f0 = camera.fov;
+      camera.getWorldDirection(hero.l0); hero.l0.multiplyScalar(cp.distanceTo(hero.c)).add(cp);
     }
     if (simClock >= hero.cardAt) { hero.card = true; endCard(); }
   }
@@ -2298,12 +2302,13 @@ export async function initLanding(step) {
       if (Math.abs(camera.fov - 46) > 0.01) setFov(46);
       shotName = name; padCam = true; return;
     } else if (name === 'hero') {   // drone orbit, slow float
-      const wreck = hero.how === 'crashed', t = simClock - hero.t0, k = sstep(0, HERO.dur, t);
-      const a = hero.a0 + (wreck ? HERO.spdW : HERO.spd) * DEG * t, r = wreck ? HERO.rW : lerp(HERO.r[0], HERO.r[1], k), hh = wreck ? HERO.hW : lerp(HERO.h[0], HERO.h[1], k);
-      const x = hero.c.x + Math.cos(a) * r, z = hero.c.z + Math.sin(a) * r;
-      camera.position.set(x + 0.6 * Math.sin(simClock * 0.43), Math.max(hero.c.y + hh, heightAt(x, z) + 8) + 0.5 * Math.sin(simClock * 0.31 + 1), z + 0.6 * Math.cos(simClock * 0.37));
-      camera.lookAt(_lo.copy(hero.c).add(_pv.set(0, wreck ? 4 : 22, 0)));
-      if (Math.abs(camera.fov - HERO.fov) > 0.01) { setFov(HERO.fov); }
+      const wreck = hero.how === 'crashed', t = simClock - hero.t0, k = sstep(0, HERO.dur, t), b = sstep(0, HERO.blend, t);
+      hero.ang += (wreck ? HERO.spdW : HERO.spd) * DEG * sstep(0, HERO.blend * 0.8, t) * dt;   // the orbit eases in as it pulls back
+      const r = lerp(hero.r0, wreck ? HERO.rW : lerp(HERO.r[0], HERO.r[1], k), b), hh = lerp(hero.h0, wreck ? HERO.hW : lerp(HERO.h[0], HERO.h[1], k), b);
+      const x = hero.c.x + Math.cos(hero.ang) * r, z = hero.c.z + Math.sin(hero.ang) * r, fl = 0.4 * b;
+      camera.position.set(x + fl * Math.sin(simClock * 0.43), Math.max(hero.c.y + hh, heightAt(x, z) + 4 + 4 * b) + fl * Math.sin(simClock * 0.31 + 1), z + fl * Math.cos(simClock * 0.37));
+      camera.lookAt(_lo.copy(hero.c).add(_pv.set(0, wreck ? 4 : 22, 0)).lerp(hero.l0, 1 - b));
+      const f = lerp(hero.f0, HERO.fov, b); if (Math.abs(camera.fov - f) > 0.01) setFov(f);
       shotName = name; padCam = true;
     } else if (name === 'pad') {
       const P = name === 'pad' ? _pc.set(PAD_CAM.x, 0, -apSide * Math.abs(PAD_CAM.z)) : REPLAY_CAM;   // pad cam on the far side from the approach
