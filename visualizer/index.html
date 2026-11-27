@@ -3,14 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rocket TVC | Mars Landing</title>
-<link rel="icon" href="public/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="public/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="public/apple-touch-icon.png">
-<meta name="description" content="Land a Starship on Mars, steered by a real thrust-vector-controlled rocket on a desk rig. Deorbit, entry, belly flop, flip and a TVC landing in 3D.">
+<title>Rocket TVC · Mars Landing with Real Thrust Vector Control</title>
+<meta name="description" content="Fly a Starship-style Mars landing in your browser, steered by a real 3D-printed rocket on a desk rig: Arduino Nano, MPU-6050 and two gimbal servos, under $100.">
+<link rel="canonical" href="https://eg-rocket-tvc.vercel.app/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#000000">
+<meta name="keywords" content="thrust vector control, TVC rocket, Arduino rocket gimbal, MPU-6050, hardware in the loop, Starship Mars landing simulation, Web Serial, EG1004">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="EG Rocket TVC">
-<meta property="og:title" content="Rocket TVC | Mars Landing">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="Rocket TVC · Mars Landing">
 <meta property="og:description" content="Land a Starship on Mars, steered by a real thrust-vector-controlled rocket on a desk rig.">
 <meta property="og:url" content="https://eg-rocket-tvc.vercel.app/">
 <meta property="og:image" content="https://eg-rocket-tvc.vercel.app/public/og.jpg">
@@ -18,9 +20,134 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Rocket TVC: Starship over the curve of Mars at sunrise; deorbit, entry, belly flop, flip, TVC landing">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Rocket TVC | Mars Landing">
+<meta name="twitter:title" content="Rocket TVC · Mars Landing">
 <meta name="twitter:description" content="Land a Starship on Mars, steered by a real thrust-vector-controlled rocket on a desk rig.">
 <meta name="twitter:image" content="https://eg-rocket-tvc.vercel.app/public/og.jpg">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebSite",
+   "@id": "https://eg-rocket-tvc.vercel.app/#website",
+   "url": "https://eg-rocket-tvc.vercel.app/",
+   "name": "EG Rocket TVC",
+   "inLanguage": "en"
+  },
+  {
+   "@type": "WebApplication",
+   "@id": "https://eg-rocket-tvc.vercel.app/#app",
+   "url": "https://eg-rocket-tvc.vercel.app/",
+   "name": "Rocket TVC · Mars Landing",
+   "description": "Fly a Starship-style Mars landing in your browser, steered by a real 3D-printed rocket on a desk rig: Arduino Nano, MPU-6050 and two gimbal servos, under $100.",
+   "image": "https://eg-rocket-tvc.vercel.app/public/og.jpg",
+   "applicationCategory": "EducationalApplication",
+   "applicationSubCategory": "Simulation",
+   "operatingSystem": "Any (web browser)",
+   "browserRequirements": "Requires WebGL. The live rocket link needs the Web Serial API (Chrome or Edge on desktop).",
+   "isAccessibleForFree": true,
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "featureList": [
+    "3D Mars descent: deorbit burn, plasma entry, belly flop, flip and TVC landing burn",
+    "Hardware in the loop: a real TVC rocket on a desk rig steers the landing over Web Serial",
+    "Simulated controller mode with gusts, no hardware needed",
+    "Live bench view and calibration of the rig",
+    "Webcast-style HUD with an attitude sphere of the real rocket"
+   ],
+   "about": [
+    {
+     "@type": "Thing",
+     "name": "Thrust vector control"
+    },
+    {
+     "@type": "Thing",
+     "name": "Hardware-in-the-loop simulation"
+    },
+    {
+     "@type": "Thing",
+     "name": "Mars landing"
+    },
+    {
+     "@type": "Thing",
+     "name": "Rocket attitude control"
+    }
+   ],
+   "keywords": "thrust vector control, TVC rocket, gimbal, Arduino, MPU-6050, PID, hardware in the loop, Starship, Mars landing simulation, Web Serial, three.js, EG1004",
+   "isPartOf": {
+    "@id": "https://eg-rocket-tvc.vercel.app/#website"
+   },
+   "sameAs": [
+    "https://github.com/anuthrak/eg-rocket-tvc"
+   ],
+   "creator": {
+    "@type": "Organization",
+    "name": "SLDP 45 (EG1004, NYU Tandon)"
+   }
+  },
+  {
+   "@type": "FAQPage",
+   "@id": "https://eg-rocket-tvc.vercel.app/#faq",
+   "mainEntity": [
+    {
+     "@type": "Question",
+     "name": "What is Rocket TVC?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "A web visualizer for a student-built thrust vector control (TVC) rocket. A 3D-printed rocket sits on a desk rig at its centre of mass, and its controller steers the landing of a Starship-style ship on Mars in a 3D simulation: deorbit burn, plasma entry, belly flop, flip and a TVC landing burn onto the pad."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How does the real rocket control the Mars landing?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "An Arduino Nano reads an MPU-6050 IMU at 100 Hz and drives two servos that gimbal the motor tube to keep the rocket upright. Over Web Serial the visualizer reads the rocket's tilt and nozzle angles live, and the simulated ship follows them through the landing burn. Push the real rocket and the ship on screen is pushed too; the TVC has to bring it back."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Do I need the hardware to try it?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "No. In Sim mode the same controller runs in the browser on a simulated attitude, with gusts you can trigger. Rig mode connects to the physical rocket through Chrome or Edge."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "What is thrust vector control?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Thrust vector control steers a rocket by tilting its engine (or nozzle) so the thrust pushes the tail sideways and turns the vehicle. Real launch vehicles use it to fly, flip and land; this project uses a small electric ducted fan on a two-axis gimbal."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "What hardware is the rocket built from?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±8° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Which browsers does it work in?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Any modern browser with WebGL runs the simulation. The live link to the rocket uses the Web Serial API, available in Chrome and Edge on desktop."
+     }
+    }
+   ]
+  }
+ ]
+}
+</script>
+<link rel="icon" href="public/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="public/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="public/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow+Semi+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
@@ -871,5 +998,28 @@
 </footer>
 
 <script type="module" src="main.js"></script>
+<noscript>
+<section class="noscript-about" style="max-width:720px;margin:40px auto;padding:0 20px;color:#ddd;font:16px/1.6 system-ui,sans-serif">
+<h2>Rocket TVC · Mars landing with real thrust vector control</h2>
+<p>Fly a Starship-style Mars landing in your browser, steered by a real 3D-printed rocket on a desk rig: Arduino Nano, MPU-6050 and two gimbal servos, under $100. This page needs JavaScript and WebGL to run.</p>
+<ul>
+<li>3D Mars descent: deorbit burn, plasma entry, belly flop, flip and TVC landing burn</li>
+<li>Hardware in the loop: a real TVC rocket on a desk rig steers the landing over Web Serial</li>
+<li>Simulated controller mode with gusts, no hardware needed</li>
+<li>Live bench view and calibration of the rig</li>
+<li>Webcast-style HUD with an attitude sphere of the real rocket</li>
+</ul>
+<h3>Questions</h3>
+<dl>
+<dt><b>What is Rocket TVC?</b></dt><dd>A web visualizer for a student-built thrust vector control (TVC) rocket. A 3D-printed rocket sits on a desk rig at its centre of mass, and its controller steers the landing of a Starship-style ship on Mars in a 3D simulation: deorbit burn, plasma entry, belly flop, flip and a TVC landing burn onto the pad.</dd>
+<dt><b>How does the real rocket control the Mars landing?</b></dt><dd>An Arduino Nano reads an MPU-6050 IMU at 100 Hz and drives two servos that gimbal the motor tube to keep the rocket upright. Over Web Serial the visualizer reads the rocket&#x27;s tilt and nozzle angles live, and the simulated ship follows them through the landing burn. Push the real rocket and the ship on screen is pushed too; the TVC has to bring it back.</dd>
+<dt><b>Do I need the hardware to try it?</b></dt><dd>No. In Sim mode the same controller runs in the browser on a simulated attitude, with gusts you can trigger. Rig mode connects to the physical rocket through Chrome or Edge.</dd>
+<dt><b>What is thrust vector control?</b></dt><dd>Thrust vector control steers a rocket by tilting its engine (or nozzle) so the thrust pushes the tail sideways and turns the vehicle. Real launch vehicles use it to fly, flip and land; this project uses a small electric ducted fan on a two-axis gimbal.</dd>
+<dt><b>What hardware is the rocket built from?</b></dt><dd>A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±8° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely.</dd>
+<dt><b>Which browsers does it work in?</b></dt><dd>Any modern browser with WebGL runs the simulation. The live link to the rocket uses the Web Serial API, available in Chrome and Edge on desktop.</dd>
+</dl>
+<p>Source: <a href="https://github.com/anuthrak/eg-rocket-tvc">github.com/anuthrak/eg-rocket-tvc</a></p>
+</section>
+</noscript>
 </body>
 </html>
