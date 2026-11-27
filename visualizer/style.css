@@ -913,8 +913,8 @@ body.clean-feed .lnd-lower { bottom: 9vh; }
 #landing .lnd-att-row { display: flex; align-items: center; gap: 14px; justify-content: flex-end; }
 #landing .lnd-sphere { width: clamp(108px, 10.5vw, 150px); aspect-ratio: 1; flex: none; border-radius: 50%; transition: box-shadow .3s, opacity .3s; }
 #landing .lnd-sphere.idle { opacity: .75; }
-#landing .lnd-sphere.hot { box-shadow: 0 0 0 1px rgba(91,140,255,.55), 0 0 22px rgba(91,140,255,.35); }
-#landing .lnd-sphere.live.hot { box-shadow: 0 0 0 1px rgba(62,207,110,.6), 0 0 22px rgba(62,207,110,.35); }
+#landing .lnd-sphere.hot { box-shadow: none; }
+#landing .lnd-sphere.live.hot { box-shadow: none; }
 #landing .lnd-attv { min-width: 0; }
 #landing .lnd-attv .lnd-big b { font-size: clamp(28px, 3.2vw, 46px); }
 #landing .lnd-kv { margin-top: 3px; font-size: 11px; }
@@ -944,9 +944,6 @@ body.clean-feed .lnd-lower { bottom: 9vh; }
 #landing .lnd-engmap circle.on { fill: #fff; stroke: #fff; }
 #landing .lnd-sphere canvas { display: block; width: 100% !important; height: 100% !important; }
 #landing .lnd-sphere { position: relative; }
-#landing .sph-lbl { position: absolute; left: 12%; font: 600 8px var(--label); letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.42); pointer-events: none; }
-#landing .sph-lbl.sky { top: 40%; } #landing .sph-lbl.mars { top: 53%; color: rgba(232,190,160,.55); }
-@media (max-width: 760px) { #landing .sph-lbl { display: none; } }
 #landing .lnd-sphere.idle { opacity: .85; }
 #landing .lnd-play[hidden] { display: none; }
 @media (max-width: 760px) {

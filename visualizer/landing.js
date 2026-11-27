@@ -1453,7 +1453,7 @@ export async function initLanding(step) {
   linkBtn.onclick = () => setLink(!linkOn); setLink(linkOn);
   addEventListener('keydown', e => { if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey && document.body.dataset.tab === 'landing' && !e.target.closest?.('input, select, textarea')) setLink(!linkOn); });
   const camBtns = [...camBtn.querySelectorAll('button')];
-  camBtns.forEach(b => b.onclick = () => { camMode = b.dataset.cam; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); });
+  camBtns.forEach(b => b.onclick = () => { camMode = b.dataset.cam; controls.enabled = camMode === 'free'; if (camMode === 'free') { controls.target.copy(ship.position); controls.minDistance = 0; controls.maxDistance = Infinity; } refresh(); });
   // Settings menu (quality, link, auto-loop) and the ? tooltip
   const menuEl = $('lndMenu'), gearBtn = $('lndGear');
   gearBtn.onclick = e => { e.stopPropagation(); menuEl.hidden = !menuEl.hidden; gearBtn.setAttribute('aria-expanded', String(!menuEl.hidden)); };
@@ -2075,6 +2075,19 @@ export async function initLanding(step) {
   const camOff = new THREE.Vector3(-105, 42, -118), lookOff = new THREE.Vector3(), _co = new THREE.Vector3(), _lo = new THREE.Vector3();
   let shake = 0, orbitA = 0, shotName = '', padCam = false, rcsSide = 0;
   const PAD_CAM = new THREE.Vector3(-82, 6, -98), REPLAY_CAM = new THREE.Vector3(70, 5, 62);
+  // Free cam on the planet: FREE.min..FREE.max m from the ship and above the ground; from a wider (or closer) view the
+  // limit eases in instead of snapping. In orbit and the entry it stays unlimited.
+  const FREE = { min: 40, max: 600, ease: 1.5, floor: 3 };
+  function freeLimits(dt) {
+    const d = camera.position.distanceTo(controls.target), k = 1 - Math.exp(-dt * FREE.ease);
+    const mx = Math.max(FREE.max, Math.min(controls.maxDistance, d)), mn = Math.min(FREE.min, Math.max(controls.minDistance, d));
+    controls.maxDistance = mx > FREE.max ? mx + (FREE.max - mx) * k : FREE.max;
+    controls.minDistance = mn < FREE.min ? mn + (FREE.min - mn) * k : FREE.min;
+  }
+  function freeFloor() {
+    const p = camera.position, g = heightAt(p.x, p.z) + FREE.floor;
+    if (p.y < g) { p.y = g; camera.lookAt(controls.target); }
+  }
   function shot() {
     if (camMode !== 'auto') return camMode;
     if (state === 'flight') {
@@ -2217,7 +2230,7 @@ export async function initLanding(step) {
         if (S.onboard) { camOff.copy(off); orbLook.copy(_ct); }   // bolted to the flap: no lag
         if (camera.fov !== S.fov) { setFov(S.fov); }
       }
-      if (camMode === 'free') controls.update(); else {
+      if (camMode === 'free') { controls.minDistance = 0; controls.maxDistance = Infinity; controls.update(); } else {
         camOff.lerp(off, 1 - Math.exp(-dt * (state === 'entry' ? 4 : 1.5)));
         camera.position.copy(camOff);
         orbLook.lerp(state === 'entry' ? _ct : _lo.copy(deoEndLook), 1 - Math.exp(-dt * 4));
@@ -2229,7 +2242,7 @@ export async function initLanding(step) {
     }
     if (camMode === 'still') return;
     if (state === 'flight') cloudFx(dt);
-    if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
+    if (camMode === 'free') { controls.target.lerp(ship.position, 1 - Math.exp(-dt * 3)); freeLimits(dt); controls.update(); freeFloor(); return; }
     const name = use, sp = ship.position;
     glint.visible = false; if (name !== 'track') trkMast.visible = false;
     if (name === 'track') {   // a long-lens operator far below: lags, overshoots and corrects, magnified wobble
@@ -2458,26 +2471,23 @@ export async function initLanding(step) {
   const insR = new THREE.WebGLRenderer({ alpha: true, antialias: true }); insR.setClearColor(0x000000, 0); insEl.appendChild(insR.domElement);
   const insCam = new THREE.PerspectiveCamera(30, 1, 0.01, 20);
   insCam.position.set(1.15, 0.55, 1.45); insCam.lookAt(0, 0.0, 0);
-  // The sphere: a glass ball fixed to the world round your rocket (centred on its pivot). Inside: the sky above, Mars below
-  // the horizon; on it, rings at 10° and 25° (abort) from straight up, and a dot where the nose points.
+  // The sphere: a wireframe globe fixed to the world round your rocket (centred on its CG): latitude rings every 30° with
+  // the horizon brighter, meridians every 30°, the 10° ring and the 25° abort ring (red) from straight up, and a dot where
+  // the nose points. Lines on the far side fade, so it reads as a globe with no fill or glass.
   const SPH_R = 0.44;
-  const sphGlass = new THREE.Mesh(new THREE.SphereGeometry(SPH_R, 48, 32), new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
-    vertexShader: 'varying vec3 vN, vV; void main(){ vec4 w = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-w.xyz); gl_Position = projectionMatrix * w; }',
-    fragmentShader: 'varying vec3 vN, vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.5); gl_FragColor = vec4(vec3(0.9, 0.94, 1.0), 0.05 + 0.65 * f); }' }));
-  sphGlass.renderOrder = 4;
-  const sphIn = new THREE.Mesh(new THREE.SphereGeometry(SPH_R * 0.995, 48, 32), new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide,
-    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `varying vec3 vP; void main(){ float y = vP.y / ${SPH_R.toFixed(3)};
-      vec3 c = y < 0.0 ? mix(vec3(0.5, 0.36, 0.28), vec3(0.3, 0.22, 0.18), -y) : mix(vec3(0.24, 0.3, 0.42), vec3(0.1, 0.12, 0.2), y);
-      gl_FragColor = vec4(c, y < 0.0 ? 0.26 : 0.4); }` }));   // the ground a pale wash: it reads as Mars, not as a warning
-  sphIn.renderOrder = -1;
-  const ringLine = (polar, col, op, dash) => { const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(polar) * Math.cos(a) * SPH_R, Math.cos(polar) * SPH_R, Math.sin(polar) * Math.sin(a) * SPH_R)); }
-    const g = new THREE.BufferGeometry().setFromPoints(pts), m = dash ? new THREE.LineDashedMaterial({ color: col, transparent: true, opacity: op, dashSize: 0.02, gapSize: 0.014, depthWrite: false }) : new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: op, depthWrite: false });
-    const l = new THREE.Line(g, m); if (dash) l.computeLineDistances(); l.renderOrder = 3; return l; };
-  const sphRings = [ringLine(Math.PI / 2, 0xffffff, 0.45, false), ringLine(10 * DEG, 0xffffff, 0.35, false), ringLine(25 * DEG, 0xff4d5e, 0.85, true)];
-  const sphNose = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8), new THREE.MeshBasicMaterial({ color: 0x5b8cff, depthTest: false })); sphNose.renderOrder = 6;
-  insScene.add(sphIn, sphGlass, sphNose, ...sphRings);
-  insEl.insertAdjacentHTML('beforeend', '<span class="sph-lbl sky">Sky</span><span class="sph-lbl mars">Mars</span>');
+  const wireMat = (col, op) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, depthTest: false,
+    uniforms: { uCol: { value: new THREE.Color(col) }, uOp: { value: op }, uHot: { value: 1 } },
+    vertexShader: 'varying float vF; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vF = dot(normalize(w.xyz), normalize(cameraPosition)); gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: 'uniform vec3 uCol; uniform float uOp, uHot; varying float vF; void main(){ gl_FragColor = vec4(uCol, uOp * uHot * mix(0.28, 1.0, smoothstep(-0.25, 0.3, vF))); }' });
+  const circle = (pt, mat) => { const pts = []; for (let i = 0; i <= 128; i++) pts.push(pt(i / 128 * Math.PI * 2));
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat); l.renderOrder = 3; return l; };
+  const latLine = (polar, mat) => circle(a => new THREE.Vector3(Math.sin(polar) * Math.cos(a) * SPH_R, Math.cos(polar) * SPH_R, Math.sin(polar) * Math.sin(a) * SPH_R), mat);
+  const sphWire = [];
+  for (const p of [30, 60, 120, 150]) sphWire.push(latLine(p * DEG, wireMat(0xffffff, 0.16)));
+  for (let m = 0; m < 6; m++) { const az = m * 30 * DEG; sphWire.push(circle(a => new THREE.Vector3(Math.sin(a) * Math.cos(az) * SPH_R, Math.cos(a) * SPH_R, Math.sin(a) * Math.sin(az) * SPH_R), wireMat(0xffffff, 0.16))); }
+  const sphRings = [latLine(Math.PI / 2, wireMat(0xffffff, 0.6)), latLine(10 * DEG, wireMat(0xffffff, 0.4)), latLine(25 * DEG, wireMat(0xff4d5e, 0.7))];
+  const sphNose = new THREE.Mesh(new THREE.SphereGeometry(0.011, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })); sphNose.renderOrder = 6;
+  insScene.add(sphNose, ...sphWire, ...sphRings);
   insScene.add(new THREE.HemisphereLight(0xcfd8ff, 0x3a2a20, 1.1));
   { const k = new THREE.DirectionalLight(0xffffff, 2.2); k.position.set(2, 3, 2); insScene.add(k);
     const r2 = new THREE.DirectionalLight(0xff9a60, 0.8); r2.position.set(-2, -1, -1.5); insScene.add(r2); }
@@ -2487,14 +2497,12 @@ export async function initLanding(step) {
   const insTvc = new THREE.Group(); insTvc.position.y = I_GIM * IMM; insTvc.rotation.order = 'XZY'; insAir.add(insTvc);
   const insInner = new THREE.Group(); insInner.position.y = I_GIM * IMM; insAir.add(insInner);
   insScene.add(insRocket);
-  const insFlame = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.14, 16, 1, true).rotateX(Math.PI).translate(0, -0.07, 0),
-    new THREE.MeshBasicMaterial({ color: 0xffa860, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
-  insFlame.position.y = -I_TUBE_BELOW * IMM; insTvc.add(insFlame);
+
   const insArrowMat = c => new THREE.MeshBasicMaterial({ color: c, depthTest: false, transparent: true });
   const insArrow = c => { const g = new THREE.Group(); const m = insArrowMat(c);
     const sh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10).translate(0, 0.5, 0), m), hd = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4, 14).translate(0, 2, 0), m);
     sh.renderOrder = hd.renderOrder = 5; g.add(sh, hd); g.userData = { sh, hd }; insScene.add(g); return g; };
-  const insGim = insArrow(0xff8a3d), insTilt = insArrow(0x5b8cff);
+  const insGim = insArrow(0xff8a3d);
   function setInsArrow(g, o, d, len, alpha) {
     g.visible = alpha > 0.01; if (!g.visible) return;
     const th = 0.006, { sh, hd } = g.userData;
@@ -2504,7 +2512,7 @@ export async function initLanding(step) {
   }
   // The outline: per part a depth-only pass, a silhouette (back faces pushed out a fixed number of pixels), a faint fill
   // and the crease edges. The fill's depth hides the far side and whatever sits inside the body.
-  const OUT_COL = 0xcfe0ff, OUT_PX = 1.1;
+  const OUT_COL = 0xe8eef8, OUT_PX = 1.1;
   const outPx = { value: new THREE.Vector2(1, 1) };   // the outline width as a fraction of the canvas: OUT_PX / size
   const insDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   const insFill = new THREE.MeshBasicMaterial({ color: 0x0b1222, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
@@ -2513,7 +2521,7 @@ export async function initLanding(step) {
       vec2 n = (projectionMatrix * vec4(normalMatrix * normal, 0.0)).xy; float l = length(n);
       if (l > 1e-6) p.xy += n / l * uPx * 2.0 * p.w; gl_Position = p; }`,
     fragmentShader: 'uniform vec3 uCol; void main(){ gl_FragColor = vec4(uCol, 0.95); }', transparent: true });
-  const insEdge = new THREE.LineBasicMaterial({ color: OUT_COL, transparent: true, opacity: 0.6 });
+  const insEdge = new THREE.LineBasicMaterial({ color: OUT_COL, transparent: true, opacity: 0.45 });
   const RIG_PART = /^[1-6] |Head\/nut|^M3x/;   // the desk rig (collar, tabs, rings, arm, base) and its fasteners
   let insReady = false;
   new GLTFLoader().load('models/sldp45.glb', gltf => {   // same URL as the Bench tab: the browser serves it from cache
@@ -2545,7 +2553,9 @@ export async function initLanding(step) {
     insEl.classList.toggle('live', source === 'rig' && rigLive());
     // The landing rings mean something once the TVC has the ship: dim before
     const rk = tvcOn || state === 'landed' ? 1 : 0.35;
-    sphRings[1].material.opacity = 0.35 * rk; sphRings[2].material.opacity = 0.85 * rk;
+    sphRings[1].material.uniforms.uOp.value = 0.4 * rk; sphRings[2].material.uniforms.uOp.value = 0.7 * rk;
+    const hk = want ? 1.6 : 1;   // lit: the globe's lines brighten (no glow)
+    for (const l of [...sphWire, ...sphRings]) l.material.uniforms.uHot.value += (hk - l.material.uniforms.uHot.value) * 0.15;
     if (!insReady) return true;
     // The ship as drawn: its attitude, and its nozzle gimbal (the flip's is drawn 1.6× larger; the tube stops at 12°)
     insRocket.quaternion.copy(ship.quaternion);
@@ -2553,12 +2563,10 @@ export async function initLanding(step) {
     const gx = clamp(tvc.rotation.x * flipG, -lim, lim), gz = clamp(tvc.rotation.z * flipG, -lim, lim);
     insTvc.rotation.set(gx, 0, gz); insInner.rotation.x = gx;
     const firing = (state === 'flight' && (s.phase === 'tvc' || (s.phase === 'flip' && flipT() > IGN[0]))) || state === 'falling' || (state === 'deorbit' && vacLevel(et).some(x => x > 0.05));
-    insFlame.visible = firing; insFlame.scale.set(1, 0.8 + 0.3 * Math.random(), 1);
     _iu.set(0, 1, 0).applyQuaternion(insRocket.quaternion); sphNose.position.copy(_iu).multiplyScalar(SPH_R);
     insRocket.updateWorldMatrix(true, true);
-    const tl = Math.acos(clamp(_iu.y, -1, 1)) / DEG, gAng = Math.hypot(gx, gz) / DEG;
+    const gAng = Math.hypot(gx, gz) / DEG;
     _io.copy(_iu).multiplyScalar(0.36 * IMM / 0.001); _id.set(_iu.x, 0, _iu.z);
-    if (tvcOn && _id.lengthSq() > 1e-8) setInsArrow(insTilt, _io, _id.normalize(), 0.05 + 0.006 * Math.min(tl, 20), sstep(0.4, 1.4, tl)); else insTilt.visible = false;
     insTvc.updateWorldMatrix(true, false);
     _id.set(0, -1, 0).transformDirection(insTvc.matrixWorld); _io.set(0, -I_TUBE_BELOW * IMM, 0).applyMatrix4(insTvc.matrixWorld);
     _id.addScaledVector(_iu, -_id.dot(_iu));
@@ -2997,7 +3005,7 @@ export async function initLanding(step) {
         camMode = 'still'; controls.enabled = false; const p = ship.position; camera.position.set(p.x + dx, p.y + dy, p.z + dz); camera.lookAt(p.x, p.y + ty, p.z);
       },
       pause() { if (!paused) pauseBtn.click(); },   // freeze idle shot i at t seconds
-      pose() { return { p: camera.position.toArray().map(v => +v.toFixed(2)), d: camera.getWorldDirection(new THREE.Vector3()).toArray().map(v => +v.toFixed(4)), fov: +camera.fov.toFixed(2), shot: camName, dof: post.dof.enabled ? +post.dof.mat.uniforms.uAp.value.toFixed(2) : 0, t: +simClock.toFixed(3), state }; },
+      pose() { return { ship: +camera.position.distanceTo(ship.position).toFixed(1), agl: +(camera.position.y - heightAt(camera.position.x, camera.position.z)).toFixed(1), p: camera.position.toArray().map(v => +v.toFixed(2)), d: camera.getWorldDirection(new THREE.Vector3()).toArray().map(v => +v.toFixed(4)), fov: +camera.fov.toFixed(2), shot: camName, dof: post.dof.enabled ? +post.dof.mat.uniforms.uAp.value.toFixed(2) : 0, t: +simClock.toFixed(3), state }; },
       cam() { const s = flight.s; return { shot: shotName, side: apSide, z: Math.round(s.z), eng: s.eng, fov: +camera.fov.toFixed(1), h: Math.round(s.h - groundUnder()), t: +(s.t - s.tPh).toFixed(1), phase: s.phase, state, tag: tagEl.classList.contains('on') }; },   // TVC-scene state
     };
   }
