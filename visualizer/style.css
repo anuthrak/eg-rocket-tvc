@@ -943,6 +943,10 @@ body.clean-feed .lnd-lower { bottom: 9vh; }
 #landing .lnd-engmap circle:not(.ring) { fill: none; stroke: rgba(255,255,255,.4); stroke-width: .7; }
 #landing .lnd-engmap circle.on { fill: #fff; stroke: #fff; }
 #landing .lnd-sphere canvas { display: block; width: 100% !important; height: 100% !important; }
+#landing .lnd-sphere { position: relative; }
+#landing .sph-lbl { position: absolute; left: 12%; font: 600 8px var(--label); letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.42); pointer-events: none; }
+#landing .sph-lbl.sky { top: 40%; } #landing .sph-lbl.mars { top: 53%; color: rgba(232,190,160,.55); }
+@media (max-width: 760px) { #landing .sph-lbl { display: none; } }
 #landing .lnd-sphere.idle { opacity: .85; }
 #landing .lnd-play[hidden] { display: none; }
 @media (max-width: 760px) {

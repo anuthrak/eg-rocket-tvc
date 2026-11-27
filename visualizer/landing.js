@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as L from './landing-sim.js';
 import { createOrbitScene, R_MARS } from './landing-orbit.js';
 import { blendLooks, easeLook, newLook, createPost, createFlare, QUALITY, Q_ORDER } from './landing-look.js';
@@ -2446,7 +2447,8 @@ export async function initLanding(step) {
   function showTag(html, cls = '', ms = RL.tagMs) { tagEl.innerHTML = html; tagEl.className = 'lnd-push on ' + cls; tagUntil = performance.now() + ms; }
   function tagStep() { if (tagEl.classList.contains('on') && performance.now() > tagUntil) tagEl.classList.remove('on'); }
 
-  // Inset: the real rocket on the desk rig (CAD, models/sldp45.glb), driven by the same tilt and nozzle angles
+  // Inset: our rocket (CAD, models/sldp45.glb, without the desk rig) drawn as an outline, turned to the ship's attitude
+  // through the whole flight (orbit to touchdown) with its nozzle tube on the ship's gimbal angles
   const insEl = $('lndSphere'), insScene = new THREE.Scene();
   const insR = new THREE.WebGLRenderer({ alpha: true, antialias: true }); insR.setClearColor(0x000000, 0); insEl.appendChild(insR.domElement);
   const insCam = new THREE.PerspectiveCamera(30, 1, 0.01, 20);
@@ -2461,8 +2463,8 @@ export async function initLanding(step) {
   const sphIn = new THREE.Mesh(new THREE.SphereGeometry(SPH_R * 0.995, 48, 32), new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide,
     vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `varying vec3 vP; void main(){ float y = vP.y / ${SPH_R.toFixed(3)};
-      vec3 c = y < 0.0 ? mix(vec3(0.62, 0.3, 0.14), vec3(0.36, 0.15, 0.07), -y) : mix(vec3(0.24, 0.3, 0.42), vec3(0.1, 0.12, 0.2), y);
-      gl_FragColor = vec4(c, y < 0.0 ? 0.75 : 0.55); }` }));
+      vec3 c = y < 0.0 ? mix(vec3(0.5, 0.36, 0.28), vec3(0.3, 0.22, 0.18), -y) : mix(vec3(0.24, 0.3, 0.42), vec3(0.1, 0.12, 0.2), y);
+      gl_FragColor = vec4(c, y < 0.0 ? 0.26 : 0.4); }` }));   // the ground a pale wash: it reads as Mars, not as a warning
   sphIn.renderOrder = -1;
   const ringLine = (polar, col, op, dash) => { const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(polar) * Math.cos(a) * SPH_R, Math.cos(polar) * SPH_R, Math.sin(polar) * Math.sin(a) * SPH_R)); }
     const g = new THREE.BufferGeometry().setFromPoints(pts), m = dash ? new THREE.LineDashedMaterial({ color: col, transparent: true, opacity: op, dashSize: 0.02, gapSize: 0.014, depthWrite: false }) : new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: op, depthWrite: false });
@@ -2470,15 +2472,16 @@ export async function initLanding(step) {
   const sphRings = [ringLine(Math.PI / 2, 0xffffff, 0.45, false), ringLine(10 * DEG, 0xffffff, 0.35, false), ringLine(25 * DEG, 0xff4d5e, 0.85, true)];
   const sphNose = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8), new THREE.MeshBasicMaterial({ color: 0x5b8cff, depthTest: false })); sphNose.renderOrder = 6;
   insScene.add(sphIn, sphGlass, sphNose, ...sphRings);
+  insEl.insertAdjacentHTML('beforeend', '<span class="sph-lbl sky">Sky</span><span class="sph-lbl mars">Mars</span>');
   insScene.add(new THREE.HemisphereLight(0xcfd8ff, 0x3a2a20, 1.1));
   { const k = new THREE.DirectionalLight(0xffffff, 2.2); k.position.set(2, 3, 2); insScene.add(k);
     const r2 = new THREE.DirectionalLight(0xff9a60, 0.8); r2.position.set(-2, -1, -1.5); insScene.add(r2); }
-  const IMM = 0.001, I_CG = 247, I_GIM = 37, I_TUBE_BELOW = 57;
-  const insRocket = new THREE.Group(), insMiddle = new THREE.Group(), insFixed = new THREE.Group();
+  const IMM = 0.00108, I_CG = 247, I_GIM = 37, I_TUBE_BELOW = 57;
+  const insRocket = new THREE.Group();
   const insAir = new THREE.Group(); insAir.position.y = -I_CG * IMM; insRocket.add(insAir);
   const insTvc = new THREE.Group(); insTvc.position.y = I_GIM * IMM; insTvc.rotation.order = 'XZY'; insAir.add(insTvc);
   const insInner = new THREE.Group(); insInner.position.y = I_GIM * IMM; insAir.add(insInner);
-  insScene.add(insRocket, insMiddle, insFixed);
+  insScene.add(insRocket);
   const insFlame = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.14, 16, 1, true).rotateX(Math.PI).translate(0, -0.07, 0),
     new THREE.MeshBasicMaterial({ color: 0xffa860, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
   insFlame.position.y = -I_TUBE_BELOW * IMM; insTvc.add(insFlame);
@@ -2494,21 +2497,33 @@ export async function initLanding(step) {
     sh.scale.set(th, Math.max(len - th * 4, 0.001), th); hd.position.y = Math.max(len - th * 4, 0.001); hd.scale.setScalar(th);
     sh.material.opacity = alpha;
   }
-  const INS_COL = { steel_body: 0xc9ced6, steel_band: 0xaab0ba, steel_door: 0xb4bac4, black: 0x1d2026, sled: 0x3d5a46, gimbal: 0x4a4f58, servo: 0x1c2333, tube: 0x6f747d, pla: 0xe9e6df, pla2: 0x55585e, steel: 0x9aa0a8 };
-  const insMats = {};
+  // The outline: per part a depth-only pass, a silhouette (back faces pushed out a fixed number of pixels), a faint fill
+  // and the crease edges. The fill's depth hides the far side and whatever sits inside the body.
+  const OUT_COL = 0xcfe0ff, OUT_PX = 1.1;
+  const outPx = { value: new THREE.Vector2(1, 1) };   // the outline width as a fraction of the canvas: OUT_PX / size
+  const insDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  const insFill = new THREE.MeshBasicMaterial({ color: 0x0b1222, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  const insHull = new THREE.ShaderMaterial({ side: THREE.BackSide, uniforms: { uPx: outPx, uCol: { value: new THREE.Color(OUT_COL) } },
+    vertexShader: `uniform vec2 uPx; void main(){ vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      vec2 n = (projectionMatrix * vec4(normalMatrix * normal, 0.0)).xy; float l = length(n);
+      if (l > 1e-6) p.xy += n / l * uPx * 2.0 * p.w; gl_Position = p; }`,
+    fragmentShader: 'uniform vec3 uCol; void main(){ gl_FragColor = vec4(uCol, 0.95); }', transparent: true });
+  const insEdge = new THREE.LineBasicMaterial({ color: OUT_COL, transparent: true, opacity: 0.6 });
+  const RIG_PART = /^[1-6] |Head\/nut|^M3x/;   // the desk rig (collar, tabs, rings, arm, base) and its fasteners
   let insReady = false;
   new GLTFLoader().load('models/sldp45.glb', gltf => {   // same URL as the Bench tab: the browser serves it from cache
     gltf.scene.traverse(o => {
       if (!o.isMesh) return;
-      const [grp, col, name] = o.name.split('|');
-      if (grp === 'fixed' && /^(5 Arm|6 Base)/.test(name || '')) return;   // rings only: keep the rocket big in frame
-      const mat = insMats[col] ??= new THREE.MeshStandardMaterial({ color: INS_COL[col] ?? 0xe9e6df, roughness: col?.startsWith('steel') ? 0.35 : 0.7, metalness: col?.startsWith('steel') ? 0.6 : 0 });
-      o.geometry.computeVertexNormals(); const m = new THREE.Mesh(o.geometry, mat); m.scale.setScalar(IMM);
-      if (grp === 'inner') { m.position.y = -I_GIM * IMM; insInner.add(m); }
-      else if (grp === 'tube') { m.position.y = -I_GIM * IMM; insTvc.add(m); }
-      else if (grp === 'middle') { m.position.y = -I_CG * IMM; insMiddle.add(m); }
-      else if (grp === 'fixed') { m.position.y = -I_CG * IMM; insFixed.add(m); }
-      else insAir.add(m);
+      const [grp, col, name = ''] = o.name.split('|');
+      if (grp === 'fixed' || grp === 'middle' || RIG_PART.test(name) || col === 'sled') return;   // the rocket only (the sleds sit inside)
+      const g = new THREE.Group(); g.scale.setScalar(IMM);
+      const geo = o.geometry, hull = mergeVertices(geo.clone().deleteAttribute('normal').deleteAttribute('uv'), 0.05); hull.computeVertexNormals();
+      const dp = new THREE.Mesh(geo, insDepth), fill = new THREE.Mesh(geo, insFill), sil = new THREE.Mesh(hull, insHull),
+        edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 32), insEdge);
+      dp.renderOrder = 0; sil.renderOrder = 1; fill.renderOrder = 2; edge.renderOrder = 2; g.add(dp, sil, fill, edge);
+      if (grp === 'inner') { g.position.y = -I_GIM * IMM; insInner.add(g); }
+      else if (grp === 'tube') { g.position.y = -I_GIM * IMM; insTvc.add(g); }
+      else insAir.add(g);
     });
     insReady = true;
   }, undefined, err => console.warn('Inset model not loaded:', err));
@@ -2516,34 +2531,33 @@ export async function initLanding(step) {
   // Shown only when it matters: each push or gust countdown, the push, RL.insAfter after the recovery, and (rig) while
   // asked to hold still; R pins it on. Fades out over RL.insFade.
   function insetStep(counting) {
-    // The sphere is always there (with the link on); it lights up when it matters: each push or gust countdown, the push,
-    // RL.insAfter after the recovery, and (rig) while asked to hold still. Before the TVC has the ship it stands by.
-    const s = flight.s, now = performance.now(), active = (state === 'flight' && (s.phase === 'tvc' || source === 'rig')) || state === 'falling' || state === 'tipping';
+    // The sphere follows the ship from orbit to touchdown (with the link on); it lights up when it matters: each push or
+    // gust countdown, the push, RL.insAfter after the recovery, and (rig) while asked to hold still.
+    const s = flight.s, now = performance.now(), tvcOn = (state === 'flight' && s.phase === 'tvc') || state === 'falling' || state === 'tipping';
     const hold = source === 'rig' && state === 'flight' && ((s.phase === 'belly' && calls.hold) || s.phase === 'flip');
-    const want = active && (insPin || !!counting || pushOn || hold || now - insLast < RL.insAfter);
-    insEl.classList.toggle('hot', want); insEl.classList.toggle('idle', !active);
-    const live = source === 'rig' && rigLive();
-    insEl.classList.toggle('live', live);
+    const want = insPin || !!counting || pushOn || hold || (tvcOn && now - insLast < RL.insAfter);
+    insEl.classList.toggle('hot', want); insEl.classList.remove('idle');
+    insEl.classList.toggle('live', source === 'rig' && rigLive());
+    // The landing rings mean something once the TVC has the ship: dim before
+    const rk = tvcOn || state === 'landed' ? 1 : 0.35;
+    sphRings[1].material.opacity = 0.35 * rk; sphRings[2].material.opacity = 0.85 * rk;
     if (!insReady) return true;
-    // The TVC source's attitude: in the belly flop (rig) the raw lean, so "hold it still" shows
-    const d = s.phase === 'tvc' || state !== 'flight' ? dev : source === 'rig' && rig ? { tiltX: rig.tiltX, tiltY: rig.tiltY, gx: rig.gx ?? 0, gy: rig.gy ?? 0 } : { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
-    const tX = d.tiltX * DEG, tY = d.tiltY * DEG;
-    const dx = Math.cos(tX) * Math.sin(tY), dy = Math.cos(tX) * Math.cos(tY), dz = Math.sin(tX);
-    const ga = Math.atan2(dz, dy), gb = Math.atan2(-dx, Math.hypot(dy, dz));
-    insRocket.rotation.set(ga, 0, gb); insMiddle.rotation.x = ga;
-    insTvc.rotation.set(d.gx * DEG, 0, -d.gy * DEG); insInner.rotation.x = d.gx * DEG;
-    const firing = s.phase === 'tvc' || state === 'falling';
+    // The ship as drawn: its attitude, and its nozzle gimbal (the flip's is drawn 1.6× larger; the tube stops at 12°)
+    insRocket.quaternion.copy(ship.quaternion);
+    const flipG = state === 'flight' && s.phase === 'flip' ? 1 / 1.6 : 1, lim = 12 * DEG;
+    const gx = clamp(tvc.rotation.x * flipG, -lim, lim), gz = clamp(tvc.rotation.z * flipG, -lim, lim);
+    insTvc.rotation.set(gx, 0, gz); insInner.rotation.x = gx;
+    const firing = (state === 'flight' && (s.phase === 'tvc' || (s.phase === 'flip' && flipT() > IGN[0]))) || state === 'falling' || (state === 'deorbit' && vacLevel(et).some(x => x > 0.05));
     insFlame.visible = firing; insFlame.scale.set(1, 0.8 + 0.3 * Math.random(), 1);
-    const tl = L.tiltOf(d.tiltX, d.tiltY), gAng = Math.hypot(d.gx, d.gy);
-    _iu.set(0, 1, 0).applyEuler(insRocket.rotation); sphNose.position.copy(_iu).multiplyScalar(SPH_R);
+    _iu.set(0, 1, 0).applyQuaternion(insRocket.quaternion); sphNose.position.copy(_iu).multiplyScalar(SPH_R);
     insRocket.updateWorldMatrix(true, true);
-    _iu.set(0, 1, 0).applyQuaternion(insRocket.quaternion);
-    _io.copy(_iu).multiplyScalar(0.36); _id.set(_iu.x, 0, _iu.z);
-    if (_id.lengthSq() > 1e-8) setInsArrow(insTilt, _io, _id.normalize(), 0.05 + 0.006 * Math.min(tl, 20), sstep(0.4, 1.4, tl)); else insTilt.visible = false;
+    const tl = Math.acos(clamp(_iu.y, -1, 1)) / DEG, gAng = Math.hypot(gx, gz) / DEG;
+    _io.copy(_iu).multiplyScalar(0.36 * IMM / 0.001); _id.set(_iu.x, 0, _iu.z);
+    if (tvcOn && _id.lengthSq() > 1e-8) setInsArrow(insTilt, _io, _id.normalize(), 0.05 + 0.006 * Math.min(tl, 20), sstep(0.4, 1.4, tl)); else insTilt.visible = false;
     insTvc.updateWorldMatrix(true, false);
     _id.set(0, -1, 0).transformDirection(insTvc.matrixWorld); _io.set(0, -I_TUBE_BELOW * IMM, 0).applyMatrix4(insTvc.matrixWorld);
     _id.addScaledVector(_iu, -_id.dot(_iu));
-    if (_id.lengthSq() > 1e-8 && gAng > 0.4) setInsArrow(insGim, _io, _id.normalize(), 0.04 + 0.008 * Math.min(gAng, 16), sstep(0.4, 1.4, gAng)); else insGim.visible = false;
+    if (firing && _id.lengthSq() > 1e-8 && gAng > 0.4) setInsArrow(insGim, _io, _id.normalize(), 0.04 + 0.008 * Math.min(gAng, 16), sstep(0.4, 1.4, gAng)); else insGim.visible = false;
     return true;
   }
   function renderInset() {
@@ -2552,7 +2566,7 @@ export async function initLanding(step) {
     const pr = Math.min(2, devicePixelRatio || 1);
     if (insR.getPixelRatio() !== pr) insR.setPixelRatio(pr);
     const c = insR.domElement; if (c.width !== Math.round(w * pr) || c.height !== Math.round(h * pr)) insR.setSize(w, h, true);
-    insCam.aspect = w / h; insCam.updateProjectionMatrix();
+    insCam.aspect = w / h; insCam.updateProjectionMatrix(); outPx.value.set(OUT_PX / w, OUT_PX / h);
     insR.render(insScene, insCam);
   }
   function rigLinkStep(dt) {
@@ -2666,8 +2680,19 @@ export async function initLanding(step) {
     clockStep(s, orb);
     tlStep(s);
     // TVC readouts beside the sphere: the TVC's own tilt and nozzle (without the autopilot's lean)
-    const a = dev, tvcOn = state === 'flight' && s.phase === 'tvc' || state === 'falling' || (ended() && td);
+    // Before the TVC: the ship's pitch and its tilt off vertical; in the rig's hold-still calls, the real rocket's lean
+    const tvcOn = state === 'flight' && s.phase === 'tvc' || state === 'falling' || (ended() && td);
+    const rigHold = source === 'rig' && rig && rigLive() && state === 'flight' && ((s.phase === 'belly' && calls.hold) || s.phase === 'flip');
+    let a = dev;
     if (!tvcOn) {
+      _up.set(0, 1, 0).applyQuaternion(ship.quaternion);
+      const lit = state === 'flight' && s.phase === 'flip' && flipT() > IGN[0], gk = 1 / DEG / 1.6;
+      a = { tiltX: Math.asin(clamp(_up.z, -1, 1)) / DEG, tiltY: Math.atan2(_up.x, _up.y) / DEG, gx: lit ? tvc.rotation.x * gk : null, gy: lit ? -tvc.rotation.z * gk : null };
+    }
+    if (rigHold) {
+      const t = L.tiltOf(rig.tiltX, rig.tiltY);
+      $('lndTiltL').textContent = 'Rig · hold still'; $('lndTilt').textContent = t.toFixed(1) + '°'; $('lndTilt').className = t > 5 ? 'amber' : '';
+    } else if (!tvcOn) {
       const pitch = orb ? ((curPitch % 360) + 360) % 360 : s.tilt;
       $('lndTiltL').textContent = 'Pitch'; $('lndTilt').textContent = pitch.toFixed(0) + '°'; $('lndTilt').className = '';
     } else {
@@ -2676,7 +2701,7 @@ export async function initLanding(step) {
       $('lndTilt').className = t > 15 ? 'warn' : t > 8 ? 'amber' : '';
     }
     $('lndTX').textContent = sgn(a.tiltX) + '°'; $('lndTY').textContent = sgn(a.tiltY) + '°';
-    $('lndGX').textContent = sgn(a.gx) + '°'; $('lndGY').textContent = sgn(a.gy) + '°';
+    $('lndGX').textContent = a.gx == null ? '—' : sgn(a.gx) + '°'; $('lndGY').textContent = a.gy == null ? '—' : sgn(a.gy) + '°';
     const live = rigLive(), src = $('lndSource');
     src.classList.toggle('live', source === 'rig' && live); src.classList.toggle('sim', source === 'sim');
     $('lndSrcTitle').textContent = source === 'sim' ? 'SIMULATED TVC' : live ? (rig?.demo ? 'RIG · BENCH DEMO FEED' : 'RIG · LIVE') : 'RIG · NO DATA';

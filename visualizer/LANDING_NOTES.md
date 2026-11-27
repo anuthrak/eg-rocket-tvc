@@ -47,7 +47,7 @@ Foundations · 1 orbit idle · 2 deorbit · real Mars season · 3 entry plasma (
 - `TVC_CAM` (landing.js): shot times/heights, camera x/z, height offset, aim drop, lead, fov.
 - landing-sim.js: `DIVERT` (start offset), `DIV` (the divert: stop `x` m short of the pad along track, start the burn `hExtra` m high, approach speed `aB`/`vMax`; the flip already flies the divert speed), `BELLY` (flap bank steering: gains, `bankMax`, `lift`), `LAT` (flip pull `kFlip`, TVC along-track `kp`/`kd`/`amax`, across-track `kpz`/`kdz`/`amaxz`, TVC-phase turn rate `alpha`, overshoot `over` + ramps `hA..hD`), `ENG3` (shutdown thresholds; all three engines above `h2`, `gap` s between changes), `TFX` in landing.js (TVC-phase flip effects: gimbal draw, buffet by engines, shutdown kick, nose-swing threshold °/s for the camera lean; no nose jets in the TVC phase), `HEAVY` (big-ship follow of the raw source: `release`, `wn`, `zeta`, `vMax`, `aMax`, nozzle `gTau`/`gRate`; `s.big` vs raw `s.dev`), `A_LOW`/`H0`/`H1` (final settle profile). Gust times in landing.js `handover()`. Re-run `node tests/landing_mc.mjs 500` after any change.
 
-- Raw vs big: raw `dev`/`s.dev` → abort, tracker, HUD, inset; `s.big` → thrust, ship pose, nozzles, tilt arrow. `flightStart()` aims the along-track coast (`x + 2·vx` at the TVC start) over the pad.
+- Raw vs big: raw `dev`/`s.dev` → abort, tracker, HUD; `s.big` → thrust, ship pose, nozzles, tilt arrow. `flightStart()` aims the along-track coast (`x + 2·vx` at the TVC start) over the pad.
 
 ## Known issues
 - Debug `still()` from ~4 km can show a pure-black block (bloom NaN); pre-existing, not seen in flight shots.
@@ -59,3 +59,4 @@ Recreate per session: `npm i three@0.160.0` in /tmp/nm, then a Playwright script
 cloud deck.
 
 - Gimbal signs: a positive gimbal pushes the tail the way a positive tilt leans (it turns the nose back). The TVC source (Nano/rig) uses that sign; the autopilot draws the opposite of the turn it wants (`s.gA = -gfor(alpha)`). Thrust = the body axis tipped by the TVC source gimbal about the body axes (`nozzleDir`); the autopilot gimbal only turns the ship and is drawn on the bells. The plume leaves along each bell.
+- Attitude sphere (`insetStep`): copies the drawn `ship.quaternion` and `tvc.rotation` (flip gimbal ÷1.6, tube capped at 12°) from orbit to touchdown; the rocket is the CAD without the desk rig (`RIG_PART`, sleds) drawn as an outline (depth pass `insDepth`, pixel-width silhouette `insHull` on merged normals, faint `insFill`, `EdgesGeometry` 32°). The 10°/25° rings dim until TVC; the tilt arrow shows in TVC, the gimbal arrow while an engine fires. Pale ground + Sky/Mars labels (hidden ≤ 760 px). Rig hold-still calls show the rig's raw lean in the tilt number.
