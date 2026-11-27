@@ -51,7 +51,7 @@ export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3
 export const DIVERT = 350;
 // The divert: the belly flop and flip stop DIV.x m short of the pad along track (west of it), and the landing burn starts
 // DIV.hExtra m higher than it needs to, so the TVC phase has the height and time to lean the ship across to the pad
-export const DIV = { x: 600, hExtra: 1200, aB: 4, vMax: 70 };
+export const DIV = { x: 600, hExtra: 1400, aB: 2.5, vMax: 55 };
 export const BELLY = { aim: 0, kp: 0.01, kd: 0.1, bankMax: 25, lift: 1.0 };   // flap bank (deg) → side force = drag·lift·sin(bank)
 // Starship scale: the TVC source (the 45 cm desk rocket, or its simulation) moves ~10× faster than a 50 m ship could.
 // The big ship follows it as a heavy body: the lean target holds the peak and lets go over `release` s, then a damped
@@ -59,7 +59,7 @@ export const BELLY = { aim: 0, kp: 0.01, kd: 0.1, bankMax: 25, lift: 1.0 };   //
 // abort, the tracker, the HUD and the inset; the big ship's attitude drives the thrust, so a push moves it off course.
 export const HEAVY = { release: 0.8, wn: 3, zeta: 0.85, vMax: 12, aMax: 28, gTau: 0.25, gRate: 30 };
 export const ENG3 = { to2: 0.62, to1: 0.31, h1: 100, h2: 1200, hold: 0.3, gap: 3 };   // all three engines for the divert (above h2 m)   // shut one engine below these 3-engine throttle fractions (to1 only below h1 m)
-export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };
+export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, kpz: 0.2, kdz: 0.8, amaxz: 8, alpha: 20, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };   // (z: across track)
 // TVC phase: sideways accel = -kd·v - kp·(z - aim), clamped to amax (m/s²). The aim swings `over` m past the pad
 // between hA→hB and back by hC→hD (smoothstep ramps), so the ship overshoots once and comes back while it's still high.
 export function createFlight(x0 = 0, z0 = 0) {
@@ -145,8 +145,8 @@ export function createFlight(x0 = 0, z0 = 0) {
       // Along track in the TVC phase: fly toward the pad at a speed it can still brake from (DIV.aB), capped at DIV.vMax;
       // close in, the same PD as across track
       const vDes = -Math.sign(s.x) * Math.min(DIV.vMax, Math.sqrt(2 * DIV.aB * Math.abs(s.x)), LAT.kp / LAT.kd * Math.abs(s.x));
-      const aX = tv ? clamp(LAT.kd * (vDes - s.vx), -LAT.amax, LAT.amax) : clamp(-0.32 * s.vx - 0.022 * (s.x + DIV.x), -9, 9);   // TVC: same loop along track (the flip holds the divert point)
-      const aZ = tv ? clamp(-LAT.kd * s.vz - LAT.kp * (s.z - latAim(hh)), -LAT.amax, LAT.amax) : clamp(-0.2 * s.vz - LAT.kFlip * s.z, -9, 9);
+      const aX = tv ? clamp(LAT.kd * (vDes - s.vx), -LAT.amax, LAT.amax) : clamp(LAT.kd * (vDes - s.vx), -9, 9);   // the flip already flies the divert's speed (no brake-then-go swing)
+      const aZ = tv ? clamp(-LAT.kdz * s.vz - LAT.kpz * (s.z - latAim(hh)), -LAT.amaxz, LAT.amaxz) : clamp(-0.2 * s.vz - LAT.kFlip * s.z, -9, 9);
       const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 15 : 25;    // near the ground: stand up straight
       tgtY = clamp(Math.atan2(aX, aH) / DEG, -lim, lim);
       tgtX = clamp(Math.atan2(aZ, aH) / DEG, -lim, lim);
@@ -166,7 +166,7 @@ export function createFlight(x0 = 0, z0 = 0) {
         if (engT > ENG3.hold && s.eng > 1 && engCool <= 0) { s.eng--; engT = 0; engCool = ENG3.gap; }
         if (need > s.eng / 3 * 0.97 && s.eng < 3 && (engCool <= 0 || need > s.eng / 3 * 1.1)) { s.eng++; engCool = ENG3.gap; }
         s.thr = clamp(need, 0.05, s.eng / 3);   // fraction of three engines; one engine throttled low can hover the light ship
-        alphaMax = 14;
+        alphaMax = LAT.alpha;
       }
       s.flap *= 0.98;
     }
@@ -176,9 +176,13 @@ export function createFlight(x0 = 0, z0 = 0) {
     const thrust = s.phase === 'belly' ? 0 : s.thr * SHIP.T;
     // The autopilot's gimbal: the angle that makes the torque it asks for (arm 0.4 L to the CG)
     const gfor = al => thrust > 0 ? clamp(al * DEG * SHIP.I / (thrust * 0.4 * SHIP.L) / DEG, -8, 8) : 0;
-    s.gA.y = gfor(alY); s.gA.x = gfor(alX);
+    // (a positive gimbal pushes the tail the way a positive tilt leans: it turns the nose back, so it's the opposite sign of
+    // the turn the autopilot wants)
+    s.gA.y = -gfor(alY); s.gA.x = -gfor(alX);
     // Thrust along the nozzle: the body axis tipped by the gimbal (autopilot's + the TVC source's)
-    const n = nozzleDir({ tiltX: tx, tiltY: ty, gx: d.gx + s.gA.x, gy: d.gy + s.gA.y });
+    // (the autopilot's own gimbal only makes its turns, drawn on the bells; its brief sideways kick is left out of the
+    // translation, which the guidance flies by the lean)
+    const n = nozzleDir({ tiltX: tx, tiltY: ty, gx: d.gx, gy: d.gy });
     fx += thrust * n.x; fh += thrust * n.y; fz += thrust * n.z;
     s.vx += fx / s.m * DT; s.vh += fh / s.m * DT; s.vz += fz / s.m * DT;
     s.x += s.vx * DT; s.h += s.vh * DT; s.z += s.vz * DT;
@@ -201,7 +205,7 @@ function runFrom(x0, z0 = 0) {   // to the start of the TVC phase, with no TVC i
 // the TVC loop then only trims (aiming at the landing point instead let the strong loop hide a 400 m along-track swing)
 export function flightStart() {
   let x0 = 0;
-  for (let i = 0; i < 10; i++) { const s = runFrom(x0, DIVERT).s; x0 -= 0.9 * (s.x + 2.0 * s.vx + DIV.x); }   // coast-to-stop point DIV.x short of the pad
+  for (let i = 0; i < 10; i++) { const s = runFrom(x0, DIVERT).s; x0 -= 0.9 * (s.x + DIV.x); }   // the TVC phase starts DIV.x short of the pad
   return { x0 };   // the same x0 serves both sides (mirror image in z)
 }
 
@@ -251,11 +255,8 @@ export function axisFromTilt(tiltX, tiltY) {
 export const tiltOf = (tiltX, tiltY) => Math.acos(clamp(axisFromTilt(tiltX, tiltY).y, -1, 1)) / DEG;
 // Thrust direction: the body axis tipped by the gimbal. A positive gimbal pushes the tail (and the ship) the way a
 // positive tilt leans, which is how it rights the ship (same signs as the Bench view's nozzle).
-export function nozzleDir(a) {
-  const ax = axisFromTilt(a.tiltX, a.tiltY);
-  const n = { x: ax.x + Math.sin((a.gy || 0) * DEG), y: ax.y, z: ax.z + Math.sin((a.gx || 0) * DEG) };
-  const l = Math.hypot(n.x, n.y, n.z);
-  return { x: n.x / l, y: n.y / l, z: n.z / l };
+export function nozzleDir(a) {   // the gimbal tips the thrust about the body's own axes (right at any lean, not just upright)
+  return axisFromTilt(a.tiltX + (a.gx || 0), a.tiltY + (a.gy || 0));
 }
 
 // ---------- Disturbance tracker: "pushed to 12.4°, back in 0.58 s" ----------
