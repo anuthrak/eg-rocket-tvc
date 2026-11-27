@@ -4,7 +4,7 @@ import { initBench } from './bench.js';
 import { initTests } from './tests.js';
 import { initLanding } from './landing.js';
 
-export const VERSION = '2.12.0';   // bump with CHANGELOG.md; see README → Releasing
+export const VERSION = '3.0.0';   // bump with CHANGELOG.md; see README → Releasing
 
 const $ = id => document.getElementById(id);
 if (!('serial' in navigator)) document.body.classList.add('no-serial');   // hides Connect + baud
