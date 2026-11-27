@@ -1447,10 +1447,15 @@ export async function initLanding(step) {
   let linkOn = true; try { linkOn = localStorage.getItem('tvc-landing-link') !== 'off'; } catch {}
   const linkBtn = $('lndLink');
   const setLink = on => { linkOn = on; try { localStorage.setItem('tvc-landing-link', on ? 'on' : 'off'); } catch {}
-    linkBtn.querySelector('.lbl').textContent = on ? 'Link: On' : 'Link: Off'; linkBtn.classList.toggle('on', on); };
+    linkBtn.querySelector('.lbl').textContent = on ? 'Link: On' : 'Link: Off'; linkBtn.classList.toggle('on', on); $('lndAtt').hidden = !on; };
   linkBtn.onclick = () => setLink(!linkOn); setLink(linkOn);
   addEventListener('keydown', e => { if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey && document.body.dataset.tab === 'landing' && !e.target.closest?.('input, select, textarea')) setLink(!linkOn); });
-  camBtn.onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % CAMS.length]; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); };
+  const camBtns = [...camBtn.querySelectorAll('button')];
+  camBtns.forEach(b => b.onclick = () => { camMode = b.dataset.cam; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); });
+  // Settings menu (quality, link, auto-loop) and the ? tooltip
+  const menuEl = $('lndMenu'), gearBtn = $('lndGear');
+  gearBtn.onclick = e => { e.stopPropagation(); menuEl.hidden = !menuEl.hidden; gearBtn.setAttribute('aria-expanded', String(!menuEl.hidden)); };
+  addEventListener('pointerdown', e => { if (!menuEl.hidden && !e.target.closest('.lnd-menu-wrap')) { menuEl.hidden = true; gearBtn.setAttribute('aria-expanded', 'false'); } });
   addEventListener('keydown', e => {
     if (document.body.dataset.tab !== 'landing' || e.target.closest('input, select, textarea')) return;
     if (e.key === 'g' || e.key === 'G') doGust();
@@ -1472,6 +1477,7 @@ export async function initLanding(step) {
   function refresh() {
     goBtn.querySelector('.lbl').textContent = state === 'orbit' ? 'Begin descent' : running() ? 'In flight' : 'Fly again';
     goBtn.disabled = running() || (source === 'rig' && !rigLive() && state === 'orbit');
+    goBtn.hidden = running();
     pauseBtn.disabled = !running();
     pauseBtn.querySelector('.lbl').textContent = paused ? 'Play' : 'Pause';
     pauseBtn.classList.toggle('on', paused);
@@ -1480,7 +1486,9 @@ export async function initLanding(step) {
     tvcBtn.classList.toggle('off', !att.tvc);
     gustBtn.querySelector('.lbl').textContent = source === 'rig' ? 'Call a gust' : 'Gust';
     gustBtn.title = source === 'rig' ? 'Shows a prompt to push the real rocket (G)' : 'Shove the ship sideways (G)';
-    camBtn.querySelector('.lbl').textContent = 'Cam: ' + camMode[0].toUpperCase() + camMode.slice(1);
+    camBtns.forEach(b => b.classList.toggle('on', b.dataset.cam === camMode));
+    goBtn.title = state === 'orbit' ? 'Begin descent (Space)' : running() ? 'In flight' : 'Fly again (Space)';
+    goBtn.classList.toggle('again', ended());
   }
 
   let calloutTimer = 0;
@@ -1786,7 +1794,7 @@ export async function initLanding(step) {
       ent.tr += dt;
       const wNow = 1 + (E.warp - 1) * sstep(1.5, 4.5, ent.tr) - (E.warp - 10) * sstep(0.88, 1, et / E.entry);
       et += dt * wNow / E.warp * ENT_PACE;   // ~30 s on screen
-      $('lndWarp').textContent = '×' + Math.max(1, Math.round(wNow)) + ' time warp';
+      $('lndWarp').textContent = '×' + Math.max(1, Math.round(wNow)) + ' time warp'; ent.w = wNow;
       if (window.__entU != null) et = window.__entU * E.entry;
       const u = clamp(et / E.entry, 0, 1);
       [h, v] = entryHV(u);
@@ -2439,9 +2447,29 @@ export async function initLanding(step) {
   function tagStep() { if (tagEl.classList.contains('on') && performance.now() > tagUntil) tagEl.classList.remove('on'); }
 
   // Inset: the real rocket on the desk rig (CAD, models/sldp45.glb), driven by the same tilt and nozzle angles
-  const insEl = $('lndInset'), insScene = new THREE.Scene();
+  const insEl = $('lndSphere'), insScene = new THREE.Scene();
+  const insR = new THREE.WebGLRenderer({ alpha: true, antialias: true }); insR.setClearColor(0x000000, 0); insEl.appendChild(insR.domElement);
   const insCam = new THREE.PerspectiveCamera(30, 1, 0.01, 20);
-  insCam.position.set(1.0, 0.62, 1.25); insCam.lookAt(0, 0.04, 0);
+  insCam.position.set(1.15, 0.55, 1.45); insCam.lookAt(0, 0.0, 0);
+  // The sphere: a glass ball fixed to the world round your rocket (centred on its pivot). Inside: the sky above, Mars below
+  // the horizon; on it, rings at 10° and 25° (abort) from straight up, and a dot where the nose points.
+  const SPH_R = 0.44;
+  const sphGlass = new THREE.Mesh(new THREE.SphereGeometry(SPH_R, 48, 32), new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
+    vertexShader: 'varying vec3 vN, vV; void main(){ vec4 w = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-w.xyz); gl_Position = projectionMatrix * w; }',
+    fragmentShader: 'varying vec3 vN, vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.5); gl_FragColor = vec4(vec3(0.9, 0.94, 1.0), 0.05 + 0.65 * f); }' }));
+  sphGlass.renderOrder = 4;
+  const sphIn = new THREE.Mesh(new THREE.SphereGeometry(SPH_R * 0.995, 48, 32), new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide,
+    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec3 vP; void main(){ float y = vP.y / ${SPH_R.toFixed(3)};
+      vec3 c = y < 0.0 ? mix(vec3(0.62, 0.3, 0.14), vec3(0.36, 0.15, 0.07), -y) : mix(vec3(0.24, 0.3, 0.42), vec3(0.1, 0.12, 0.2), y);
+      gl_FragColor = vec4(c, y < 0.0 ? 0.75 : 0.55); }` }));
+  sphIn.renderOrder = -1;
+  const ringLine = (polar, col, op, dash) => { const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(polar) * Math.cos(a) * SPH_R, Math.cos(polar) * SPH_R, Math.sin(polar) * Math.sin(a) * SPH_R)); }
+    const g = new THREE.BufferGeometry().setFromPoints(pts), m = dash ? new THREE.LineDashedMaterial({ color: col, transparent: true, opacity: op, dashSize: 0.02, gapSize: 0.014, depthWrite: false }) : new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: op, depthWrite: false });
+    const l = new THREE.Line(g, m); if (dash) l.computeLineDistances(); l.renderOrder = 3; return l; };
+  const sphRings = [ringLine(Math.PI / 2, 0xffffff, 0.45, false), ringLine(10 * DEG, 0xffffff, 0.35, false), ringLine(25 * DEG, 0xff4d5e, 0.85, true)];
+  const sphNose = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8), new THREE.MeshBasicMaterial({ color: 0x5b8cff, depthTest: false })); sphNose.renderOrder = 6;
+  insScene.add(sphIn, sphGlass, sphNose, ...sphRings);
   insScene.add(new THREE.HemisphereLight(0xcfd8ff, 0x3a2a20, 1.1));
   { const k = new THREE.DirectionalLight(0xffffff, 2.2); k.position.set(2, 3, 2); insScene.add(k);
     const r2 = new THREE.DirectionalLight(0xff9a60, 0.8); r2.position.set(-2, -1, -1.5); insScene.add(r2); }
@@ -2488,16 +2516,15 @@ export async function initLanding(step) {
   // Shown only when it matters: each push or gust countdown, the push, RL.insAfter after the recovery, and (rig) while
   // asked to hold still; R pins it on. Fades out over RL.insFade.
   function insetStep(counting) {
-    const s = flight.s, now = performance.now(), base = insReady && ((state === 'flight' && (s.phase === 'tvc' || source === 'rig')) || state === 'falling' || state === 'tipping');
+    // The sphere is always there (with the link on); it lights up when it matters: each push or gust countdown, the push,
+    // RL.insAfter after the recovery, and (rig) while asked to hold still. Before the TVC has the ship it stands by.
+    const s = flight.s, now = performance.now(), active = (state === 'flight' && (s.phase === 'tvc' || source === 'rig')) || state === 'falling' || state === 'tipping';
     const hold = source === 'rig' && state === 'flight' && ((s.phase === 'belly' && calls.hold) || s.phase === 'flip');
-    const want = base && (insPin || !!counting || pushOn || hold || now - insLast < RL.insAfter || state !== 'flight');
-    if (want) insSeen = now;
-    const on = base && now - insSeen < RL.insFade;
-    insEl.hidden = !on; insEl.classList.toggle('out', !want);
-    if (!on) return false;
+    const want = active && (insPin || !!counting || pushOn || hold || now - insLast < RL.insAfter);
+    insEl.classList.toggle('hot', want); insEl.classList.toggle('idle', !active);
     const live = source === 'rig' && rigLive();
     insEl.classList.toggle('live', live);
-    $('lndInsetL').textContent = source === 'sim' ? 'YOUR ROCKET · SIM' : !live ? 'YOUR ROCKET · NO DATA' : rig?.demo ? 'YOUR ROCKET · DEMO' : 'YOUR ROCKET · LIVE';
+    if (!insReady) return true;
     // The TVC source's attitude: in the belly flop (rig) the raw lean, so "hold it still" shows
     const d = s.phase === 'tvc' || state !== 'flight' ? dev : source === 'rig' && rig ? { tiltX: rig.tiltX, tiltY: rig.tiltY, gx: rig.gx ?? 0, gy: rig.gy ?? 0 } : { tiltX: 0, tiltY: 0, gx: 0, gy: 0 };
     const tX = d.tiltX * DEG, tY = d.tiltY * DEG;
@@ -2508,7 +2535,7 @@ export async function initLanding(step) {
     const firing = s.phase === 'tvc' || state === 'falling';
     insFlame.visible = firing; insFlame.scale.set(1, 0.8 + 0.3 * Math.random(), 1);
     const tl = L.tiltOf(d.tiltX, d.tiltY), gAng = Math.hypot(d.gx, d.gy);
-    $('lndInsT').textContent = tl.toFixed(1) + '°'; $('lndInsG').textContent = gAng.toFixed(1) + '°';
+    _iu.set(0, 1, 0).applyEuler(insRocket.rotation); sphNose.position.copy(_iu).multiplyScalar(SPH_R);
     insRocket.updateWorldMatrix(true, true);
     _iu.set(0, 1, 0).applyQuaternion(insRocket.quaternion);
     _io.copy(_iu).multiplyScalar(0.36); _id.set(_iu.x, 0, _iu.z);
@@ -2520,22 +2547,18 @@ export async function initLanding(step) {
     return true;
   }
   function renderInset() {
-    const r = insEl.getBoundingClientRect(), c = renderer.domElement.getBoundingClientRect();
-    if (r.width < 4) return;
-    const x = r.left - c.left, y = c.bottom - r.bottom, w = r.width, h = r.height;
+    const w = insEl.clientWidth, h = insEl.clientHeight;
+    if (w < 4) return;
+    const pr = Math.min(2, devicePixelRatio || 1);
+    if (insR.getPixelRatio() !== pr) insR.setPixelRatio(pr);
+    const c = insR.domElement; if (c.width !== Math.round(w * pr) || c.height !== Math.round(h * pr)) insR.setSize(w, h, true);
     insCam.aspect = w / h; insCam.updateProjectionMatrix();
-    const ac = renderer.autoClear, cc = renderer.getClearColor(_cc).getHex(), ca = renderer.getClearAlpha();
-    renderer.autoClear = false; renderer.setScissorTest(true);
-    renderer.setScissor(x, y, w, h); renderer.setViewport(x, y, w, h);
-    renderer.setClearColor(0x0b0e14, 0.92); renderer.clear(true, true, false);
-    renderer.render(insScene, insCam);
-    renderer.setScissorTest(false); renderer.setViewport(0, 0, c.width, c.height);
-    renderer.setClearColor(cc, ca); renderer.autoClear = ac;
+    insR.render(insScene, insCam);
   }
   function rigLinkStep(dt) {
     const counting = stripStep();
     tagStep();
-    if (!linkOn) { insEl.hidden = true; return false; }
+    if (!linkOn) return false;
     return insetStep(counting);
   }
 
@@ -2550,7 +2573,52 @@ export async function initLanding(step) {
     if (state === 'falling') return 'tvc';
     return 'td';
   }
-  const engDots = [...document.querySelectorAll('#lndEng i')];
+  const engDots = [...document.querySelectorAll('#lndEng circle:not(.ring)')];
+  let hudT = performance.now(), hudV = 0, hudVx = 0, hudVz = 0, gS = 0;
+  // Mission clock: T+ from the deorbit burn, in mission time (the entry's time warp counts at its rate); stops at the end
+  let mClock = null, mClockT = performance.now();
+  function clockStep(s, orb) {
+    const now = performance.now(), hdt = Math.min(0.25, (now - mClockT) / 1000); mClockT = now;
+    if (state === 'orbit') mClock = null;
+    else if (mClock === null) mClock = 0;
+    else if (running() && !paused) mClock += hdt * (state === 'entry' ? (ent.w ?? 1) : 1);
+    const t = mClock ?? 0, hh = Math.floor(t / 3600), mm = Math.floor(t / 60) % 60, ss = Math.floor(t) % 60, p2 = n => String(n).padStart(2, '0');
+    $('lndClockP').textContent = 'T+'; $('lndClock').textContent = `${p2(hh)}:${p2(mm)}:${p2(ss)}`; $('lndClock').classList.toggle('dim', mClock === null);
+  }
+  // Timeline: the descent's events along one line (screen positions, not to time), a faint altitude trace above it,
+  // and a marker riding along. Deorbit and the flip can be clicked (begin / skip to the flip).
+  const TL = [
+    { k: 'deorbit', x: 0.06, l: 'Deorbit', go: () => { if (state === 'orbit') goBtn.click(); } },
+    { k: 'entry', x: 0.17, l: 'Entry' },
+    { k: 'peak', x: 0.37, l: 'Peak heating' },
+    { k: 'belly', x: 0.56, l: 'Belly flop' },
+    { k: 'flip', x: 0.70, l: 'Flip', go: () => skipToFlip() },
+    { k: 'burn', x: 0.76, l: 'Landing burn' },
+    { k: 'td', x: 0.97, l: 'Touchdown' },
+  ];
+  const tlDots = $('lndTlDots');
+  TL.forEach((e, i) => { const d = document.createElement(e.go ? 'button' : 'span'); d.className = 'tl-dot' + (i % 2 ? ' lo' : ''); d.style.left = (e.x * 100) + '%';
+    d.innerHTML = `<i></i><em>${e.l}</em>`; if (e.go) { d.onclick = e.go; d.title = e.k === 'flip' ? 'Skip to the flip (B)' : 'Begin descent (Space)'; } e.el = d; tlDots.appendChild(d); });
+  { // altitude trace (log scale, 100 m … 200 km) over the same screen positions
+    const H = x => x < 0.17 ? 200e3 : x < 0.56 ? 200e3 * Math.pow(8e3 / 200e3, Math.pow((x - 0.17) / 0.39, 0.7)) : x < 0.70 ? lerp(8e3, FLIP_H, (x - 0.56) / 0.14) : x < 0.76 ? lerp(FLIP_H, 2.9e3, (x - 0.7) / 0.06) : x < 0.97 ? 2.9e3 * Math.pow(1 - (x - 0.76) / 0.21, 1.6) + 1 : 1;
+    let d = ''; for (let i = 0; i <= 200; i++) { const x = i / 200, y = 38 - 34 * clamp(Math.log10(Math.max(H(x), 100) / 100) / Math.log10(2000), 0, 1); d += (i ? 'L' : 'M') + (x * 1000).toFixed(1) + ' ' + y.toFixed(1); }
+    $('lndTlTrace').setAttribute('d', d); }
+  let tvcH0 = 0;
+  function tlStep(s) {
+    let x = 0.02;
+    if (state === 'deorbit') x = lerp(0.06, 0.17, clamp(et / L.ENTRY.deorbit, 0, 1));
+    else if (state === 'entry') x = lerp(0.17, 0.56, ent.u ?? 0);
+    else if (state === 'flight') {
+      if (s.phase === 'belly') { x = lerp(0.56, 0.70, clamp((L.H_START - s.h) / (L.H_START - FLIP_H), 0, 1)); tvcH0 = 0; }
+      else if (s.phase === 'flip') { x = lerp(0.70, 0.76, clamp((s.t - s.tPh) / 5, 0, 1)); tvcH0 = 0; }
+      else { if (!tvcH0) tvcH0 = Math.max(1, s.h); x = lerp(0.76, 0.97, clamp(1 - s.h / tvcH0, 0, 1)); }
+    } else if (state !== 'orbit') x = state === 'falling' || state === 'tipping' ? 0.9 : 0.97;
+    $('lndTlNow').style.left = (x * 100) + '%'; $('lndTlFill').style.width = (x * 100) + '%';
+    let next = null;
+    TL.forEach(e => { const done = x >= e.x - 0.002; e.el.classList.toggle('done', done); e.el.classList.remove('next'); if (!done && !next) next = e; });
+    if (next && state !== 'orbit') next.el.classList.add('next');
+    TL.forEach(e => { if (e.go) e.el.disabled = e.k === 'deorbit' ? state !== 'orbit' : false; });
+  }
   function hud() {
     const s = flight.s, orb = inOrbit();
     const alt = orb ? ent.h : state === 'landed' || state === 'crashed' ? 0 : Math.max(0, s.h - groundUnder());
@@ -2560,15 +2628,28 @@ export async function initLanding(step) {
     $('lndAltU').textContent = alt >= 1000 ? 'km' : 'm';
     const flying = state === 'flight' || state === 'falling';
     const vs = orb ? (state === 'entry' ? -ent.v * Math.sin((4 + 36 * ent.u) * DEG) : 0) : flying ? s.vh : 0;
-    $('lndVs').textContent = vs.toFixed(1);
+    $('lndVs').textContent = Math.abs(vs).toFixed(1); $('lndVsArrow').textContent = vs < -0.05 ? '↓' : vs > 0.05 ? '↑' : '·';
     const spd = orb ? ent.v : flying ? Math.hypot(s.vx, s.vh, s.vz) : 0;
     if (blackout) $('lndVs').textContent = '—';
     $('lndSpd').textContent = blackout ? '—' : (spd * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 });
     const thr = orb ? (state === 'deorbit' ? vacLevel(et).reduce((x, y) => x + y) / 3 : 0) : curThr();
     $('lndThr').style.width = `${clamp(thr, 0, 1) * 100}%`;
     $('lndThrV').textContent = `${Math.round(clamp(thr, 0, 1) * 100)}%`;
-    { const fs = flight.s, n = state === 'landed' && land ? Math.max(0, landPlume().n) : state === 'flight' ? (fs.phase === 'tvc' ? fs.eng : fs.phase === 'flip' ? 3 : 0) : state === 'falling' || state === 'tipping' ? Math.max(0, fallPlume().n) : 0;   // engines lit, webcast style
-      engDots.forEach((d, i) => d.classList.toggle('on', i < n)); }
+    { const fs = flight.s, n = state === 'landed' && land ? Math.max(0, landPlume().n) : state === 'flight' ? (fs.phase === 'tvc' ? fs.eng : fs.phase === 'flip' ? 3 : 0) : state === 'falling' || state === 'tipping' ? Math.max(0, fallPlume().n) : 0;
+      const vac = state === 'deorbit' ? vacLevel(et) : [0, 0, 0];   // the three vacuum engines: the deorbit burn
+      engDots.forEach((d, i) => d.classList.toggle('on', i < 3 ? i < n : vac[i - 3] > 0.05));
+      $('lndEngN').textContent = `${Math.min(n, 3) + vac.filter(x => x > 0.05).length} / 6`; }
+    // Mach (Mars air, ~240 m/s) and the felt G (what the crew would feel: acceleration minus gravity; 0 in orbit)
+    { const now = performance.now(), hdt = Math.min(0.5, Math.max(1e-3, (now - hudT) / 1000)); hudT = now;
+      let a = 0;
+      if (orb) { const v = state === 'entry' ? ent.v : L.ENTRY.v0; a = state === 'entry' ? Math.abs(v - hudV) / hdt / Math.max(1, ent.w ?? 1) : state === 'deorbit' ? thr * 0.6 : 0; hudV = v; }
+      else if (flying) { const ax = (s.vx - hudVx) / hdt, ay = (s.vh - hudV) / hdt + L.G, az = (s.vz - hudVz) / hdt; a = Math.hypot(ax, ay, az); hudV = s.vh; hudVx = s.vx; hudVz = s.vz; }
+      else if (state === 'landed') a = L.G;
+      gS += (a / 9.81 - gS) * Math.min(1, hdt * 3);
+      const hi = orb && alt > 60e3;
+      $('lndMach').textContent = blackout || hi ? 'Mach —' : 'Mach ' + (spd / 240).toFixed(spd / 240 >= 10 ? 0 : 1);
+      $('lndG').textContent = gS.toFixed(2) + ' G'; }
+    $('lndTtgW').hidden = !(state === 'flight' && s.phase === 'tvc');
     $('lndLegs').classList.toggle('on', state !== 'orbit' && state !== 'deorbit' && state !== 'entry' && legT >= LEGS_DONE);
     const dp = orb ? null : flight.drift;
     $('lndDrift').textContent = dp === null ? '—' : dp >= 1000 ? (dp / 1000).toFixed(2) + ' km' : dp.toFixed(0) + ' m';
@@ -2582,17 +2663,10 @@ export async function initLanding(step) {
       : state === 'falling' ? 'LOSS OF CONTROL' : state === 'tipping' ? 'TIPPING OVER'
       : outcome?.title ?? '';
     $('lndPhase').classList.toggle('warn', blackout || lost || state === 'falling' || state === 'tipping' || (endState === 'crashed'));
-    const ki = PH.indexOf(phaseKey());
-    document.querySelectorAll('#lndChips span').forEach((c, i) => { c.classList.toggle('on', i === ki); c.classList.toggle('done', ki > i); });
-    // Attitude dial: the TVC's tilt and nozzle (its own, without the autopilot's lean)
+    clockStep(s, orb);
+    tlStep(s);
+    // TVC readouts beside the sphere: the TVC's own tilt and nozzle (without the autopilot's lean)
     const a = dev, tvcOn = state === 'flight' && s.phase === 'tvc' || state === 'falling' || (ended() && td);
-    const px = clamp(a.tiltY, -30, 30) * R_PER_DEG, py = -clamp(a.tiltX, -30, 30) * R_PER_DEG;
-    $('lndTiltDot').setAttribute('cx', px); $('lndTiltDot').setAttribute('cy', py);
-    $('lndTiltVec').setAttribute('x2', px); $('lndTiltVec').setAttribute('y2', py);
-    $('lndGimDot').setAttribute('cx', a.gy * 5); $('lndGimDot').setAttribute('cy', -a.gx * 5);
-    $('lndGimVec').setAttribute('x2', a.gy * 5); $('lndGimVec').setAttribute('y2', -a.gx * 5);
-    if (state === 'flight' && s.phase === 'tvc' && !paused) { trail.push([px, py]); if (trail.length > 45) trail.shift(); }
-    $('lndTrail').setAttribute('points', trail.map(q => q.join(',')).join(' '));
     if (!tvcOn) {
       const pitch = orb ? ((curPitch % 360) + 360) % 360 : s.tilt;
       $('lndTiltL').textContent = 'Pitch'; $('lndTilt').textContent = pitch.toFixed(0) + '°'; $('lndTilt').className = '';
@@ -2606,10 +2680,13 @@ export async function initLanding(step) {
     const live = rigLive(), src = $('lndSource');
     src.classList.toggle('live', source === 'rig' && live); src.classList.toggle('sim', source === 'sim');
     $('lndSrcTitle').textContent = source === 'sim' ? 'SIMULATED TVC' : live ? (rig?.demo ? 'RIG · BENCH DEMO FEED' : 'RIG · LIVE') : 'RIG · NO DATA';
+    const attEl = $('lndAtt'); attEl.classList.toggle('live', source === 'rig' && live); attEl.classList.toggle('sim', source === 'sim'); attEl.classList.toggle('nodata', source === 'rig' && !live);
+    $('lndAttSrc').textContent = source === 'sim' ? (att.tvc ? 'TVC · Nano · sim' : 'TVC · off') : live ? (rig?.demo ? 'TVC · rig · demo feed' : 'TVC · rig · live') : 'TVC · rig · no data';
     $('lndSrcSub').innerHTML = source === 'sim'
       ? (att.tvc ? 'Autopilot through the flip, then the Nano’s controller holds it to touchdown. <b>Gust</b> (G) shoves it.' : 'TVC is <b>off</b>: after the flip nothing holds it upright.')
       : live ? 'Autopilot through the flip, then the ship follows the real rocket. <b>Push it</b> and watch the TVC fight back.'
-      : 'Connect the Arduino (top bar) or switch to <b>Simulated</b>.';
+      : 'Connect the Arduino (top bar) or switch to <b>Sim</b>.';
+    $('lndHelp').title = $('lndSrcTitle').textContent + ' — ' + $('lndSrcSub').textContent + '\nKeys: Space play · B skip to flip · G gust · I link · H clean feed';
     if (state === 'orbit') goBtn.disabled = source === 'rig' && !live;
   }
 
@@ -2814,7 +2891,8 @@ export async function initLanding(step) {
       groundSky.visible = !valley; cloudMeshes.forEach(([m]) => { m.visible = !valley; });   // the tiled cloud layers read as a pattern from above
       applyLook(dt);
       post.setMode(true, valley ? vCam : null);
-      if (!(warmed && window.tvcCovered?.())) { post.render(dt); warmed = true; }
+      const insOnO = rigLinkStep(paused ? 0 : dt);
+      if (!(warmed && window.tvcCovered?.())) { post.render(dt); if (insOnO) renderInset(); warmed = true; }
     } else {
       acc += sdt;
       while (acc >= L.DT) { acc -= L.DT; simStep(); }
