@@ -1443,6 +1443,13 @@ export async function initLanding(step) {
   $('lndSkip').onclick = skipToFlip;
   const CAMS = ['auto', 'chase', 'pad', 'free'];
   let camMode = 'auto';
+  // The TVC link inset (your rocket's tilt and nozzle): a toggle, remembered on this computer
+  let linkOn = true; try { linkOn = localStorage.getItem('tvc-landing-link') !== 'off'; } catch {}
+  const linkBtn = $('lndLink');
+  const setLink = on => { linkOn = on; try { localStorage.setItem('tvc-landing-link', on ? 'on' : 'off'); } catch {}
+    linkBtn.querySelector('.lbl').textContent = on ? 'Link: On' : 'Link: Off'; linkBtn.classList.toggle('on', on); };
+  linkBtn.onclick = () => setLink(!linkOn); setLink(linkOn);
+  addEventListener('keydown', e => { if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey && document.body.dataset.tab === 'landing' && !e.target.closest?.('input, select, textarea')) setLink(!linkOn); });
   camBtn.onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % CAMS.length]; controls.enabled = camMode === 'free'; if (camMode === 'free') controls.target.copy(ship.position); refresh(); };
   addEventListener('keydown', e => {
     if (document.body.dataset.tab !== 'landing' || e.target.closest('input, select, textarea')) return;
@@ -1538,8 +1545,8 @@ export async function initLanding(step) {
   function handover() {
     if (trimN) { trim.x /= trimN; trim.y /= trimN; }
     att.reset();
-    gustPlan = source === 'sim' ? [3, 7, 13].map(t => ({ t: t + rnd(-0.6, 0.6), dir: rnd(0, 360) })) : [];
-    promptPlan = source === 'rig' ? [3, 12.5].map(t => ({ t })) : [];   // in the 3-engine burn, and in the 1-engine settle
+    gustPlan = source === 'sim' ? [4, 10, 17].map(t => ({ t: t + rnd(-0.6, 0.6), dir: rnd(0, 360) })) : [];
+    promptPlan = source === 'rig' ? [4, 20].map(t => ({ t })) : [];   // in the divert, and in the 1-engine settle
     callout(source === 'rig' ? 'TVC CONTROL · <b>RIG ACTIVE</b>' : 'TVC CONTROL · SIMULATED', 2400);
     setStrip('<b>TVC on</b>', 2000, 'tvcon');
   }
@@ -2063,7 +2070,7 @@ export async function initLanding(step) {
         if (tBreak === null && s.h < DECK.base + 150) { tBreak = s.t; deckHole(ship.position.x, ship.position.z); }
         // Skirt cam first (after the Flight 15 onboard view): white inside the deck, the valley opening below as it breaks
         // out, vapour tearing off the flap; then the ground tracking camera finds it and holds it to the flip
-        return tBreak === null || s.t < tBreak + 3.4 ? 'skirt' : 'track';
+        return tBreak === null || s.t < tBreak + 2.2 ? 'skirt' : 'track';
       }
       if (s.phase === 'flip') return 'flip';   // one side profile through the whole flip
       // TVC landing, four held shots: the engine bay at the handover, the ground long lens from the sun side (the gusts play
@@ -2089,7 +2096,11 @@ export async function initLanding(step) {
         _co.set(-30 - 30 * k, 4 + 10 * k, -170); _lo.copy(_up.set(0, 1, 0).applyQuaternion(ship.quaternion)).multiplyScalar(4); break;
       }
       case 'flipLow': _co.set(-80, -18, -70); _lo.set(0, -6, 0); break;   // low aft, looking up past the exhaust at the gimballing bells
-      default: {   // chase: from above, the pad below; lower as it nears the ground
+      default: {   // chase
+        if (state !== 'flight' || flight.s.phase !== 'belly') {   // from the flip: square on to the rocket and its TVC, level, off the sun side
+          _co.set(0, -6, -120); _lo.set(0, 0, 0); break;           // (across the line of travel: the flip and the lean read in profile)
+        }
+        // the belly flop: from above, the pad below
         const k = sstep(40, 900, h), az = Math.atan2(SUN.z, SUN.x) + 0.5 * Math.sin(orbitA), el = lerp(16, 50, k) * DEG, R = lerp(110, 170, k);
         _co.set(R * Math.cos(el) * Math.cos(az), R * Math.sin(el), R * Math.cos(el) * Math.sin(az));
         _lo.set(0, -6 - 0.03 * k * Math.min(h, 600), 0);
@@ -2246,7 +2257,7 @@ export async function initLanding(step) {
     if (name === 'siteT' || name === 'siteW' || name === 'tele') {   // fixed cameras (SpaceX webcast style): only the aim pans, eased
       const C = TVC_CAM[name];
       camera.position.set(C.x, heightAt(C.x, C.z) + C.h, C.z);
-      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan(C.fov * DEG / 2);
+      const frameH = 2 * camera.position.distanceTo(sp) * Math.tan((name === 'tele' && teleFov ? teleFov : C.fov) * DEG / 2);
       _lo.copy(sp).y -= C.drop * frameH;                                          // ship above the HUD
       if (C.padK != null) {   // wide: a held composition, the pad PADK of the frame height below centre; tilts up only if the ship would leave the top
         const hd = Math.hypot(camera.position.x, camera.position.z), gp = heightAt(0, 0), half = C.fov / 2;
@@ -2313,7 +2324,11 @@ export async function initLanding(step) {
     if (sh > 0.001) camera.position.add(_co.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(sh * 0.6));
     if (!paused) shake *= Math.exp(-dt * 2.5);
     const fov = name === 'pad' ? 44 : name === 'flaps' || name === 'close' || name === 'top' ? 52 : name === 'side' ? 20 : name === 'flip' ? 34 : name === 'flipLow' ? 42 : name in TVC_CAM && TVC_CAM[name].fov ? TVC_CAM[name].fov : 40;
-    const fz = name === 'siteT' || name === 'siteW' || name === 'tele' ? fov * opZoom() : fov;
+    if (name === 'tele') {   // one long hold through the divert: the operator rides the zoom, keeping the ship ~1/8 of the frame
+      const want = clamp(2 * Math.atan(200 / camera.position.distanceTo(sp)) / DEG, 8, TVC_CAM.tele.fov);
+      teleFov = teleFov === 0 ? want : teleFov + (want - teleFov) * (1 - Math.exp(-dt * 1.5));
+    } else teleFov = 0;
+    const fz = name === 'tele' ? teleFov * opZoom() : name === 'siteT' || name === 'siteW' ? fov * opZoom() : fov;
     if (Math.abs(camera.fov - fz) > 1e-3) setFov(fz);
   }
   // TVC landing shots after the Starship Flight 15 webcast: a far site camera (~250 m up, ~3 km out, off to the side of
@@ -2333,7 +2348,7 @@ export async function initLanding(step) {
   outpost.addCamProps([[PAD_CAM.x, PAD_CAM.z, PAD_CAM.y, 'pole'], [PAD_CAM.x, -PAD_CAM.z, PAD_CAM.y, 'pole'], [TVC_CAM.tele.x, TVC_CAM.tele.z, TVC_CAM.tele.h, 'tripod'], [TVC_CAM.siteT.x, TVC_CAM.siteT.z, TVC_CAM.siteT.h, 'hut']]);
   const planCams = { pad: [[PAD_CAM.x, PAD_CAM.z], [PAD_CAM.x, -PAD_CAM.z]], site: [TVC_CAM.siteT.x, TVC_CAM.siteT.z] }, planBad = checkPlan(outpost.objs, planCams);
   planBad.forEach(([o, why]) => console.warn(`Base plan: ${o.name} ${why}`));
-  const overP = new THREE.Vector3(), _pc = new THREE.Vector3(), siteAim = new THREE.Vector3(), siteGoal = new THREE.Vector3(), siteVel = new THREE.Vector3(); let opT0 = 0, reC = false;
+  const overP = new THREE.Vector3(), _pc = new THREE.Vector3(), siteAim = new THREE.Vector3(), siteGoal = new THREE.Vector3(), siteVel = new THREE.Vector3(); let opT0 = 0, reC = false, teleFov = 0;
   const opZoom = () => { const t = simClock - opT0; return (1 + 0.6 * Math.exp(-t * 2.6) * Math.cos(t * 3.2)) * (1 - 0.08 * sstep(0, 12, t)); };   // finding the ship, then the slow push-in
 
 
@@ -2520,6 +2535,7 @@ export async function initLanding(step) {
   function rigLinkStep(dt) {
     const counting = stripStep();
     tagStep();
+    if (!linkOn) { insEl.hidden = true; return false; }
     return insetStep(counting);
   }
 

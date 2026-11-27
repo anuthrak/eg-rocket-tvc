@@ -53,7 +53,8 @@ export const PLAN = {
   cables: [[[-50, 419], [200, 260], [440, 150]], [[-640, 470], [-500, 560], [-250, 470], [-147, 470]]],
   racks: [[[95, -320], [40, -120], [28, -40]], [[80, -340], [-120, -250], [-262, -150]]],   // pipe racks: plant → LZ-1, plant → LZ-2
   lowCams: [[-82, 98], [-82, -98], [-330, 60]],   // the pad cams and the tele cam (landing.js PAD_CAM, TVC_CAM.tele): LZ-1's berm is open toward them
-  // Keep-outs. The TVC phase starts within ~170 m of LZ-1 at ~1.9 km and is within 60 m of it below 1 km (landing-sim):
+  // Keep-outs. The TVC phase starts ~680 m west of LZ-1 at ~3 km (the divert, landing-sim DIV), comes in high over LZ-2/3,
+  // and is within ~200 m of LZ-1 below ~400 m:
   // a cone over the pad. Wedges: nothing tall straight behind the pad as the pad cams (±10°) and site cameras (±4°) see it.
   keep: { cone: { r: 200, maxH: 10, slope: 0.5 }, wedge: { deg: 10, siteDeg: 4, len: 1500, maxH: 8 } },
 };

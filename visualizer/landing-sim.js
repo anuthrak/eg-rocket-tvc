@@ -49,13 +49,16 @@ export const ENTRY = { deorbit: 10.4, entry: 20.0, warp: 30, h0: 200e3, h1: 12e3
 // or right of the pad line (z); the flaps bank it toward the pad (BELLY), the flip and burn carry it the rest of the way
 // with one small overshoot (LAT).
 export const DIVERT = 350;
+// The divert: the belly flop and flip stop DIV.x m short of the pad along track (west of it), and the landing burn starts
+// DIV.hExtra m higher than it needs to, so the TVC phase has the height and time to lean the ship across to the pad
+export const DIV = { x: 600, hExtra: 1200, aB: 4, vMax: 70 };
 export const BELLY = { aim: 0, kp: 0.01, kd: 0.1, bankMax: 25, lift: 1.0 };   // flap bank (deg) → side force = drag·lift·sin(bank)
 // Starship scale: the TVC source (the 45 cm desk rocket, or its simulation) moves ~10× faster than a 50 m ship could.
 // The big ship follows it as a heavy body: the lean target holds the peak and lets go over `release` s, then a damped
 // 2nd-order follow with turn rate/acceleration caps (about what its gimbal can do). The raw source still drives the
 // abort, the tracker, the HUD and the inset; the big ship's attitude drives the thrust, so a push moves it off course.
 export const HEAVY = { release: 0.8, wn: 3, zeta: 0.85, vMax: 12, aMax: 28, gTau: 0.25, gRate: 30 };
-export const ENG3 = { to2: 0.72, to1: 0.31, h1: 100, hold: 0.3 };   // shut one engine below these 3-engine throttle fractions (to1 only below h1 m)
+export const ENG3 = { to2: 0.62, to1: 0.31, h1: 100, h2: 1200, hold: 0.3, gap: 3 };   // all three engines for the divert (above h2 m)   // shut one engine below these 3-engine throttle fractions (to1 only below h1 m)
 export const LAT = { kFlip: 0.05, kp: 0.2, kd: 0.8, amax: 8, over: 30, hA: 900, hB: 500, hC: 320, hD: 170 };
 // TVC phase: sideways accel = -kd·v - kp·(z - aim), clamped to amax (m/s²). The aim swings `over` m past the pad
 // between hA→hB and back by hC→hD (smoothstep ramps), so the ship overshoots once and comes back while it's still high.
@@ -74,7 +77,7 @@ export function createFlight(x0 = 0, z0 = 0) {
   const T_FLIP = 4.5, MARGIN = 0.95, side = Math.sign(z0);
   const ss = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   const latAim = h => -side * LAT.over * ss(LAT.hA, LAT.hB, h) * ss(LAT.hD, LAT.hC, h);
-  let aRef = 16, engT = 0;
+  let aRef = 16, engT = 0, engCool = 0;
   const hv = { ex: 0, ey: 0, vx: 0, vy: 0 };
   function heavyStep(u) {
     const H = HEAVY, b = s.big, um = Math.hypot(u.tiltX, u.tiltY), em = Math.hypot(hv.ex, hv.ey);
@@ -129,7 +132,7 @@ export function createFlight(x0 = 0, z0 = 0) {
       const zt = side * BELLY.aim, aW = -BELLY.kd * s.vz - BELLY.kp * (s.z - zt), aMax = drag / s.m * BELLY.lift;
       tgtX = clamp(Math.asin(clamp(aW / Math.max(aMax, 1e-3), -1, 1)) / DEG, -BELLY.bankMax, BELLY.bankMax);
       s.flap = clamp((84 - s.cmd.y) * 0.07 - s.cmd.wy * 0.035, -1, 1);
-      if (s.h <= stopH()) { s.phase = 'flip'; s.tPh = s.t; }
+      if (s.h <= stopH() + DIV.hExtra) { s.phase = 'flip'; s.tPh = s.t; }
     } else {
       // Guidance. Flip: a suicide burn (constant deceleration to the ground). TVC phase: follow a speed profile that
       // brakes hard high up and eases off near the ground (1.5 m/s at touchdown), steering over the pad.
@@ -139,7 +142,10 @@ export function createFlight(x0 = 0, z0 = 0) {
       else aH = G + aProfile(hh) + clamp((vProfile(hh) - s.vh) * 2.5, -6, 20);   // feed-forward + speed error
       aH = clamp(aH, 0, 40);
       const tv = s.phase === 'tvc';
-      const aX = tv ? clamp(-LAT.kd * s.vx - LAT.kp * s.x, -LAT.amax, LAT.amax) : clamp(-0.32 * s.vx - 0.022 * s.x, -9, 9);   // TVC: same loop along track
+      // Along track in the TVC phase: fly toward the pad at a speed it can still brake from (DIV.aB), capped at DIV.vMax;
+      // close in, the same PD as across track
+      const vDes = -Math.sign(s.x) * Math.min(DIV.vMax, Math.sqrt(2 * DIV.aB * Math.abs(s.x)), LAT.kp / LAT.kd * Math.abs(s.x));
+      const aX = tv ? clamp(LAT.kd * (vDes - s.vx), -LAT.amax, LAT.amax) : clamp(-0.32 * s.vx - 0.022 * (s.x + DIV.x), -9, 9);   // TVC: same loop along track (the flip holds the divert point)
       const aZ = tv ? clamp(-LAT.kd * s.vz - LAT.kp * (s.z - latAim(hh)), -LAT.amax, LAT.amax) : clamp(-0.2 * s.vz - LAT.kFlip * s.z, -9, 9);
       const lim = s.phase !== 'tvc' ? 25 : hh < 25 ? 4 : hh < 150 ? 15 : 25;    // near the ground: stand up straight
       tgtY = clamp(Math.atan2(aX, aH) / DEG, -lim, lim);
@@ -155,9 +161,10 @@ export function createFlight(x0 = 0, z0 = 0) {
         }
       } else {
         // 3 → 2 → 1 engines as the burn eases (Flight 13 did the same); relights one if it needs more than it has
-        engT = need < (s.eng === 3 ? ENG3.to2 : s.eng === 2 && hh < ENG3.h1 ? ENG3.to1 : -1) ? engT + DT : 0;
-        if (engT > ENG3.hold && s.eng > 1) { s.eng--; engT = 0; }
-        if (need > s.eng / 3 * 0.97 && s.eng < 3) s.eng++;
+        engT = need < (s.eng === 3 ? (hh < ENG3.h2 ? ENG3.to2 : -1) : s.eng === 2 && hh < ENG3.h1 ? ENG3.to1 : -1) ? engT + DT : 0;
+        engCool -= DT;   // no engine change within ENG3.gap s of the last (no hunting between 2 and 3 in the divert)
+        if (engT > ENG3.hold && s.eng > 1 && engCool <= 0) { s.eng--; engT = 0; engCool = ENG3.gap; }
+        if (need > s.eng / 3 * 0.97 && s.eng < 3 && (engCool <= 0 || need > s.eng / 3 * 1.1)) { s.eng++; engCool = ENG3.gap; }
         s.thr = clamp(need, 0.05, s.eng / 3);   // fraction of three engines; one engine throttled low can hover the light ship
         alphaMax = 14;
       }
@@ -194,7 +201,7 @@ function runFrom(x0, z0 = 0) {   // to the start of the TVC phase, with no TVC i
 // the TVC loop then only trims (aiming at the landing point instead let the strong loop hide a 400 m along-track swing)
 export function flightStart() {
   let x0 = 0;
-  for (let i = 0; i < 10; i++) { const s = runFrom(x0, DIVERT).s; x0 -= 0.9 * (s.x + 2.0 * s.vx); }   // coast-to-stop point over the pad
+  for (let i = 0; i < 10; i++) { const s = runFrom(x0, DIVERT).s; x0 -= 0.9 * (s.x + 2.0 * s.vx + DIV.x); }   // coast-to-stop point DIV.x short of the pad
   return { x0 };   // the same x0 serves both sides (mirror image in z)
 }
 

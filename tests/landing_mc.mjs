@@ -1,6 +1,6 @@
 // Landing Monte Carlo (side approach): Simulated source, TVC on, 3 random gusts (GT=t1,t2,t3), random side. node tests/landing_mc.mjs [N] [kd]
-const L = await import('../visualizer/landing-sim.js');
-const GUSTS_T = (process.env.GT || "3,7,13").split(",").map(Number);   // gust times into the TVC phase (s)
+const L = await import(process.env.SIM || '../visualizer/landing-sim.js');
+const GUSTS_T = (process.env.GT || "4,10,17").split(",").map(Number);   // gust times into the TVC phase (s)
 if (process.argv[3]) L.LAT.kd = +process.argv[3]; const N = +process.argv[2] || 200, rnd = (a, b) => a + Math.random() * (b - a);
 const { x0 } = L.flightStart();
 let crash = 0, offPad = 0, lost = 0, maxMiss = 0, maxDev = 0, maxTD = 0, sumMiss = 0;
