@@ -1390,7 +1390,7 @@ export async function initLanding(step) {
   let outcome = null, legK = 0, legT = 0, legEv = 0, land = null, trim = { x: 0, y: 0 }, trimN = 0, td = null, lost = false;
   let calls = {};                    // callouts already shown this run
   // Hero ending (finish): drone orbit after the landing (or round the wreck), the end card over it
-  const HERO = { dur: 11, durWreck: 8, r: [200, 160], h: [34, 52], spd: 6, rW: 90, hW: 20, spdW: 3.5, fov: 38 };
+  const HERO = { dur: 14, durWreck: 9, r: [200, 175], h: [34, 46], spd: 2.4, rW: 90, hW: 20, spdW: 1.6, fov: 38 };   // slow drone orbit: ~34° over the landed hold
   const hero = { on: false, card: true, at: 1e9, cardAt: 1e9, how: '', a0: 0, t0: 0, c: new THREE.Vector3() };
   const START = L.flightStart();
   let apSide = 1;   // which side of the pad the ship comes in from (+1/-1, random each run)
