@@ -30,7 +30,15 @@ const START_PCT = 5;
 const REST_MIN = 2;            // °: less than this and the rocket isn't resting on a lean (balanced, or upright)
 const MOVE_DEG = 2.5, FIRST_DEG = 0.3, HITS = 5;   // lift-off: 2.5° off the stop for 5 samples (100 ms), so motor shake and settling on the stop don't count
 const MOVED_MAX = 9, RATE_MAX = 90;   // the Nano cuts at 12° from rest by itself
-const LEVER_MM = 190;          // rig pivot (247 mm from the tail, SLDP-GS-001) to TVC gimbal point (57 mm)
+const LEVER_MM = 190;          // fallback: pivot 247 mm from the tail (old fixed pivot) to the TVC gimbal point (57 mm)
+const GIMBAL_MM = 57;          // TVC gimbal point, mm from the tail
+// GS-001 collar: the pivot moves along the body. Its height (+x post scale, mm from the tail) is entered once, in
+// Stability → Rocket numbers → Pivot now, and the lever arm follows from it. Each run keeps the lever it used.
+export function leverNow() {
+  const pv = load('tvc-stability-options', {})?.pivot;
+  return Number.isFinite(pv) ? { mm: pv - GIMBAL_MM, pivot: pv } : { mm: LEVER_MM, pivot: null };
+}
+const leverOf = run => run?.lever ?? LEVER_MM;
 const MASS_G = 598;            // PROJECT_SUMMARY §5 estimate
 const SPEC_G = 220;            // QX 30 mm EDF at full throttle
 const KEY_CUR = 'tvc-breakaway-current', KEY_HIST = 'tvc-breakaway-history', KEY_OPT = 'tvc-breakaway-options', HIST_MAX = 20;
@@ -113,19 +121,19 @@ export function onset(samples, endIdx) {
 }
 
 // ---------- One gimbal angle's numbers ----------
-export function analyse(ang, model = thrustModel()) {
+export function analyse(ang, model = thrustModel(), lever = LEVER_MM) {
   const ok = ang.trials.filter(t => t.brk != null);
   const brk = median(ok.map(t => t.brk)), first = median(ok.filter(t => t.first != null).map(t => t.first));
   const spread = ok.length > 1 ? Math.max(...ok.map(t => t.brk)) - Math.min(...ok.map(t => t.brk)) : null;
   const at = first ?? brk;                       // torque from where it starts moving (lift-off is a little later)
   const g = at != null ? model.g(at) : null;
   const side = g != null ? g * Math.sin(rad(ang.deg)) : null;
-  const torque = side != null ? side * LEVER_MM : null;
+  const torque = side != null ? side * lever : null;
   const rest = median(ang.trials.map(t => t.restDeg).filter(v => v != null));
   return { brk, first, spread, g, side, torque, rest, n: ang.trials.length, nOk: ok.length };
 }
 export function overall(run, model = thrustModel()) {
-  const res = run.angles.map(a => analyse(a, model));
+  const res = run.angles.map(a => analyse(a, model, leverOf(run)));
   const tq = res.map(r => r.torque).filter(v => v != null);
   const torque = median(tq);
   const t0 = run.angles.flatMap(a => a.trials)[0];
@@ -144,7 +152,7 @@ function csv(run) {
   const rows = ['gimbal_deg,trial,rest_lean_deg,rest_dir_deg,starts_moving_pct,liftoff_pct,thrust_g,side_force_g,torque_gmm,noise_deg,threshold_deg,max_pct,ramp_pct_s,thrust_source'];
   run.angles.forEach(a => a.trials.forEach((t, i) => {
     const at = t.first ?? t.brk, g = at != null ? model.g(at) : null, side = g != null ? g * Math.sin(rad(a.deg)) : null;
-    rows.push([a.deg, i + 1, f(t.restDeg, 2), f(t.restDir, 0), f(t.first, 1), t.brk == null ? 'none' : f(t.brk, 1), f(g, 1), f(side, 1), f(side != null ? side * LEVER_MM : null, 0),
+    rows.push([a.deg, i + 1, f(t.restDeg, 2), f(t.restDir, 0), f(t.first, 1), t.brk == null ? 'none' : f(t.brk, 1), f(g, 1), f(side, 1), f(side != null ? side * leverOf(run) : null, 0),
       f(t.noise, 3), f(t.thresh, 2), run.max, run.ramp, o.src].join(','));
   }));
   return rows.join('\n') + '\n';
@@ -159,7 +167,7 @@ function samplesCsv(run) {
 }
 function summary(run) {
   const o = overall(run);
-  const lines = [`CT-5 breakaway, ${stamp(run.t)}`, `Firmware v${run.fw} · ramp ${run.ramp} %/s up to ${run.max} % · ${run.reps} repeat${run.reps > 1 ? 's' : ''} · thrust from ${o.src === 'scale' ? 'the scale step test' : 'the spec curve (220 g × t²)'}`,
+  const lines = [`CT-5 breakaway, ${stamp(run.t)}`, `Firmware v${run.fw} · ramp ${run.ramp} %/s up to ${run.max} % · ${run.reps} repeat${run.reps > 1 ? 's' : ''} · thrust from ${o.src === 'scale' ? 'the scale step test' : 'the spec curve (220 g × t²)'} · lever ${leverOf(run)} mm${run.pivot != null ? ` (pivot ${run.pivot} mm from the tail)` : ''}`,
     `Rest lean ${f(o.restDeg, 1)}° ${dirName(o.restDir)}`];
   run.angles.forEach((a, i) => {
     const r = o.res[i];
@@ -349,7 +357,8 @@ export function initVector({ send, link }) {
 
   async function sequence() {
     const angles = [...opt.angles].sort((a, b) => b - a);   // biggest first: lifts off soonest
-    work = { id: Date.now(), t: Date.now(), t0: performance.now(), fw: link().fw, max: opt.max, ramp: opt.ramp, reps: opt.reps,
+    const lv = leverNow();
+    work = { id: Date.now(), t: Date.now(), t0: performance.now(), fw: link().fw, max: opt.max, ramp: opt.ramp, reps: opt.reps, lever: lv.mm, pivot: lv.pivot,
              angles: angles.map(deg => ({ deg, trials: [] })) };
     phase = 'arming'; setNote('', false); stepIdx = 0; render();
     want = 0; setGim(0, 0);
@@ -496,7 +505,9 @@ export function initVector({ send, link }) {
     panel.querySelectorAll('[data-rep]').forEach(b => { b.classList.toggle('on', +b.dataset.rep === opt.reps); b.disabled = busy; });
     const per = (REST_MS + AIM_MS + BASE_MS + 1500) / 1000 + (opt.max - START_PCT) / opt.ramp + 2;
     setText('vcPlan', `Gimbal ${[...opt.angles].sort((a, b) => b - a).join('°, ')}° × ${opt.reps} · ${totalSteps()} ramps · up to about ${Math.round(per * totalSteps())} s, much less if it lifts off early.` +
-      (lean ? ` Resting now at ${lean.toFixed(1)}° from upright.` : ''));
+      (lean ? ` Resting now at ${lean.toFixed(1)}° from upright.` : '') +
+      (() => { const lv = leverNow(); return lv.pivot != null ? ` Lever arm ${lv.mm} mm (pivot ${lv.pivot} mm from the tail).`
+        : ` Lever arm ${lv.mm} mm assumed: enter the collar scale reading in Stability → Rocket numbers → Pivot now for the real one.`; })());
     panel.querySelectorAll('#vcCheck input').forEach((c, i) => { c.checked = checks[i]; c.disabled = busy; });
 
     // Run
@@ -537,7 +548,7 @@ export function initVector({ send, link }) {
       : `Lifts off at ${cell(o.res.find(x => x.brk != null).brk, 1)} % with ${r.angles[o.res.findIndex(x => x.brk != null)].deg}° of gimbal.` +
         (o.tqSpread != null && o.tqSpread > 0.35 ? ' The torque differs a lot between angles: the thrust curve may be off (run the Throttle step test on a scale) or the pivot is sticky.' : ''));
     $('vcOverall').className = 'lz-overall' + (none ? ' bad' : r ? ' ok' : '');
-    setText('vcMeta', r ? `${stamp(r.t)} · firmware v${r.fw} · ramp ${r.ramp} %/s to ${r.max} % · thrust from ${o.src === 'scale' ? 'your scale step test' : 'the spec curve (no scale step test yet)'} · lever ${LEVER_MM} mm` : '');
+    setText('vcMeta', r ? `${stamp(r.t)} · firmware v${r.fw} · ramp ${r.ramp} %/s to ${r.max} % · thrust from ${o.src === 'scale' ? 'your scale step test' : 'the spec curve (no scale step test yet)'} · lever ${leverOf(r)} mm${r.pivot != null ? ` (pivot ${r.pivot} mm from the tail)` : ' (assumed)'}` : '');
     $('vcCsv').disabled = $('vcCopy').disabled = !r;
     setText('vcCopy', Date.now() - copied < 1500 ? 'Copied ✓' : 'Copy summary');
     $('vcNew').disabled = busy;
@@ -550,7 +561,7 @@ export function initVector({ send, link }) {
   }
 
   // For the charts (tests.js): finished trials plus the one running now
-  const data = () => ({ run, work, cur, busy: !idle(), opt, thrustModel, pctFor, LEVER_MM });
+  const data = () => ({ run, work, cur, busy: !idle(), opt, thrustModel, pctFor, LEVER_MM: leverOf(work || run) });
   const level = () => (!open ? null : armed && fwAct != null && performance.now() - lastThr < 1000 ? fwAct / 85 : 0);
   return { handle, onLink, isOpen: () => open, close: hide, data, level, refresh: () => open && render() };
 }
