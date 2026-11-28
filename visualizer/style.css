@@ -251,6 +251,19 @@ h2 .h2btn.on { background: var(--text); color: #000; border-color: var(--text); 
 .lz-conv small.ok { color: var(--ok); } .lz-conv small.bad { color: var(--warn); }
 .lz-overall { font: 600 17px var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .lz-overall.ok { color: var(--ok); } .lz-overall.bad { color: var(--warn); }
+/* Stability results: headline, then what to do and why in plain sentence case */
+.st-verdict { display: flex; flex-direction: column; gap: 8px; }
+.st-vhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.st-sure { font: 500 10px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--ok); border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; }
+.st-sure.warn { color: var(--amber); } .st-sure:empty { display: none; }
+.st-vsub { margin: 0; color: var(--muted); font-size: 12.5px; }
+.st-vlist { display: flex; flex-direction: column; gap: 4px; }
+.st-vlist[hidden] { display: none; }
+.st-vlbl { font: 500 10px var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.st-do, .st-why { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+.st-do { color: var(--text); font-size: 13px; }
+.st-do li::marker { color: var(--amber); font-weight: 600; }
+.st-why { color: var(--muted); font-size: 12.5px; }
 .lz-sum, .lz-tab { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .lz-sum th, .lz-sum td, .lz-tab th, .lz-tab td { padding: 4px 6px; border-top: 1px solid var(--line); text-align: right; }
 .lz-sum thead th, .lz-tab thead th { border-top: 0; font: 500 10px var(--label); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }

@@ -10,8 +10,8 @@
 //   rate − rate₀ = −k·∫tilt dt + k·eq·t − c·(tilt − tilt₀) − f·∫sign(rate) dt + offset
 // and cross-checked from the swing peaks (period, amplitude decay: straight line = dry friction, exponential = damping).
 // From k: CG height vs the pivot h = −k·I/(m·g) (I about the pivot), swing period, pull at 5°. From f: the friction
-// torque and the dead band (f/k: how far from eq it can stop). Then the fix for the chosen target (tab slide + nose
-// ballast). The two rig axes cross at one point (SLDP-GS-001), so both should give the same CG height: if they don't,
+// torque and the dead band (f/k: how far from eq it can stop). Then the fix for the chosen target (collar slide +
+// nose ballast). The two rig axes cross at one point (SLDP-GS-001), so both should give the same CG height: if they don't,
 // one is held by friction or something (cables) springs only one axis.
 // Motor off throughout: no ARM, no throttle. Demo mode runs a simulated rig so the test can be tried without the Nano.
 
@@ -26,7 +26,9 @@ const PEAK_RATE = 3;                                           // °/s each way 
 const MOVED_MIN = 2.5;                                         // ° of travel for a release to count as a swing                                           // at a rig stop (±30° hard stops)
 const PAUSE_MS = 1200, STAY_HINT_MS = 5000;
 const KEY_CUR = 'tvc-stability-current', KEY_HIST = 'tvc-stability-history', KEY_OPT = 'tvc-stability-options', HIST_MAX = 20;
-const DEF = { axes: ['X', 'Y'], reps: 2, angle: 10, maxS: 20, target: 0, mass: 598, inertia: 0.017, lever: 385, slide: 5 };
+const DEF = { axes: ['X', 'Y'], reps: 2, angle: 10, maxS: 20, target: 4, mass: 598, inertia: 0.017, lever: 385, pivot: null };
+const TARGETS = [0, 4, 10];                                    // mm nose-heavy; the rig README asks for 3-5
+const PIVOT_MIN = 200, PIVOT_MAX = 270, CG_EST = 222;          // GS-001 collar range and CG estimate, mm from the tail (rig README)
 
 // ---------- Maths ----------
 function solve(A, b) {
@@ -162,9 +164,10 @@ export function analyse(run) {
     const stuck = rs.filter(r => r.stuck);
     const hs = ok.map(r => r.h);
     const plus = ok.filter(r => r.side > 0).map(r => r.settle), minus = ok.filter(r => r.side < 0).map(r => r.settle);
+    const hPlus = median(ok.filter(r => r.side > 0).map(r => r.h)), hMinus = median(ok.filter(r => r.side < 0).map(r => r.h));
     const k = median(ok.map(r => r.k));
     return { axis, n: rs.length, nOk: ok.length, nStuck: stuck.length, stuckMax: stuck.length ? Math.max(...stuck.map(r => Math.abs(r.start))) : null,
-             k, h: median(hs), hSpread: hs.length > 1 ? Math.max(...hs) - Math.min(...hs) : null,
+             k, h: median(hs), hPlus, hMinus, hSpread: hs.length > 1 ? Math.max(...hs) - Math.min(...hs) : null,
              T: median(ok.map(r => r.T)), Tpk: median(ok.map(r => r.Tpk)), zeta: median(ok.map(r => r.zeta)), f: median(ok.map(r => r.f)),
              band: median(ok.map(r => r.band)), fric: median(ok.map(r => r.fricNmm)), pull5: k != null ? k * 5 : null,
              settle: median(ok.map(r => r.settle)), settleGap: plus.length && minus.length ? median(plus) - median(minus) : null,
@@ -195,30 +198,38 @@ export function analyse(run) {
   }
   return { res, axes, best, h, mismatch, stuckAxis, fix: h != null ? fixFor(h, P, run.target) : null };
 }
-// What moves the CG from h to the target (mm above the pivot): slide the pivot tabs (±slide), then nose ballast
+// What moves the CG from h to the target (mm above the pivot): slide the rocket through the GS-001 collar (the pivot
+// moves along the body, 200-270 mm from the tail on the +x post scale), then nose ballast for whatever is left.
+// Runs saved before the collar (P.slide: ± tab travel, no P.pivot) keep their old limit.
 export function fixFor(h, P, target) {
-  const need = target - h;                       // + : the CG must come up relative to the pivot
-  if (Math.abs(need) < 1.5) return { need, slide: 0, grams: 0, ok: true };
-  const s = Math.sign(need) * Math.min(Math.abs(need), P.slide);
+  const need = target - h;                       // + : the CG must come up relative to the pivot (pivot toward the tail)
+  if (Math.abs(need) < 1.5) return { need, slide: 0, grams: 0, ok: true, to: null, end: false };
+  const room = P.pivot != null ? Math.max(0, need > 0 ? P.pivot - PIVOT_MIN : PIVOT_MAX - P.pivot) : P.slide ?? PIVOT_MAX - PIVOT_MIN;
+  const s = Math.sign(need) * Math.min(Math.abs(need), room);
   const rem = need - s;
   const L = P.lever + s - target;                // ballast point above the CG target after the slide
   const grams = Math.abs(rem) > 0.5 && L > 0 ? P.mass * rem / L : 0;
-  return { need, slide: s, grams, ok: false };
+  return { need, slide: s, grams, ok: false, to: P.pivot != null ? P.pivot - s : null, end: Math.abs(rem) > 0.5 };
 }
 
 // ---------- Text ----------
 const f = (v, d = 1) => (v == null || !Number.isFinite(v) ? '' : v.toFixed(d));
 const sgn = (v, d = 1) => (v == null || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`);
 const hText = h => (h == null ? '—' : Math.abs(h) < 1.5 ? 'on the pivot' : `${Math.abs(h).toFixed(0)} mm ${h < 0 ? 'below' : 'above'}`);
-function fixText(fx, target) {
-  if (!fx) return '';
-  if (fx.ok) return `Already within 1.5 mm of the target (${target ? `${target} mm nose-heavy` : 'neutral'}).`;
-  const parts = [];
-  if (Math.abs(fx.slide) >= 0.5) parts.push(`slide both pivot tabs ${Math.abs(fx.slide).toFixed(0)} mm toward the ${fx.slide > 0 ? 'tail' : 'nose'}`);
+const tgtText = t => (t ? `${t} mm nose-heavy` : 'neutral');
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+const pivotText = P => (P.pivot != null ? `pivot at ${P.pivot} mm on the collar scale` : P.slide != null ? `tab slide ±${P.slide} mm` : 'pivot height not entered');
+const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function fixText(fx) {
+  if (!fx || fx.ok) return '';
+  const parts = [], mm = Math.abs(fx.slide);
+  if (mm >= 0.5) parts.push(`loosen the knob and slide the rocket ${mm.toFixed(0)} mm ${fx.slide > 0 ? 'up' : 'down'} through the collar` +
+    (fx.to != null ? ` (pivot to ${fx.to.toFixed(0)} on the scale${fx.end ? ', the end of the collar\'s travel' : ''})` : ` (moves the pivot toward the ${fx.slide > 0 ? 'tail' : 'nose'})`));
   if (fx.grams >= 1) parts.push(`add about ${fx.grams.toFixed(0)} g at the nose`);
   else if (fx.grams <= -1) parts.push(`take about ${(-fx.grams).toFixed(0)} g off the nose (or add it at the tail)`);
-  return parts.length ? parts.join(', then ') + '.' : 'Within the tab slide.';
+  return parts.join(', then ');
 }
+const OIL = ax => `Put a drop of light oil on the ${ax} pivot screw tips and check nothing rubs (stop pegs in their slots, the collar, the cable), then run ${ax} again.`;
 function releaseText(r) {
   if (!r) return '';
   if (r.stuck) return r.moved != null ? `crept only ${f(r.moved, 1)}° from ${sgn(r.start)}° and stopped: held by friction or something touching` : `stayed where it was left at ${sgn(r.start)}°: pivot friction is stronger than gravity's pull there`;
@@ -227,35 +238,67 @@ function releaseText(r) {
   if (r.kind === 'falls') return `falls away${r.hitStop ? ' onto the stop' : ''}: CG ${hText(r.h)} the pivot`;
   return `about neutral (k ${f(r.k, 2)}), stopped at ${sgn(r.settle)}°`;
 }
+// The verdict: a headline, what to do (in order) and why. text: the same as plain lines (Copy summary).
 export function verdict(o, run) {
-  if (!o.axes.some(a => a.n)) return { text: 'No releases yet.', bad: false };
-  const tgt = run.target ? `${run.target} mm nose-heavy` : 'neutral';
+  const P = run.P, tgt = tgtText(run.target);
+  const out = (head, sub, sure, steps, notes, bad) =>
+    ({ head, sub, sure, steps, notes, bad, text: [head + (sub ? ` (${sub})` : '') + '.', ...steps.map((x, i) => `${i + 1}. ${x}`), ...notes].join('\n') });
+  if (!o.axes.some(a => a.n)) return out('No releases yet', '', true, [], [], false);
   if (o.h == null) {  // nothing fitted
     const a = o.stuckAxis;
-    return { text: a ? `Every release on ${a.axis} stayed where it was left (up to ${f(a.stuckMax, 0)}°): pivot friction holds it, so the CG can't be measured on this axis. Loosen the pivot nuts a little (snug, then back off until it swings freely) or release from a bigger angle.`
-      : 'No release could be fitted. Tip it further (10–15°) and keep your hands off after letting go.', bad: true };
+    return a
+      ? out('CG can\'t be measured', `${a.axis} never moved`, false, [OIL(a.axis), 'Or release from a bigger angle (15–20°).'],
+          [`Every release on ${a.axis} stayed where it was left (up to ${f(a.stuckMax, 0)}°): pivot friction is stronger than gravity's pull there.`], true)
+      : out('No release could be fitted', '', false, ['Tip it further (10–15°) and keep your hands off after letting go.'], [], true);
   }
-  const b = o.best;
-  let t = `CG ${hText(o.h)} the pivot (from ${b.axis}: ${b.k > 0.3 ? `swings back every ${f(b.T, 2)} s` : b.k < -0.3 ? 'falls away' : 'about neutral'}). Target: ${tgt}. Fix: ${fixText(o.fix, run.target)}`;
+  const b = o.best, steps = [], notes = [];
+  const sub = `from ${b.axis}: ${b.k > 0.3 ? `swings back every ${f(b.T, 2)} s` : b.k < -0.3 ? 'falls away' : 'about neutral'} · target ${tgt}`;
+  const fx = fixText(o.fix);
+  let saidBand = false;
   if (o.mismatch) {
     const [a1, a2] = o.axes.filter(a => a.h != null);
     const other = a1 === b ? a2 : a1;
-    const why = Math.abs(other.k) > Math.abs(b.k)
-      ? `something adds a spring to ${other.axis} only (a cable or tether, ESC leads, a stop or the collar touching)` +
-        (other.springy ? `: it ${other.settle != null && Math.abs(other.settle) > 4 ? `rests at ${sgn(other.settle)}° instead of near upright` : 'comes to rest in different places'}${other.settleGap != null && Math.abs(other.settleGap) > 2 ? `, ${f(Math.abs(other.settleGap), 0)}° apart depending on the side it came from` : ''}, and its pivot friction (±${f(other.band, 1) || '—'}°) is too small to explain that` : '') +
-        `. Unplug or re-route the cables and run ${other.axis} again; if it then matches ${b.axis}, that was it`
-      : `${other.axis} is held back by pivot friction (dead band ±${f(other.band, 1)}°): back its nuts off a little and run it again`;
-    t += ` The axes disagree (${a1.axis} ${hText(a1.h)}, ${a2.axis} ${hText(a2.h)}). The rig's two pivots cross at one point, so gravity acts the same on both; ${b.axis} is taken as the true CG because ${why}.`;
-  } else if (o.stuckAxis && o.stuckAxis.axis !== b.axis) {
-    t += ` ${o.stuckAxis.axis} never moved after letting go (up to ${f(o.stuckAxis.stuckMax, 0)}°): it isn't neutral, its pivot friction (at least ${f(o.stuckAxis.fricMin, 0)} N·mm) is stronger than gravity's pull there. Back its nuts off a little and test it again.`;
+    const spring = Math.abs(other.k) > Math.abs(b.k);
+    if (P.pivot != null) steps.push(`Check against the rocket: ${a1.axis} puts the CG ${(P.pivot + a1.h).toFixed(0)} mm from the tail, ${a2.axis} ${(P.pivot + a2.h).toFixed(0)} mm. The rig README estimates about ${CG_EST}.`);
+    else steps.push(`Read the collar scale (pivot height from the tail, on the +x post) and enter it under Setup → Rocket numbers for the next run. Each axis then gives a CG position to compare with the rig README's estimate (about ${CG_EST} mm from the tail).`);
+    // One side of the springy axis much stiffer than the other: something pushes back only when tipped that way
+    const sided = spring && other.hPlus != null && other.hMinus != null && Math.abs(other.hPlus - other.hMinus) > 10;
+    const stiffSide = sided ? (other.hPlus < other.hMinus ? '+' : '−') + other.axis : null;
+    const softH = sided ? (other.hPlus < other.hMinus ? other.hMinus : other.hPlus) : null;
+    if (sided) steps.push(`Tip it toward ${stiffSide} and look for what pushes back on that side: the 12 V cable or ESC leads pulling taut, a stop peg touching the end of its slot, the collar or a fin touching a ring. Free it (or re-route the cable as in the rig README: tether clip, slack loop) and run ${other.axis} again.`);
+    else if (spring) steps.push(`Unplug the 12 V cable (or re-route it as in the rig README: tether clip, slack loop) and run ${other.axis} again. If it then matches ${b.axis}, the cable was the spring.`);
+    const sticky = spring ? (b.sticky ? b : null) : other;
+    if (sticky) { steps.push(OIL(sticky.axis)); saidBand = true; }
+    steps.push(fx ? `Once the axes agree: ${fx}.` : 'Once the axes agree, check the balance again.');
+    notes.push(`The two pivots cross at one point, so gravity pulls the same on both: X and Y should give the same CG. Here ${a1.axis} says ${hText(a1.h)} and ${a2.axis} ${hText(a2.h)}.`);
+    if (spring) {
+      const ev = other.springy ? ` ${other.axis} ${other.settle != null && Math.abs(other.settle) > 4 ? `rests at ${sgn(other.settle)}° instead of near upright` : 'comes to rest in different places'}${other.settleGap != null && Math.abs(other.settleGap) > 2 ? `, ${f(Math.abs(other.settleGap), 0)}° apart depending on the side it came from` : ''}, and its pivot friction (±${f(other.band, 1) || '—'}°) is too small to explain that.` : '';
+      notes.push(`${b.axis} is taken as the CG because something seems to add a spring to ${other.axis} only (the cable, ESC leads, a stop or the collar touching).${ev}`);
+      if (sided) notes.push(`${other.axis}'s two sides disagree: tipped to +${other.axis} it says ${hText(other.hPlus)}, to −${other.axis} ${hText(other.hMinus)}. Gravity can't do that, so something pushes back on the ${stiffSide} side only.` +
+        (Math.abs(softH - b.h) <= 6 ? ` The other side agrees with ${b.axis} (${hText(softH)}), which backs up the CG from ${b.axis}.` : ''));
+      if (b.sticky && !(sided && Math.abs(softH - b.h) <= 6)) notes.push(`But ${b.axis} has large pivot friction (it can stop anywhere within ±${f(b.band, 1)}° of where gravity would settle it), so its number is weak too. Do the checks before moving the collar.`);
+    } else notes.push(`${b.axis} is taken as the CG: ${other.axis} looks held back by pivot friction (dead band ±${f(other.band, 1)}°), which hides gravity's pull.`);
+  } else {
+    steps.push(fx ? `${cap(fx)}.` : `Nothing to change: within 1.5 mm of the target (${tgt}).`);
+    if (o.stuckAxis && o.stuckAxis.axis !== b.axis) {
+      steps.push(OIL(o.stuckAxis.axis)); saidBand = true;
+      notes.push(`${o.stuckAxis.axis} never moved after letting go (up to ${f(o.stuckAxis.stuckMax, 0)}°): it isn't neutral, its pivot friction (at least ${f(o.stuckAxis.fricMin, 0)} N·mm) is stronger than gravity's pull there.`);
+    }
+    const lean = o.axes.find(a => a.settle != null && Math.abs(a.settle) > 4);
+    if (lean) {
+      steps.push(`Centre the side lean on ${lean.axis}: a small weight at pivot height on the ${lean.settle > 0 ? '−' : '+'}${lean.axis} side (M3 screws + washers, rig README → Balancing step 3).`);
+      notes.push(`It rests at ${sgn(lean.settle)}° on ${lean.axis}: something off to the ${lean.settle > 0 ? '+' : '−'}${lean.axis} side (the ESC, a lead) or a cable pulling. With the CG this close to the pivot, under 1 mm of side offset is enough.`);
+    }
   }
-  const lean = o.axes.find(a => a.settle != null && Math.abs(a.settle) > 4 && !(o.mismatch && a !== b));
-  if (lean && !o.mismatch) t += ` It rests at ${sgn(lean.settle)}° on ${lean.axis}: something off to the ${lean.settle > 0 ? '+' : '−'}${lean.axis} side (the ESC, a lead) or a cable pulling. With the CG this close to the pivot, under 1 mm of side offset is enough; a small weight at pivot height on the other side centres it.`;
   const bigBand = o.axes.find(a => a.band != null && a.band > 2);
-  if (bigBand) t += ` ${bigBand.axis} pivot friction is large: it can stop anywhere within ±${f(bigBand.band, 1)}° of where gravity would settle it.`;
+  if (bigBand && !(o.mismatch && bigBand === b && b.sticky)) {
+    notes.push(`${bigBand.axis} pivot friction is large: it can stop anywhere within ±${f(bigBand.band, 1)}° of where gravity would settle it.`);
+    if (!saidBand) steps.push(OIL(bigBand.axis));
+  }
   const odd = o.axes.find(a => a.gyro != null && (a.gyro < 0.8 || a.gyro > 1.25));
-  if (odd) t += ` ${odd.axis}: the tilt moved ${f(odd.gyro, 2)}× what the gyro says, so check Calibrate → Level and the IMU mount.`;
-  return { text: t, bad: !o.fix?.ok || o.mismatch || !!bigBand };
+  if (odd) steps.push(`Check Calibrate → Level and the IMU mount: on ${odd.axis} the tilt moved ${f(odd.gyro, 2)}× what the gyro says.`);
+  const sure = !o.mismatch && !bigBand && !odd;
+  return out(`CG ${hText(o.h)} the pivot`, sub, sure, steps, notes, !o.fix?.ok || o.mismatch || !!bigBand);
 }
 
 function csv(run) {
@@ -273,7 +316,7 @@ function samplesCsv(run) {
 function summary(run) {
   const o = analyse(run), P = run.P;
   const lines = [`IT-3 rig stability (motor off), ${stamp(run.t)}`,
-    `Firmware v${run.fw}${run.demo ? ' (demo: simulated rig)' : ''} · axes ${run.axes.join(', ')} · ${run.reps} releases each · ${run.angle}° · mass ${P.mass} g · I ${P.inertia} kg·m² · ballast point ${P.lever} mm above the pivot · tab slide ±${P.slide} mm`,
+    `Firmware v${run.fw}${run.demo ? ' (demo: simulated rig)' : ''} · axes ${run.axes.join(', ')} · ${run.reps} releases each · ${run.angle}° · mass ${P.mass} g · I ${P.inertia} kg·m² · ballast point ${P.lever} mm above the pivot · ${pivotText(P)}`,
     verdict(o, run).text, ''];
   for (const a of o.axes) lines.push(`${a.axis}: CG ${hText(a.h)} · period ${f(a.T, 2) || '—'} s (peaks ${f(a.Tpk, 2) || '—'} s) · pull ${f(a.pull5, 0) || '—'} °/s² at 5° · ζ ${f(a.zeta, 2) || '—'} · friction ${a.fric != null ? f(a.fric, 1) : a.fricMin != null ? '≥ ' + f(a.fricMin, 0) : '—'} N·mm (±${f(a.band, 1) || '—'}°) · settles ${sgn(a.settle)}° · ${a.nOk}/${a.n} fitted${a.nStuck ? `, ${a.nStuck} stuck` : ''}`);
   return lines.join('\n');
@@ -324,6 +367,8 @@ export function initStability({ send, link }) {
   let live = null;
   let opt = { ...DEF, ...load(KEY_OPT, {}) };
   if (!Array.isArray(opt.axes) || !opt.axes.length) opt.axes = [...DEF.axes];
+  if (!TARGETS.includes(opt.target)) opt.target = DEF.target;
+  delete opt.slide;
   let checks = [false, false, false, false];
   let phase = 'idle';                      // idle | running | done
   let step = '', plan = [], idx = 0;       // step: hold | ready | swing | pause
@@ -416,7 +461,7 @@ export function initStability({ send, link }) {
   // ---------- Run control ----------
   function start() {
     if (!ready()) return;
-    const P = { mass: opt.mass, inertia: opt.inertia, lever: opt.lever, slide: opt.slide };
+    const P = { mass: opt.mass, inertia: opt.inertia, lever: opt.lever, pivot: opt.pivot };
     plan = [];
     for (const axis of opt.axes) for (let i = 0; i < opt.reps; i++) plan.push({ axis, side: i % 2 ? -1 : 1 });
     work = { id: Date.now(), t: Date.now(), fw: link().fw, demo: !!link().demo, axes: [...opt.axes], reps: opt.reps, angle: opt.angle, maxS: opt.maxS, target: opt.target, P, rels: [] };
@@ -495,7 +540,7 @@ export function initStability({ send, link }) {
   panel.querySelectorAll('[data-axis]').forEach(b => { b.onclick = () => { if (idle()) { opt.axes = toggle(opt.axes, b.dataset.axis); saveOpt(); } }; });
   for (const [attr, key] of [['rep', 'reps'], ['angle', 'angle'], ['max', 'maxS'], ['target', 'target']])
     panel.querySelectorAll(`[data-${attr}]`).forEach(b => { b.onclick = () => { if (idle()) { opt[key] = +b.dataset[attr]; saveOpt(); } }; });
-  const NUM = { stMass: ['mass', 100, 3000], stInertia: ['inertia', 0.001, 0.2], stLever: ['lever', 20, 1000], stSlide: ['slide', 0, 30] };
+  const NUM = { stMass: ['mass', 100, 3000], stInertia: ['inertia', 0.001, 0.2], stLever: ['lever', 20, 1000] };
   for (const [id, [key, lo, hi]] of Object.entries(NUM)) {
     const el = $(id);
     el.value = opt[key];
@@ -505,6 +550,15 @@ export function initStability({ send, link }) {
       el.value = opt[key];
     };
   }
+  const pv = $('stPivot');
+  pv.value = opt.pivot ?? '';
+  pv.onchange = () => {
+    const v = parseFloat(pv.value);
+    if (pv.value.trim() === '') opt.pivot = null;
+    else if (Number.isFinite(v) && v >= PIVOT_MIN && v <= PIVOT_MAX) opt.pivot = Math.round(v);
+    pv.value = opt.pivot ?? '';
+    saveOpt();
+  };
   $('stGo').onclick = start;
   $('stStayed').onclick = stayed;
   $('stRedo').onclick = redo;
@@ -560,7 +614,7 @@ export function initStability({ send, link }) {
     panel.querySelectorAll('[data-axis]').forEach(b => { b.classList.toggle('on', opt.axes.includes(b.dataset.axis)); b.disabled = busy; });
     for (const [attr, key] of [['rep', 'reps'], ['angle', 'angle'], ['max', 'maxS'], ['target', 'target']])
       panel.querySelectorAll(`[data-${attr}]`).forEach(b => { b.classList.toggle('on', +b.dataset[attr] === opt[key]); b.disabled = busy; });
-    for (const id of Object.keys(NUM)) $(id).disabled = busy;
+    for (const id of [...Object.keys(NUM), 'stPivot']) $(id).disabled = busy;
     setText('stPlan', `${total()} releases (${opt.axes.map(a => `${opt.reps} on ${a}`).join(', ')}, alternating + and − sides) from about ${opt.angle}°, up to ${opt.maxS} s each. About ${Math.round(total() * (opt.maxS * 0.5 + 6) / 60 + 0.5)} min.`);
     panel.querySelectorAll('#stCheck input').forEach((c, i) => { c.checked = checks[i]; c.disabled = busy; });
 
@@ -602,13 +656,22 @@ export function initStability({ send, link }) {
     // Results
     const r = run, o = r ? analyse(r) : null;
     const v = r ? verdict(o, r) : { text: 'No run yet.', bad: false };
-    setText('stOverall', v.text);
-    $('stOverall').className = 'lz-overall' + (r ? (v.bad ? ' bad' : ' ok') : '');
+    setText('stHead', r ? v.head : 'No run yet');
+    $('stHead').className = 'lz-overall' + (r ? (v.bad ? ' bad' : ' ok') : '');
+    setText('stSure', r && v.steps ? (v.sure ? 'Clear result' : 'Check first') : '');
+    $('stSure').className = 'st-sure' + (r && v.steps && !v.sure ? ' warn' : '');
+    setText('stHeadS', r ? v.sub || '' : 'Run the test (Setup → Run) to see where the CG sits and what to change.');
+    setHtml('stDo', (v.steps || []).map(x => `<li>${esc(x)}</li>`).join(''));
+    setHtml('stWhy', (v.notes || []).map(x => `<li>${esc(x)}</li>`).join(''));
+    $('stDoBox').hidden = !v.steps?.length;
+    $('stWhyBox').hidden = !v.notes?.length;
     setText('stCg', o?.h != null ? hText(o.h) : DASH);
     setText('stCgS', o?.best ? `from ${o.best.axis}${o.mismatch ? ' · axes disagree' : ''}` : '');
     setText('stPer', o ? o.axes.map(a => `${a.axis} ${a.T != null ? f(a.T, 2) + ' s' : a.nStuck === a.n && a.n ? 'stuck' : a.k != null && a.k < -0.3 ? 'falls' : '—'}`).join(' · ') : DASH);
-    setText('stFix', o?.fix ? (o.fix.ok ? 'None needed' : `${Math.abs(o.fix.slide) >= 0.5 ? `Tabs ${o.fix.slide > 0 ? '−' : '+'}${Math.abs(o.fix.slide).toFixed(0)} mm` : ''}${Math.abs(o.fix.slide) >= 0.5 && Math.abs(o.fix.grams) >= 1 ? ' + ' : ''}${Math.abs(o.fix.grams) >= 1 ? `${o.fix.grams > 0 ? '' : '−'}${Math.abs(o.fix.grams).toFixed(0)} g nose` : ''}`) : DASH);
-    setText('stFixS', r ? `to ${r.target ? `${r.target} mm nose-heavy` : 'neutral'}` : '');
+    const fx = o?.fix, mmS = fx ? Math.abs(fx.slide) : 0;
+    setText('stFix', fx ? (fx.ok ? 'None needed' : [mmS >= 0.5 ? `Rocket ${fx.slide > 0 ? 'up' : 'down'} ${mmS.toFixed(0)} mm` : '',
+      Math.abs(fx.grams) >= 1 ? `${fx.grams > 0 ? '+' : '−'}${Math.abs(fx.grams).toFixed(0)} g nose` : ''].filter(Boolean).join(' + ')) : DASH);
+    setText('stFixS', r ? `${fx?.to != null ? `scale ${fx.to.toFixed(0)} · ` : fx && !fx.ok && mmS >= 0.5 ? 'through the collar · ' : ''}to ${tgtText(r.target)}${o?.mismatch ? ' · check first' : ''}` : '');
     const fr = o ? o.axes.filter(a => a.fric != null || a.fricMin != null) : [];
     setText('stFric', fr.length ? fr.map(a => `${a.axis} ${a.fric != null ? f(a.fric, 1) : `≥ ${f(a.fricMin, 0)}`}`).join(' · ') : DASH);
     setText('stFricS', fr.length ? `N·mm · dead band ${fr.map(a => (a.band != null ? `±${f(a.band, 1)}°` : a.fricMin != null ? `≥ ±${f(a.stuckMax, 0)}°` : '—')).join(', ')}` : '');
@@ -616,7 +679,7 @@ export function initStability({ send, link }) {
     setHtml('stRows', o ? o.axes.map(a => `<tr><td>${a.axis}</td><td>${a.h != null ? `${a.h >= 0 ? '+' : '−'}${Math.abs(a.h).toFixed(0)}${a.hSpread != null ? ` <small>±${(a.hSpread / 2).toFixed(0)}</small>` : ''}` : DASH}</td><td>${cell(a.T, 2)}</td><td>${cell(a.pull5, 0)}</td><td>${cell(a.zeta, 2)}</td><td>${a.fric != null ? cell(a.fric, 1) : a.fricMin != null ? `≥ ${a.fricMin.toFixed(0)}` : DASH}</td><td>${a.settle != null ? sgn(a.settle) : DASH}</td><td>${a.nOk}/${a.n}${a.nStuck ? ` <small>${a.nStuck} stuck</small>` : ''}</td></tr>`).join('') : `<tr><td colspan="8">${DASH}</td></tr>`);
     setHtml('stRelRows', o ? o.res.map((x, i) => `<tr><td>${i + 1} ${x.side > 0 ? '+' : '−'}${x.axis}</td><td>${sgn(x.start, 0)}</td><td>${x.stuck ? 'stuck' : x.err ? 'no fit' : x.kind === 'back' ? 'back' : x.kind === 'falls' ? 'falls' : 'neutral'}</td><td>${cell(x.T, 2)}<small>${x.Tpk != null ? ` / ${x.Tpk.toFixed(2)}` : ''}</small></td><td>${x.h != null ? sgn(x.h, 0) : DASH}</td><td>${cell(x.zeta, 2)}</td><td>${cell(x.f, 0)}</td><td>${x.decay ? (x.decay === 'dry' ? 'dry' : 'visc.') : DASH}</td><td>${x.settle != null ? sgn(x.settle) : DASH}</td><td>${cell(x.gyro, 2)}</td></tr>`).join('') : '');
     const P = r?.P;
-    setText('stMeta', r ? `${stamp(r.t)} · firmware v${r.fw}${r.demo ? ' (demo: simulated rig)' : ''} · ${r.rels.length} releases from ~${r.angle}° · mass ${P.mass} g · I ${P.inertia} kg·m² · ballast point ${P.lever} mm above the pivot · tab slide ±${P.slide} mm` +
+    setText('stMeta', r ? `${stamp(r.t)} · firmware v${r.fw}${r.demo ? ' (demo: simulated rig)' : ''} · ${r.rels.length} releases from ~${r.angle}° · mass ${P.mass} g · I ${P.inertia} kg·m² · ballast point ${P.lever} mm above the pivot · ${pivotText(P)}` +
       (o.axes.some(a => a.settleGap != null) ? ` · settle gap (+ side − − side): ${o.axes.filter(a => a.settleGap != null).map(a => `${a.axis} ${sgn(a.settleGap)}°`).join(', ')}` : '') : '');
     $('stCsv').disabled = $('stCopy').disabled = !r;
     $('stRaw').disabled = !r?.rels.some(x => x.pts?.length);

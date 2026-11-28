@@ -354,7 +354,7 @@
             <li><b>Laser</b> (CT-1) proves the gimbal goes where it is told, within 1°.</li>
             <li><b>Throttle</b> (CT-4) runs the EDF on its own and shows the vibration it adds.</li>
             <li><b>Thrust vector</b> (CT-5) runs both: the thrust it takes to move the rocket off a rig stop.</li>
-            <li><b>Stability</b> (IT-3), motor off: how the rig holds the rocket. CG vs the pivot, pivot friction, and the tab slide and nose weight that balance it.</li>
+            <li><b>Stability</b> (IT-3), motor off: how the rig holds the rocket. CG vs the pivot, pivot friction, and the collar slide and nose weight that balance it.</li>
           </ol>
         </section>
   <!-- System check: every part, guided, nothing rewired (syscheck.js) -->
@@ -798,21 +798,21 @@
             <span class="vc-seg"><button data-angle="5">5</button><button data-angle="10">10</button><button data-angle="15">15</button><button data-angle="20">20</button></span></div>
           <div class="cal-line"><span>Record up to<small>s per release</small></span>
             <span class="vc-seg"><button data-max="10">10</button><button data-max="20">20</button><button data-max="30">30</button></span></div>
-          <div class="cal-line"><span>Target balance<small>for the fix it suggests</small></span>
-            <span class="vc-seg"><button data-target="0">Neutral</button><button data-target="5">5 mm nose</button><button data-target="10">10 mm nose</button></span></div>
+          <div class="cal-line"><span>Target balance<small>for the fix; rig README: 3–5 mm nose</small></span>
+            <span class="vc-seg"><button data-target="0">Neutral</button><button data-target="4">4 mm nose</button><button data-target="10">10 mm nose</button></span></div>
           <details class="cal-measure">
             <summary>Rocket numbers (for CG height and the fix)</summary>
             <label class="cal-line"><span>Mass<small>g, everything on the pivot</small></span><input id="stMass" type="number" min="100" max="3000" step="1"></label>
             <label class="cal-line"><span>Inertia<small>kg·m², about the CG</small></span><input id="stInertia" type="number" min="0.001" max="0.2" step="0.001"></label>
             <label class="cal-line"><span>Ballast point<small>mm above the pivot (nose)</small></span><input id="stLever" type="number" min="20" max="1000" step="1"></label>
-            <label class="cal-line"><span>Tab slide<small>± mm the pivot tabs can move</small></span><input id="stSlide" type="number" min="0" max="30" step="0.5"></label>
+            <label class="cal-line"><span>Pivot now<small>mm from the tail, collar scale (200–270)</small></span><input id="stPivot" type="number" min="200" max="270" step="1" placeholder="scale"></label>
           </details>
           <p class="cal-p" id="stPlan"></p>
           <ul class="th-check" id="stCheck">
             <li><label><input type="checkbox"> Calibrate → Level done and saved (tilt reads 0 when upright)</label></li>
             <li><label><input type="checkbox"> Rocket complete as it will run (EDF, ESC, battery or tether, nose), on the pivot</label></li>
-            <li><label><input type="checkbox"> Pivot nuts snug, then backed off so it swings freely; nothing rubbing on either axis</label></li>
-            <li><label><input type="checkbox"> Cables routed as they will be in use; 12 V off (motor not needed)</label></li>
+            <li><label><input type="checkbox"> Pivot screws in fully, a drop of oil on each tip; swings freely, nothing rubbing on either axis</label></li>
+            <li><label><input type="checkbox"> 12 V cable routed as in use (tether clip, slack loop); 12 V off (motor not needed)</label></li>
           </ul>
           <p class="cal-p">Needs firmware v1.12.0 (gyro rates in calibration mode). In Demo mode it runs on a simulated rig.</p>
         </div>
@@ -837,7 +837,12 @@
         </div>
         <!-- 3 Results -->
         <div class="cal-step st-step" data-tab="2" hidden>
-          <div class="lz-overall" id="stOverall">No run yet.</div>
+          <div class="st-verdict">
+            <div class="st-vhead"><b class="lz-overall" id="stHead">No run yet</b><span class="st-sure" id="stSure"></span></div>
+            <p class="st-vsub" id="stHeadS"></p>
+            <div class="st-vlist" id="stDoBox" hidden><span class="st-vlbl">Do this</span><ol class="st-do" id="stDo"></ol></div>
+            <div class="st-vlist" id="stWhyBox" hidden><span class="st-vlbl">Why</span><ul class="st-why" id="stWhy"></ul></div>
+          </div>
           <div class="vc-dir">
             <div class="fh-check"><span class="cal-name">CG vs pivot</span><b id="stCg">—</b><small id="stCgS"></small></div>
             <div class="fh-check"><span class="cal-name">Swing period</span><b id="stPer">—</b><small>there and back</small></div>
@@ -845,7 +850,7 @@
             <div class="fh-check"><span class="cal-name">Pivot friction</span><b id="stFric">—</b><small id="stFricS"></small></div>
           </div>
           <table class="lz-tab vc-tab">
-            <thead><tr><th>Axis</th><th>CG<small>mm</small></th><th>Period<small>s</small></th><th>Pull 5°<small>°/s²</small></th><th>Damping<small>ζ</small></th><th>Friction<small>N·mm</small></th><th>Settles<small>°</small></th><th>Fitted</th></tr></thead>
+            <thead><tr><th>Axis</th><th>CG<small>mm, − below</small></th><th>Period<small>s</small></th><th>Pull 5°<small>°/s²</small></th><th>Damping<small>ζ</small></th><th>Friction<small>N·mm</small></th><th>Settles<small>°</small></th><th>Fitted</th></tr></thead>
             <tbody id="stRows"></tbody>
           </table>
           <details class="cal-measure">
@@ -857,7 +862,10 @@
           </details>
           <p class="cal-p" id="stMeta"></p>
           <div class="cal-acts"><button id="stCsv" class="primary">Download CSV</button><button id="stRaw" title="Every IMU sample of every release: tilt and rate at 50 Hz">Samples CSV</button><button id="stCopy">Copy summary</button><button id="stNew">New test</button></div>
-          <p class="cal-p">Each swing is fitted with <i>accel = −k·(tilt − settle) − c·rate − f·sign(rate)</i>. <b>CG</b>: height of the CG above the pivot (− = below) from the gravity spring <i>k</i>: <i>h = −k·I / (m·g)</i>. Below the pivot it swings back like a pendulum; above, it falls away; on it, it stays where it is left. <b>Period</b>: one swing there and back (fit; the release table also gives it from the peaks). <b>Pull 5°</b>: how hard gravity turns it back from 5°, which the TVC has to beat. <b>Damping ζ</b>: smooth slowing (air, grease). <b>Friction</b>: dry pivot friction torque. It stops the rocket anywhere within the dead band (friction ÷ <i>k</i>) and can make a tight axis look neutral when it isn't. <b>Settles</b>: where it came to rest. The two rig pivots cross at one point, so X and Y should give the same CG. <b>Fix</b>: slide the pivot tabs (toward the tail raises the CG relative to the pivot), then nose ballast for the rest, to reach the target.</p>
+          <details class="cal-measure">
+            <summary>How it's worked out</summary>
+            <p class="cal-p">Each swing is fitted with <i>accel = −k·(tilt − settle) − c·rate − f·sign(rate)</i>. <b>CG</b>: height of the CG above the pivot (− = below) from the gravity spring <i>k</i>: <i>h = −k·I / (m·g)</i>. Below the pivot it swings back like a pendulum; above, it falls away; on it, it stays where it is left. <b>Period</b>: one swing there and back (fit; the release table also gives it from the peaks). <b>Pull 5°</b>: how hard gravity turns it back from 5°, which the TVC has to beat. <b>Damping ζ</b>: smooth slowing (air, grease). <b>Friction</b>: dry pivot friction torque. It stops the rocket anywhere within the dead band (friction ÷ <i>k</i>) and can make a tight axis look neutral when it isn't. <b>Settles</b>: where it came to rest. The two rig pivots cross at one point, so X and Y should give the same CG. <b>Fix</b>: loosen the knob and slide the rocket through the collar (up moves the pivot toward the tail, so the CG rises relative to it; the +x post scale reads 200–270 mm from the tail), then nose ballast for the rest, to reach the target.</p>
+          </details>
           <details class="cal-measure">
             <summary>Past runs (this browser)</summary>
             <ul class="lz-hist" id="stHist"></ul>
