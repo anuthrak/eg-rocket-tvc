@@ -281,8 +281,11 @@ export function verdict(o, run) {
   } else {
     steps.push(fx ? `${cap(fx)}.` : `Nothing to change: within 1.5 mm of the target (${tgt}).`);
     if (o.stuckAxis && o.stuckAxis.axis !== b.axis) {
-      steps.push(OIL(o.stuckAxis.axis)); saidBand = true;
-      notes.push(`${o.stuckAxis.axis} never moved after letting go (up to ${f(o.stuckAxis.stuckMax, 0)}°): it isn't neutral, its pivot friction (at least ${f(o.stuckAxis.fricMin, 0)} N·mm) is stronger than gravity's pull there.`);
+      const sa = o.stuckAxis;
+      if (b.k > 0.3) {
+        steps.push(OIL(sa.axis)); saidBand = true;
+        notes.push(`${sa.axis} never moved after letting go (up to ${f(sa.stuckMax, 0)}°): it isn't neutral, its pivot friction${sa.fricMin != null ? ` (at least ${f(sa.fricMin, 0)} N·mm)` : ''} is stronger than gravity's pull there.`);
+      } else notes.push(`${sa.axis} stayed where it was left (up to ${f(sa.stuckMax, 0)}°). With the CG this close to the pivot that is expected: it is what balanced looks like (rig README → Balancing step 1).`);
     }
     const lean = o.axes.find(a => a.settle != null && Math.abs(a.settle) > 4);
     if (lean) {
@@ -297,8 +300,10 @@ export function verdict(o, run) {
   }
   const odd = o.axes.find(a => a.gyro != null && (a.gyro < 0.8 || a.gyro > 1.25));
   if (odd) steps.push(`Check Calibrate → Level and the IMU mount: on ${odd.axis} the tilt moved ${f(odd.gyro, 2)}× what the gyro says.`);
-  const sure = !o.mismatch && !bigBand && !odd;
-  return out(`CG ${hText(o.h)} the pivot`, sub, sure, steps, notes, !o.fix?.ok || o.mismatch || !!bigBand);
+  const weak = b.nOk < 2 || (b.r2 != null && b.r2 < 0.5);
+  if (weak) notes.push(`Only ${b.nOk} of ${b.n} ${b.axis} releases could be fitted${b.r2 != null && b.r2 < 0.5 ? `, and the fit is poor (R² ${f(b.r2, 2)})` : ''}, so the CG number is rough. Run it again (4 releases) to firm it up.`);
+  const sure = !o.mismatch && !bigBand && !odd && !weak;
+  return out(Math.abs(o.h) < 1.5 ? 'CG on the pivot' : `CG ${hText(o.h)} the pivot`, sub, sure, steps, notes, !o.fix?.ok || o.mismatch || !!bigBand);
 }
 
 function csv(run) {
