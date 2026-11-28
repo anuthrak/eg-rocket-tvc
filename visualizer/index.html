@@ -129,7 +129,7 @@
      "name": "What hardware is the rocket built from?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±8° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely."
+      "text": "A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±10° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely."
      }
     },
     {
@@ -454,7 +454,7 @@
             <p class="cal-note" id="cdNoteY"></p>
           </div>
           <div class="cal-dir">
-            <div class="cal-dir-h"><span class="cal-name">Motion test<small>Both servos, full ±8°</small></span>
+            <div class="cal-dir-h"><span class="cal-name">Motion test<small>Both servos, full ±10°</small></span>
               <span id="cdSweepSt" class="cal-res">Ready</span><button id="calSweepStop" disabled>Stop</button></div>
             <p class="cal-p">Takes about 3 s, then returns to centre. Keep fingers clear, and press Stop if a linkage binds.</p>
             <div class="cal-acts"><button id="calSweepCircle">Circle</button><button id="calSweepCorners">Corner to corner</button></div>
@@ -676,7 +676,7 @@
         <div class="cal-step">
           <p class="cal-p">The controller runs as in flight. Tilt the rocket by hand: the gimbal should tilt the top of the motor <b>toward</b> the lean, so the thrust would push the tail back under the rocket. The motor stays off (the ESC is held at zero in flight mode).</p>
           <div class="fh-toggle">
-            <button id="freeBtn" class="fh-free" disabled title="No tilt abort, half gains, same ±8° limit. Turns off when you close this test or the Nano restarts (firmware v1.5.0+)"><span class="fh-off">Free-test off</span><span class="fh-on">Free-test on</span></button>
+            <button id="freeBtn" class="fh-free" disabled title="No tilt abort, half gains, same ±10° limit. Turns off when you close this test or the Nano restarts (firmware v1.5.0+)"><span class="fh-off">Free-test off</span><span class="fh-on">Free-test on</span></button>
             <p class="cal-p">Free-test removes the 25° tilt abort and halves the gains so you can move the rocket around freely.</p>
           </div>
           <div class="fh-checks">
@@ -688,7 +688,7 @@
             <dt>Peak tilt</dt><dd id="fhPtX">—</dd><dd id="fhPtY">—</dd>
             <dt>Peak gimbal</dt><dd id="fhPgX">—</dd><dd id="fhPgY">—</dd>
             <dt>Gimbal per tilt</dt><dd id="fhKX">—</dd><dd id="fhKY">—</dd>
-            <dt>Time at ±8° limit</dt><dd id="fhSatX">—</dd><dd id="fhSatY">—</dd>
+            <dt>Time at ±10° limit</dt><dd id="fhSatX">—</dd><dd id="fhSatY">—</dd>
           </dl>
           <p class="cal-note" id="fhNote"></p>
           <div class="cal-acts"><button id="fhReset">Reset</button></div>
@@ -718,7 +718,7 @@
           <div class="cal-line"><span>Gimbal angles<small>°, biggest first</small></span>
             <span class="vc-seg vc-multi" id="vcAngles"><button data-ang="8">8</button><button data-ang="6">6</button><button data-ang="4">4</button><button data-ang="2">2</button></span></div>
           <div class="cal-line"><span>Max throttle<small>% (25 % until the supply fix)</small></span>
-            <span class="vc-seg" id="vcMax"><button data-max="25">25</button><button data-max="40">40</button><button data-max="60">60</button></span></div>
+            <span class="vc-seg" id="vcMax"><button data-max="25">25</button><button data-max="40">40</button><button data-max="60">60</button><button data-max="85" title="Only with the kill switch wired and the 12 V path checked">85</button></span></div>
           <div class="cal-line"><span>Ramp<small>% per second</small></span>
             <span class="vc-seg" id="vcRamp"><button data-ramp="1">1</button><button data-ramp="2">2</button><button data-ramp="4">4</button></span></div>
           <div class="cal-line"><span>Repeats<small>per angle</small></span>
@@ -1023,7 +1023,7 @@
 <dt><b>How does the real rocket control the Mars landing?</b></dt><dd>An Arduino Nano reads an MPU-6050 IMU at 100 Hz and drives two servos that gimbal the motor tube to keep the rocket upright. Over Web Serial the visualizer reads the rocket&#x27;s tilt and nozzle angles live, and the simulated ship follows them through the landing burn. Push the real rocket and the ship on screen is pushed too; the TVC has to bring it back.</dd>
 <dt><b>Do I need the hardware to try it?</b></dt><dd>No. In Sim mode the same controller runs in the browser on a simulated attitude, with gusts you can trigger. Rig mode connects to the physical rocket through Chrome or Edge.</dd>
 <dt><b>What is thrust vector control?</b></dt><dd>Thrust vector control steers a rocket by tilting its engine (or nozzle) so the thrust pushes the tail sideways and turns the vehicle. Real launch vehicles use it to fly, flip and land; this project uses a small electric ducted fan on a two-axis gimbal.</dd>
-<dt><b>What hardware is the rocket built from?</b></dt><dd>A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±8° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely.</dd>
+<dt><b>What hardware is the rocket built from?</b></dt><dd>A 632 mm 3D-printed body, a 30 mm electric ducted fan in a two-axis gimballed motor tube (about ±10° of travel), an Arduino Nano, an MPU-6050 IMU and two MG90S servos on pushrods, powered from a 12 V supply. The parts cost under $100. The rocket cannot fly; the desk rig holds it so the control loop can be tested safely.</dd>
 <dt><b>Which browsers does it work in?</b></dt><dd>Any modern browser with WebGL runs the simulation. The live link to the rocket uses the Web Serial API, available in Chrome and Edge on desktop.</dd>
 </dl>
 <p>Source: <a href="https://github.com/anuthrak/eg-rocket-tvc">github.com/anuthrak/eg-rocket-tvc</a></p>

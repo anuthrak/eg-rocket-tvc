@@ -83,7 +83,7 @@
 // Still to do: throttle in flight mode with the thrust-scaled gains.
 
 // Printed at boot; the visualizer shows it in the LINK table. Bump with CHANGELOG.md.
-const char FW_VERSION[] = "1.13.1";
+const char FW_VERSION[] = "1.14.0";
 
 // ===================== DEFAULTS =====================
 const int X_SERVO_PIN = 9;
@@ -115,7 +115,8 @@ const float KI_G  = 0.3;
 const float I_MAX = 2.0 * DEG_TO_RAD;     // integrator can add at most ±2° of gimbal
 const float THRUST_MAX_G = 220.0;         // EDF static thrust at full throttle (QX 30 mm @ 11.1 V)
 const float THRUST_REF_G = 150.0;
-const float GMAX  = 8.0 * DEG_TO_RAD;     // design gimbal travel
+const float GMAX  = 10.0 * DEG_TO_RAD;    // gimbal travel (v1.14.0: was 8; the mount clears X +10/-15, Y +-15).
+                                          // 10 deg x the ~4:1 linkage = 40 deg of servo, inside SERVO_RANGE.
 const float GRATE = 60.0 * DEG_TO_RAD;    // gimbal slew-rate limit (rad/s)
 const float ABORT_TILT = 25.0 * DEG_TO_RAD;
 const float REST_MOVE_CUT = 12.0 * DEG_TO_RAD;   // ARM REST: motor cut when this far from the rest attitude

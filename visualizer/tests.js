@@ -6,7 +6,7 @@ import { Chart } from './tcharts.js';
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const DASH = '—';
-const GMAX = 8;
+const GMAX = 10;                                 // flight firmware v1.14.0+ (±10°)
 
 export function initTests({ calib, laser, throttle, vector, stability, syscheck, send, link }) {
   // ---------- Live telemetry ----------
@@ -173,7 +173,7 @@ export function initTests({ calib, laser, throttle, vector, stability, syscheck,
       series: [{ id: 'x', label: 'X', color: X, line: false }, { id: 'y', label: 'Y', color: Y, line: false }], refs: [{ y: 8 }, { y: -8 }], empty: 'Tilt the rocket' }),
     lzCvm: new Chart(tile('lz'), { kind: 'xy', title: 'Commanded vs measured', sub: 'Dashed: perfect', xLabel: 'Command', xUnit: '°', unit: '°', xMin: -9, xMax: 9, yMin: -9.5, yMax: 9.5,
       series: [{ id: 'x', label: 'X', color: X, line: false }, { id: 'y', label: 'Y', color: Y, line: false }], refs: [{ fn: x => x }], empty: 'Measure an axis' }),
-    lzErr: new Chart(tile('lz'), { kind: 'xy', title: 'Error per point', sub: 'Measured − commanded · dashed: ±1° limit', xLabel: 'Command', xUnit: '°', unit: '°', xMin: -9, xMax: 9, minRange: 2.6,
+    lzErr: new Chart(tile('lz'), { kind: 'xy', title: 'Error per point', sub: 'Measured − commanded · dashed: ±1° limit', xLabel: 'Command', xUnit: '°', unit: '°', xMin: -11, xMax: 11, minRange: 2.6,
       series: [{ id: 'xu', label: 'X up', color: X, marker: true }, { id: 'xd', label: 'X down', color: X, dash: true, marker: true, hollow: true },
                { id: 'yu', label: 'Y up', color: Y, marker: true }, { id: 'yd', label: 'Y down', color: Y, dash: true, marker: true, hollow: true }],
       refs: [{ y: 1 }, { y: -1 }], empty: 'Measure an axis' }),

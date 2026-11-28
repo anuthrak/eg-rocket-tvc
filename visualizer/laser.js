@@ -2,7 +2,7 @@
 // A laser on the motor tube marks each commanded angle on a wall, or on the floor under the rig (nozzle down: both
 // axes on one sheet of paper). You type the dot's signed distance from the zero mark and it becomes
 // atan(mm / pivot distance). Two sequences per axis:
-//   Full   −8 → +8 (up) then +8 → −8 (down) in 2° steps, 18 points. Backlash = max up/down difference.
+//   Full   −10 → +10 (up) then +10 → −10 (down) in 2° steps, 22 points (firmware v1.14.0+: ±10° travel). Backlash = max up/down difference.
 //   Quick  0, +6, 0, −6, 0: 5 points. Backlash = the two returns to 0 (from above vs from below). ±6 because a
 //          high linkage ratio can cap one axis near ±6.3° at the servo limit.
 // Pass (both): max |measured − commanded| ≤ 1° and backlash ≤ 1° per axis. Both also give the gain on each side
@@ -12,9 +12,9 @@
 // (axis,cmd_deg,meas_deg,dir — the same format as tests/ct1_laser_gimbal/laser_log.py; dir is start/up/down).
 
 const $ = id => document.getElementById(id);
-const MIN_FW = [1, 8, 0];
+const MIN_FW = [1, 14, 0];                    // ±10° travel (the full run steps to ±10°)
 const SEQS = {
-  full: [-8, -6, -4, -2, 0, 2, 4, 6, 8, 8, 6, 4, 2, 0, -2, -4, -6, -8],   // first 9 up, last 9 down
+  full: [-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 10, 8, 6, 4, 2, 0, -2, -4, -6, -8, -10],   // first 11 up, last 11 down
   quick: [0, 6, 0, -6, 0],
 };
 const DIRS = {
@@ -77,7 +77,7 @@ const surfName = run => (run.surface === 'floor' ? 'floor' : 'wall');
 function summary(run) {
   const c = run.cfg;
   const lines = [
-    `CT-1 laser gimbal test (${modeOf(run) === 'quick' ? 'quick, 5 points' : 'full, 18 points'}), ${stamp(run.t)}`,
+    `CT-1 laser gimbal test (${modeOf(run) === 'quick' ? 'quick, 5 points' : 'full, 22 points'}), ${stamp(run.t)}`,
     `Firmware v${run.fw} · ${surfName(run)} ${run.dist} mm from the gimbal pivot`,
     c ? `Calibration: XC ${c.xc} YC ${c.yc} · XD ${c.xd > 0 ? '+1' : '-1'} YD ${c.yd > 0 ? '+1' : '-1'} · SPG X ${c.spg} Y ${c.spgy ?? c.spg} · SWAP ${c.swap} (${c.state})` : '',
   ];
@@ -134,7 +134,7 @@ export function initLaser({ send, link, calib }) {
     else if (p[0] === 'CAL' && p[1] === 'OFF') { calOn = false; if (open) send('CAL'); }   // e.g. Calibrate just closed
     else if (p[0] === 'CAL' && p.length >= 5) { calOn = true; if (cfg) lean = { x: +p[3] - cfg.tx, y: +p[4] - cfg.ty }; }
     else if (p[0] === 'GIM') arrived();
-    else if (p[0] === 'ERR' && ['pre', 'moving'].includes(phase)) fail(`The Nano said "${line}". This test needs firmware v1.8.0 or newer.`);
+    else if (p[0] === 'ERR' && ['pre', 'moving'].includes(phase)) fail(`The Nano said "${line}". This test needs firmware v1.14.0 or newer.`);
     if (open) render();
   }
   function onLink() {
@@ -148,7 +148,7 @@ export function initLaser({ send, link, calib }) {
   function gim(x, y) {
     send(`GIM ${x} ${y}`);
     clearTimeout(replyTimer);
-    replyTimer = setTimeout(() => fail('No reply from the Nano. This test needs firmware v1.8.0 or newer (firmware/nano_tvc).'), REPLY_MS);
+    replyTimer = setTimeout(() => fail('No reply from the Nano. This test needs firmware v1.14.0 or newer (firmware/nano_tvc).'), REPLY_MS);
   }
   function fail(msg) { stopTimers(); phase = 'error'; note = msg; render(); }
   function goPoint(i) {
@@ -174,7 +174,7 @@ export function initLaser({ send, link, calib }) {
     work = Array(N()).fill(null);
     lean0 = lean && { ...lean };
     note = ''; phase = 'pre';
-    gim(0, 0);   // from the centre (full: then out to -8, as the limit stops us approaching -8 from below)
+    gim(0, 0);   // from the centre (full: then out to -10, as the limit stops us approaching -10 from below)
     render();
   }
   function stop() {
@@ -333,7 +333,7 @@ export function initLaser({ send, link, calib }) {
     const L = link();
     let msg = '';
     if (!L.port) msg = L.demo ? 'The laser test needs the real Arduino. Stop the demo and connect it.' : 'Connect the Arduino to run the laser test.';
-    else if (fwOld(L.fw)) msg = `Firmware v${L.fw} can't run the laser test. Upload firmware v1.8.0 or newer (firmware/nano_tvc).`;
+    else if (fwOld(L.fw)) msg = `Firmware v${L.fw} can't run the laser test. Upload firmware v1.14.0 or newer (firmware/nano_tvc): it moves the gimbal to ±10°.`;
     else if (!cfg) msg = 'Waiting for the Nano. It restarts when the port opens and takes about 5 s to boot (keep the rocket still).';
     // Results stay readable offline
     $('lzMsg').textContent = msg;
@@ -361,7 +361,7 @@ export function initLaser({ send, link, calib }) {
       : 'Square the rocket to a flat wall. Measure from the <b>gimbal pivot</b> (where the pivot screw axes cross) to the wall, <b>not from the laser tip</b>.');
     setText('lzDistLbl', `Gimbal pivot to ${surf}`);
     setText('lzPlan', quick ? 'Quick: 0, +6°, 0, −6°, 0 per axis. 10 marks in all, about 5 minutes. Gives error, backlash (the two returns to 0) and the gain on each side.'
-      : 'Full: −8° → +8° and back in 2° steps per axis. 36 marks in all. Gives the whole curve.');
+      : 'Full: −10° → +10° and back in 2° steps per axis. 44 marks in all. Gives the whole curve.');
     $('lzDist').disabled = locked;
     if (document.activeElement !== $('lzDist') && $('lzDist').value !== String(run.dist)) $('lzDist').value = run.dist;
     const ds = locked ? { text: `Locked at ${run.dist} mm: this test was measured with it. To change it, press New test on the Results tab.`, warn: false }
@@ -413,7 +413,7 @@ export function initLaser({ send, link, calib }) {
     const other = axis === 'X' ? 'Y' : 'X';
     const subs = {
       idle: runStats(run, axis) ? '' : `Pivot to ${surf}: ${run.dist} mm. Centre the gimbal, check the zero mark, then press Start ${axis}. ` +
-        (quick ? 'It goes 0, +6°, 0, −6°, 0: 5 points.' : 'It steps −8° → +8° (up), then back down to −8°: 18 points.'),
+        (quick ? 'It goes 0, +6°, 0, −6°, 0: 5 points.' : 'It steps −10° → +10° (up), then back down to −10°: 22 points.'),
       pre: '', moving: '', settling: '',
       ready: redo ? `Type the distance for the mark you made at point ${shown + 1} (the gimbal has moved on).`
         : `Point ${idx + 1} of ${n}${DIR(idx) === 'start' ? '' : ` · came ${DIR(idx)}`} · ${surf} ${run.dist} mm. Mark the dot, measure from the zero mark along ${axis} (+ is the side the dot went for +${axis}), type mm, press Enter.`,
@@ -469,7 +469,7 @@ export function initLaser({ send, link, calib }) {
     }
     setHtml('lzHead', head);
     setHtml('lzRows', rows.join(''));
-    setText('lzAllSum', quick ? 'All 5 points per axis' : 'All 18 points per axis');
+    setText('lzAllSum', quick ? 'All 5 points per axis' : 'All 22 points per axis');
     for (const a of ['X', 'Y']) {
       const s = runStats(run, a), r = ratioFor(run, a, s);
       setText(`lzE${a}`, s ? sdeg(s.err).replace('+', '') : DASH);

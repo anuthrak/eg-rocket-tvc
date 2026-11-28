@@ -3,7 +3,11 @@
 Visualizer and repo versions are tagged `vX.Y.Z`. Firmware versions (`FW_VERSION`, printed at boot) are noted per entry.
 
 ## [Unreleased]
+Firmware v1.14.0 (reflash needed).
+
 ### Changed
+- Gimbal travel **±10°** (was ±8°): firmware `GMAX`, the laser test (CT-1 full run −10 → +10, 22 points; needs firmware v1.14.0), Free-hand saturation and the page text. The mount clears X +10/−15° and Y ±15°; 10° × the ~4:1 linkage is 40° of servo. About 25 % more side force. The simulated controller (Landing, demo) stays at ±8° for now.
+- Thrust vector (CT-5): **85 %** max throttle option, with a note that anything above 25 % needs the kill switch wired and the 12 V path checked.
 - Stability (IT-3) results are easier to read: a short headline (CG vs the pivot) with a **Clear result / Check first** tag, then **Do this** (numbered steps, in order) and **Why** (the reasoning) in sentence case instead of one long uppercase paragraph. The formula notes are folded under "How it's worked out".
 - Stability (IT-3) wording for the GS-001 collar: the fix is now "slide the rocket N mm up/down through the collar" instead of moving pivot tabs, limited to the collar's 200–270 mm range. New **Pivot now** setting (the +x post scale reading) replaces Tab slide: with it the fix gives the scale reading to set, and axes that disagree each give a CG position to compare with the ~222 mm estimate. Pivot friction advice is oil + check for rubbing (the GS-001 screws clamp only the part they thread into, so backing them off does nothing). Targets are Neutral / 4 / 10 mm nose-heavy (default 4, rig README: 3–5).
 - Thrust vector (CT-5) lever arm follows the GS-001 collar: pivot height (Stability → Pivot now) − 57 mm to the gimbal point, instead of a fixed 190 mm. Each run keeps the lever it used; the plan, results and summary show it (or "assumed" when no pivot height is entered). Checklist: C-clamps and collar knob instead of a weighed-down base.

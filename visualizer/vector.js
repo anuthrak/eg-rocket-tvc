@@ -506,6 +506,7 @@ export function initVector({ send, link }) {
     const per = (REST_MS + AIM_MS + BASE_MS + 1500) / 1000 + (opt.max - START_PCT) / opt.ramp + 2;
     setText('vcPlan', `Gimbal ${[...opt.angles].sort((a, b) => b - a).join('°, ')}° × ${opt.reps} · ${totalSteps()} ramps · up to about ${Math.round(per * totalSteps())} s, much less if it lifts off early.` +
       (lean ? ` Resting now at ${lean.toFixed(1)}° from upright.` : '') +
+      (opt.max > 25 ? ` Above 25 %: only with the kill switch wired and the 12 V path (barrel jack, XT60 joints) checked: it can draw several amps.` : '') +
       (() => { const lv = leverNow(); return lv.pivot != null ? ` Lever arm ${lv.mm} mm (pivot ${lv.pivot} mm from the tail).`
         : ` Lever arm ${lv.mm} mm assumed: enter the collar scale reading in Stability → Rocket numbers → Pivot now for the real one.`; })());
     panel.querySelectorAll('#vcCheck input').forEach((c, i) => { c.checked = checks[i]; c.disabled = busy; });
